@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Inventory</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="inventory.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" onclick="window.location.href='index.html'"><i class="fas fa-home"></i> Home</button>
+                <button class="nav-tab" onclick="window.location.href='scheduling.html'"><i class="fas fa-calendar-alt"></i> Scheduling</button>
+                <button class="nav-tab" onclick="window.location.href='employees.html'"><i class="fas fa-users"></i> Employees</button>
+                <button class="nav-tab" onclick="window.location.href='recipes.html'"><i class="fas fa-book"></i> Recipes</button>
+                <button class="nav-tab active"><i class="fas fa-boxes"></i> Inventory</button>
+                <button class="nav-tab" onclick="window.location.href='chat.html'"><i class="fas fa-comments"></i> Chat</button>
+            </div>
+            <div class="nav-user">
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <main class="dashboard-main inventory-main">
+            <div class="inventory-header">
+                <h1>Inventory</h1>
+            </div>
+
+            <div class="inventory-search-wrap">
+                <i class="fas fa-search inventory-search-icon"></i>
+                <input type="search" id="inventory-search" class="inventory-search-input" placeholder="Search recipes..." aria-label="Search inventory">
+                <button type="button" class="inventory-search-clear" id="inventory-search-clear" title="Clear search" aria-label="Clear search"><i class="fas fa-times"></i></button>
+            </div>
+
+            <div class="inventory-content">
+                <div class="inventory-list-wrap">
+                    <div class="inventory-list" id="inventory-list"></div>
+                    <div class="inventory-empty" id="inventory-empty" style="display:none;">
+                        <i class="fas fa-boxes"></i>
+                        <p>No recipes yet</p>
+                        <span>Create recipes on the Recipes page to track inventory</span>
+                        <a href="recipes.html" class="inventory-empty-link">Go to Recipes</a>
+                    </div>
+                    <div class="inventory-no-match" id="inventory-no-match" style="display:none;">
+                        <i class="fas fa-search"></i>
+                        <p>No recipes match your search</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="script.js"></script>
+    <script src="inventory.js"></script>
+</body>
+</html>

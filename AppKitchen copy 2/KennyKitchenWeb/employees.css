@@ -1,0 +1,509 @@
+/* Employees Page - uses dashboard styles from styles.css */
+
+/* Three-column grid for employees page */
+.employees-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* Off shift status styling */
+.shift-status.offline {
+    color: #718096;
+}
+
+.shift-status.offline i {
+    opacity: 0.5;
+    animation: none;
+}
+
+/* Positions Section */
+.positions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.position-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: #f7fafc;
+    border-radius: 12px;
+    border-left: 4px solid #4299e1;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.position-item:hover {
+    background: #edf2f7;
+    transform: translateX(4px);
+}
+
+.position-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(66, 153, 225, 0.1);
+    color: #4299e1;
+    flex-shrink: 0;
+    font-size: 1.1rem;
+}
+
+.position-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.position-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #2d3748;
+}
+
+.position-count {
+    font-size: 0.8rem;
+    color: #718096;
+}
+
+.position-names {
+    display: block;
+    font-size: 0.78rem;
+    color: #4a5568;
+    margin-top: 0.2rem;
+}
+
+/* Position Detail Modal - Employee List */
+.position-employees-list {
+    background: #f7fafc;
+    border-radius: 8px;
+    padding: 0.75rem;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 2px solid #e2e8f0;
+}
+
+.position-employee-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    border-radius: 6px;
+    transition: background 0.2s ease;
+}
+
+.position-employee-item:hover {
+    background: #edf2f7;
+}
+
+.employee-avatar-small {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #4CAF50;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+/* Compensation Type Radio Buttons */
+.compensation-type-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #fff;
+    flex: 1;
+}
+
+.radio-label:hover {
+    border-color: #4CAF50;
+    background: #f0fff4;
+}
+
+.radio-label input[type="radio"] {
+    margin: 0;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    accent-color: #4CAF50;
+}
+
+.radio-label input[type="radio"]:checked + span {
+    font-weight: 600;
+    color: #4CAF50;
+}
+
+.radio-label:has(input[type="radio"]:checked) {
+    border-color: #4CAF50;
+    background: #f0fff4;
+}
+
+.radio-label span {
+    font-size: 0.95rem;
+    color: #2d3748;
+    user-select: none;
+}
+
+.employee-name-small {
+    font-weight: 500;
+    color: #2d3748;
+    font-size: 0.9rem;
+}
+
+.employee-hours {
+    font-size: 0.8rem;
+    color: #718096;
+    font-weight: 600;
+    margin-top: 0.1rem;
+}
+
+/* Sort dropdown in Current Employees header */
+.card-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.employee-sort-label {
+    font-size: 0.8rem;
+    color: #4a5568;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.employee-sort-label select {
+    border-radius: 999px;
+    border: 1px solid #e2e8f0;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.8rem;
+    color: #2d3748;
+    background: #fff;
+    outline: none;
+}
+
+/* Responsive: stack to 2 columns, then 1 */
+@media (max-width: 1400px) {
+    .employees-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    
+    .positions-card {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 1200px) {
+    .employees-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Header actions */
+.employees-header-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.btn-employee-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.3rem;
+    border-radius: 10px;
+    border: none;
+    background: #4CAF50;
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.25);
+    transition: all 0.25s ease;
+}
+
+.btn-employee-action:hover {
+    background: #45a049;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.35);
+}
+
+.btn-employee-action.btn-secondary-action {
+    background: #fff;
+    color: #4a5568;
+    border: 2px solid #e2e8f0;
+    box-shadow: none;
+}
+
+.btn-employee-action.btn-secondary-action:hover {
+    background: #f7fafc;
+    border-color: #cbd5e0;
+}
+
+@media (max-width: 768px) {
+    .employees-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+
+/* Modals for Employees page */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal.modal-employee {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    max-width: 480px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    animation: employeesModalSlideIn 0.25s ease;
+}
+
+@keyframes employeesModalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-40px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.modal-employee .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+}
+
+.modal-employee .modal-header h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin: 0;
+}
+
+.modal-employee .modal-close {
+    background: none;
+    border: none;
+    color: #718096;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.modal-employee .modal-close:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: #2d3748;
+}
+
+.modal-employee .modal-body {
+    padding: 1.5rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.modal-employee .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    border-top: 1px solid #e2e8f0;
+    background: #f7fafc;
+}
+
+.modal-employee .form-group {
+    margin-bottom: 1.25rem;
+}
+
+.modal-employee .form-group label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2d3748;
+}
+
+.modal-employee .form-control {
+    width: 100%;
+    padding: 0.65rem 0.75rem;
+    border-radius: 8px;
+    border: 2px solid #e2e8f0;
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.modal-employee .form-control:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
+}
+
+.modal-employee textarea.form-control {
+    resize: vertical;
+    min-height: 70px;
+}
+
+.modal-employee .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.2rem;
+    background: #4CAF50;
+    color: #fff;
+    border-radius: 10px;
+    border: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.modal-employee .btn-primary:hover {
+    background: #45a049;
+}
+
+.modal-employee .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.6rem 1.2rem;
+    background: #fff;
+    color: #4a5568;
+    border-radius: 10px;
+    border: 2px solid #e2e8f0;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.modal-employee .btn-secondary:hover {
+    background: #f7fafc;
+    border-color: #cbd5e0;
+}
+
+/* Position checkboxes in modals */
+.position-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.position-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    background: #f7fafc;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #4a5568;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    user-select: none;
+}
+
+.position-checkbox-label:hover {
+    background: #ebf8ff;
+    border-color: #90cdf4;
+}
+
+.position-checkbox-label input[type="checkbox"] {
+    accent-color: #4CAF50;
+    width: 14px;
+    height: 14px;
+}
+
+.position-checkbox-label:has(input:checked) {
+    background: rgba(76, 175, 80, 0.1);
+    border-color: #4CAF50;
+    color: #276749;
+}
+
+.position-checkboxes-empty {
+    font-size: 0.85rem;
+    color: #a0aec0;
+    font-style: italic;
+}
+
+/* Edit positions button on employee rows */
+.btn-edit-positions {
+    background: none;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    color: #718096;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.55rem;
+    margin-left: 0.5rem;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.btn-edit-positions:hover {
+    background: rgba(76, 175, 80, 0.08);
+    border-color: #4CAF50;
+    color: #276749;
+}
+
+/* Multi-position role tags */
+.employee-positions-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.2rem;
+}
+
+.emp-pos-tag {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.1rem 0.45rem;
+    border-radius: 6px;
+    background: rgba(76, 175, 80, 0.1);
+    color: #276749;
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}

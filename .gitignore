@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Expo / React Native
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+
+# Native (optional — uncomment if you don't commit native folders)
+# .kotlin/
+# /ios
+# /android
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+__MACOSX/
+
+# Local env / secrets
+.env
+.env*.local
+
+# TypeScript
+*.tsbuildinfo

@@ -1,0 +1,1071 @@
+// Store position responsibilities
+const positionResponsibilities = {
+    'Server': 'Take orders, serve food, handle customer service, process payments',
+    'Line Cook': 'Prepare and cook food items, maintain kitchen stations, follow recipes',
+    'Dishwasher': 'Wash dishes, clean kitchen equipment, maintain cleanliness standards',
+    'Dessert': 'Prepare desserts, maintain dessert station, plate desserts',
+    'Hot Foods': 'Prepare hot food items, maintain temperature standards, coordinate with line cooks',
+    'Cold Foods': 'Prepare cold food items, salads, maintain cold storage',
+    'MOD': 'Manage operations, handle issues, coordinate staff, ensure quality',
+    'Expo': 'Expedite orders, coordinate between kitchen and servers, ensure timing',
+    'Dish': 'Wash dishes, maintain dish station, support kitchen operations',
+    'Prep': 'Prepare ingredients, chop vegetables, prep stations, support kitchen',
+    'FOH Manager': 'Manage front of house, coordinate servers, handle customer issues'
+};
+
+// ── Employee → Positions (Supabase) ───────────────────────────────────────────
+// Structure: { "Rohan": ["Server", "Bartend"], "Kenny": ["Server"], ... }
+
+async function loadEmployeePositionsFromSupabase() {
+    if (!window.supabaseClient || !window.ORG_ID) return null;
+    const { data, error } = await window.supabaseClient
+        .from('employee_positions')
+        .select('id, employee_name, positions')
+        .eq('org_id', window.ORG_ID);
+    if (error) {
+        console.warn('[Supabase] Employee positions load failed:', error.message);
+        return null;
+    }
+    const map = {};
+    window._employeeNameToId = {};
+    (data || []).forEach(r => {
+        window._employeeNameToId[r.employee_name] = r.id;
+        map[r.employee_name] = r.positions || [];
+    });
+    
+    // Also load from profiles so mobile identities (like 'klb10012004', 'Dudu') match properly
+    try {
+        const { data: profilesData } = await window.supabaseClient
+            .from('profiles')
+            .select('id, employee_name, display_name')
+            .eq('org_id', window.ORG_ID);
+        if (profilesData) {
+            profilesData.forEach(p => {
+                if (p.employee_name) window._employeeNameToId[p.employee_name] = p.id;
+                if (p.display_name) window._employeeNameToId[p.display_name] = p.id;
+            });
+        }
+    } catch (e) {
+        console.warn('[Supabase] Could not merge profiles into name mapping:', e);
+    }
+    
+    return Object.keys(map).length ? map : null;
+}
+
+window.getEmployeeIdFromName = function(name) {
+    if (!name || !window._employeeNameToId) return null;
+    // exact match
+    if (window._employeeNameToId[name]) return window._employeeNameToId[name];
+    // case-insensitive match
+    const lowerName = name.toLowerCase();
+    for (const [key, id] of Object.entries(window._employeeNameToId)) {
+        if (key.toLowerCase() === lowerName) return id;
+    }
+    return null;
+};
+
+window.getEmployeeNameFromId = function(id) {
+    if (!id || !window._employeeNameToId) return null;
+    for (const [key, val] of Object.entries(window._employeeNameToId)) {
+        if (val === id) return key;
+    }
+    return null;
+};
+
+async function saveEmployeePositionsToSupabase(data) {
+    if (!window.supabaseClient || !window.ORG_ID || !data) return;
+    for (const [employeeName, positions] of Object.entries(data)) {
+        await window.supabaseClient.from('employee_positions').upsert(
+            { org_id: window.ORG_ID, employee_name: employeeName, positions: positions || [], updated_at: new Date().toISOString() },
+            { onConflict: 'org_id,employee_name' }
+        );
+    }
+}
+
+let _employeePositionsCache = null;
+let _managerFlagsByName = {};
+let _employeeSortOrder = 'asc'; // 'asc' = least to greatest, 'desc' = greatest to least
+
+function loadEmployeePositions() {
+    return _employeePositionsCache;
+}
+
+function saveEmployeePositions(data) {
+    _employeePositionsCache = data;
+    if (window.supabaseClient && window.ORG_ID && data) {
+        saveEmployeePositionsToSupabase(data);
+    }
+}
+
+function startOfWeekMonday(date = new Date()) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0=Sun, 1=Mon, ...
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    d.setDate(diff);
+    return d;
+}
+
+function addDays(date, days) {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d;
+}
+
+function ymd(date) {
+    return new Date(date).toISOString().split('T')[0];
+}
+
+function hoursBetweenTimes(startTime, endTime) {
+    if (!startTime || !endTime) return 0;
+    const parse = (t) => {
+        const parts = String(t).split(':');
+        const h = parseInt(parts[0] || '0', 10);
+        const m = parseInt(parts[1] || '0', 10);
+        return h * 60 + m;
+    };
+    let startMin = parse(startTime);
+    let endMin = parse(endTime);
+    if (Number.isNaN(startMin) || Number.isNaN(endMin)) return 0;
+    if (endMin < startMin) endMin += 24 * 60; // overnight
+    return Math.max(0, (endMin - startMin) / 60);
+}
+
+function isNowWithinShift(nowMinutes, startTime, endTime) {
+    const toMin = (t) => {
+        const parts = String(t || '').split(':');
+        const h = parseInt(parts[0] || '0', 10);
+        const m = parseInt(parts[1] || '0', 10);
+        if (Number.isNaN(h) || Number.isNaN(m)) return null;
+        return h * 60 + m;
+    };
+    const startMin = toMin(startTime);
+    const endMin = toMin(endTime);
+    if (startMin == null || endMin == null) return false;
+    if (endMin < startMin) {
+        // Overnight shift: on shift if now >= start OR now < end
+        return nowMinutes >= startMin || nowMinutes < endMin;
+    }
+    return nowMinutes >= startMin && nowMinutes < endMin;
+}
+
+async function loadOnShiftSetFromSupabase(dateYmd) {
+    if (!window.supabaseClient || !window.ORG_ID) return new Set();
+    const { data, error } = await window.supabaseClient
+        .from('shifts')
+        .select('employee_name, start_time, end_time')
+        .eq('org_id', window.ORG_ID)
+        .eq('shift_date', dateYmd);
+    if (error) {
+        console.warn('[Supabase] Shifts load failed:', error.message);
+        return new Set();
+    }
+
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const set = new Set();
+    (data || []).forEach(s => {
+        const name = (s.employee_name || '').trim();
+        if (!name) return;
+        if (isNowWithinShift(nowMinutes, s.start_time, s.end_time)) {
+            set.add(name);
+        }
+    });
+    return set;
+}
+
+async function loadWeeklyHoursFromSupabase(weekStartYmd, weekEndYmd) {
+    if (!window.supabaseClient || !window.ORG_ID) return {};
+    const { data, error } = await window.supabaseClient
+        .from('shifts')
+        .select('employee_name, shift_date, start_time, end_time')
+        .eq('org_id', window.ORG_ID)
+        .gte('shift_date', weekStartYmd)
+        .lte('shift_date', weekEndYmd);
+    if (error) {
+        console.warn('[Supabase] Shifts load failed:', error.message);
+        return {};
+    }
+    const map = {};
+    (data || []).forEach(s => {
+        const name = (s.employee_name || '').trim();
+        if (!name) return;
+        map[name] = (map[name] || 0) + hoursBetweenTimes(s.start_time, s.end_time);
+    });
+    return map;
+}
+
+async function renderEmployeesWithHours() {
+    const list = document.querySelector('.employees-card .shift-list');
+    if (!list) return;
+
+    const posData = getEmployeePositions();
+    const employeeNames = Object.keys(posData || {});
+
+    // If we have no employees yet, keep whatever is in HTML
+    if (!employeeNames.length) {
+        injectEditPositionButtons();
+        return;
+    }
+
+    const weekStart = startOfWeekMonday(new Date());
+    const weekEnd = addDays(weekStart, 6);
+    const weekStartStr = ymd(weekStart);
+    const weekEndStr = ymd(weekEnd);
+
+    const hoursMap = await loadWeeklyHoursFromSupabase(weekStartStr, weekEndStr);
+    const todayStr = ymd(new Date());
+    const onShiftSet = await loadOnShiftSetFromSupabase(todayStr);
+
+    const rows = employeeNames.map(name => ({
+        name,
+        hours: hoursMap[name] || 0,
+        positions: posData[name] || [],
+        onShift: onShiftSet.has(name)
+    }));
+
+    // Sort by hours worked, honoring the current sort order
+    rows.sort((a, b) => {
+        if (a.hours !== b.hours) {
+            return _employeeSortOrder === 'desc'
+                ? b.hours - a.hours
+                : a.hours - b.hours;
+        }
+        // Tie-breaker: alphabetical by name
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+
+    list.innerHTML = rows.map(r => {
+        const avatarLetter = r.name.charAt(0).toUpperCase();
+        const hrs = (Math.round((r.hours || 0) * 10) / 10).toFixed(1);
+        const statusClass = r.onShift ? 'online' : 'offline';
+        const statusText = r.onShift ? 'On shift' : 'Off';
+        return `
+            <div class="shift-item" data-employee-name="${escapeEmployeesHtml(r.name)}">
+                <div class="employee-info">
+                    <div class="employee-avatar">${avatarLetter}</div>
+                    <div class="employee-details">
+                        <span class="employee-name">${escapeEmployeesHtml(r.name)}</span>
+                        <span class="employee-hours">${hrs} hrs</span>
+                        <span class="employee-role" style="display:none;"></span>
+                    </div>
+                </div>
+                <div class="shift-status ${statusClass}">
+                    <i class="fas fa-circle"></i>
+                    ${statusText}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Re-render tags and edit buttons on the rebuilt rows
+    updatePositionsFromEmployees();
+    injectEditPositionButtons();
+}
+
+function getEmployeePositions() {
+    if (_employeePositionsCache) return _employeePositionsCache;
+    const posMap = {};
+    document.querySelectorAll('.employees-card .shift-item').forEach(item => {
+        const name = item.querySelector('.employee-name')?.textContent.trim();
+        const role = item.querySelector('.employee-role')?.textContent.trim();
+        if (name && role && role !== 'New Employee') {
+            posMap[name] = [role];
+        }
+    });
+    if (Object.keys(posMap).length) {
+        saveEmployeePositions(posMap);
+    }
+    return posMap;
+}
+
+window.addEventListener('supabase-ready', async function () {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+
+    // 1) Try to load positions from Supabase
+    const fromDb = await loadEmployeePositionsFromSupabase();
+    if (fromDb) {
+        _employeePositionsCache = fromDb;
+    } else {
+        // 2) Fall back to whatever is in the HTML, then save to Supabase
+        _employeePositionsCache = getEmployeePositions();
+    }
+
+    // 3) Update tags + render dynamic hours / on-shift state
+    updatePositionsFromEmployees();
+    renderEmployeesWithHours();
+});
+
+function getAllPositionNames() {
+    return Array.from(document.querySelectorAll('.position-item[data-position]'))
+        .map(el => el.dataset.position)
+        .filter(Boolean);
+}
+
+// ── Employees Page - request actions and create modals ────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    setupEmployeeRequestActions();
+    setupEmployeeModals();
+    setupEditPositionsModal();
+    setupPositionClicks();
+    injectEditPositionButtons();
+    updatePositionsFromEmployees();
+    const sortSelect = document.getElementById('employee-sort-select');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', function () {
+            _employeeSortOrder = this.value === 'desc' ? 'desc' : 'asc';
+            // Re-render with new sort order
+            renderEmployeesWithHours();
+        });
+    }
+    // If Supabase isn't ready, still render static list; once ready we'll re-render with hours.
+    if (typeof setupNotificationBell === 'function') {
+        setupNotificationBell();
+    }
+});
+
+function setupEmployeeRequestActions() {
+    const approveButtons = document.querySelectorAll('.employees-card + .notifications-card .btn-approve, .notifications-card .btn-approve');
+    const denyButtons = document.querySelectorAll('.employees-card + .notifications-card .btn-deny, .notifications-card .btn-deny');
+
+    // Use notifications-card within employees page
+    const card = document.querySelector('.dashboard-grid .notifications-card');
+    if (!card) return;
+
+    card.querySelectorAll('.btn-approve').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            handleEmployeeRequestAction(this, 'approve');
+        });
+    });
+    card.querySelectorAll('.btn-deny').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            handleEmployeeRequestAction(this, 'deny');
+        });
+    });
+}
+
+// Store approved drop requests (shared with script.js)
+if (typeof approvedDrops === 'undefined') {
+    window.approvedDrops = {};
+}
+
+function handleEmployeeRequestAction(button, action) {
+    const notificationItem = button.closest('.notification-item');
+    if (!notificationItem) return;
+
+    const notificationContent = notificationItem.querySelector('.notification-content p')?.textContent || '';
+    
+    // Parse drop request if approved
+    if (action === 'approve' && notificationContent.includes('to drop')) {
+        parseAndStoreDropRequest(notificationContent);
+    }
+    
+    button.style.transform = 'scale(0.95)';
+    setTimeout(() => { button.style.transform = 'scale(1)'; }, 150);
+
+    setTimeout(() => {
+        notificationItem.style.transition = 'all 0.3s ease';
+        notificationItem.style.transform = 'translateX(-100%)';
+        notificationItem.style.opacity = '0';
+        setTimeout(() => {
+            notificationItem.remove();
+            updateEmployeesRequestBadge();
+        }, 300);
+        const actionText = action === 'approve' ? 'approved' : 'denied';
+        showEmployeeToast(`Request ${actionText} successfully!`, action === 'approve' ? 'success' : 'error');
+    }, 500);
+}
+
+// Parse drop request text and store approved dates (same as script.js)
+function parseAndStoreDropRequest(text) {
+    const dropMatch = text.match(/(\w+)\s+(?:wants|to drop)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)(?:\s+to\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+))?/i);
+    if (!dropMatch) return;
+    
+    const employeeName = dropMatch[1];
+    const startDay = parseInt(dropMatch[2]);
+    const endDay = dropMatch[3] ? parseInt(dropMatch[3]) : startDay;
+    
+    const monthMatch = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i);
+    if (!monthMatch) return;
+    
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthIndex = monthNames.findIndex(m => m.toLowerCase() === monthMatch[1].toLowerCase());
+    if (monthIndex === -1) return;
+    
+    const currentYear = new Date().getFullYear();
+    const dates = [];
+    
+    for (let day = startDay; day <= endDay; day++) {
+        const date = new Date(currentYear, monthIndex, day);
+        dates.push(date.toISOString().split('T')[0]);
+    }
+    
+    if (!window.approvedDrops[employeeName]) {
+        window.approvedDrops[employeeName] = [];
+    }
+    window.approvedDrops[employeeName].push(...dates);
+    window.approvedDrops[employeeName] = [...new Set(window.approvedDrops[employeeName])];
+}
+
+function updateEmployeesRequestBadge() {
+    const requestsCard = document.querySelector('.dashboard-grid .notifications-card');
+    if (!requestsCard) return;
+
+    const notificationItems = requestsCard.querySelectorAll('.notification-item');
+    const count = notificationItems.length;
+
+    const cardBadge = requestsCard.querySelector('.card-badge');
+    if (cardBadge) {
+        cardBadge.textContent = count === 0 ? 'All Clear' : `${count} New`;
+        if (count === 0) cardBadge.style.background = '#4CAF50';
+    }
+
+    const navBadge = document.querySelector('.employees-badge, .notification-badge');
+    if (navBadge) {
+        navBadge.textContent = count;
+        navBadge.style.display = count === 0 ? 'none' : '';
+    }
+}
+
+function showEmployeeToast(message, type) {
+    if (typeof showNotificationToast === 'function') {
+        showNotificationToast(message, type);
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed; bottom: 20px; right: 20px;
+        background: ${type === 'error' ? '#e53e3e' : '#4CAF50'};
+        color: white; padding: 1rem 1.5rem; border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 10000;
+        font-weight: 600; max-width: 320px;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// --- Create Employee & Create Position modals ---
+function setupEmployeeModals() {
+    const createEmployeeBtn = document.getElementById('btn-create-employee');
+    const createPositionBtn = document.getElementById('btn-create-position');
+
+    const employeeModal = document.getElementById('create-employee-modal');
+    const positionModal = document.getElementById('create-position-modal');
+
+    if (createEmployeeBtn && employeeModal) {
+        createEmployeeBtn.addEventListener('click', () => {
+            buildPositionCheckboxes('employee-position-checkboxes', []);
+            openEmployeesModal(employeeModal, 'employee-full-name');
+        });
+    }
+    if (createPositionBtn && positionModal) {
+        createPositionBtn.addEventListener('click', () => openEmployeesModal(positionModal, 'position-name'));
+    }
+
+    // Close buttons
+    const closeEmployeeBtn = document.getElementById('close-create-employee');
+    const cancelEmployeeBtn = document.getElementById('cancel-create-employee');
+    const submitEmployeeBtn = document.getElementById('submit-create-employee');
+
+    const closePositionBtn = document.getElementById('close-create-position');
+    const cancelPositionBtn = document.getElementById('cancel-create-position');
+    const submitPositionBtn = document.getElementById('submit-create-position');
+
+    closeEmployeeBtn?.addEventListener('click', () => closeEmployeesModal(employeeModal));
+    cancelEmployeeBtn?.addEventListener('click', () => closeEmployeesModal(employeeModal));
+    closePositionBtn?.addEventListener('click', () => closeEmployeesModal(positionModal));
+    cancelPositionBtn?.addEventListener('click', () => closeEmployeesModal(positionModal));
+
+    // Position detail modal handlers
+    const positionDetailModal = document.getElementById('position-detail-modal');
+    const closePositionDetailBtn = document.getElementById('close-position-detail');
+    const cancelPositionDetailBtn = document.getElementById('cancel-position-detail');
+
+    closePositionDetailBtn?.addEventListener('click', () => closeEmployeesModal(positionDetailModal));
+    cancelPositionDetailBtn?.addEventListener('click', () => closeEmployeesModal(positionDetailModal));
+
+    positionDetailModal?.addEventListener('click', e => {
+        if (e.target === positionDetailModal) closeEmployeesModal(positionDetailModal);
+    });
+
+    submitEmployeeBtn?.addEventListener('click', handleCreateEmployeeSubmit);
+    submitPositionBtn?.addEventListener('click', handleCreatePositionSubmit);
+
+    // Overlay click closes
+    [employeeModal, positionModal].forEach(modal => {
+        modal?.addEventListener('click', e => {
+            if (e.target === modal) closeEmployeesModal(modal);
+        });
+    });
+
+    // Escape key closes active modal
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            if (employeeModal?.classList.contains('active')) closeEmployeesModal(employeeModal);
+            if (positionModal?.classList.contains('active')) closeEmployeesModal(positionModal);
+            if (positionDetailModal?.classList.contains('active')) closeEmployeesModal(positionDetailModal);
+        }
+    });
+}
+
+function openEmployeesModal(modal, focusId) {
+    if (!modal) return;
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    const focusEl = document.getElementById(focusId);
+    if (focusEl) {
+        setTimeout(() => focusEl.focus(), 50);
+    }
+}
+
+function closeEmployeesModal(modal) {
+    if (!modal) return;
+    modal.classList.remove('active');
+    document.body.style.overflow = '';
+    
+    // Reset form if needed
+    if (modal.id === 'create-employee-modal') {
+        const nameInput = document.getElementById('employee-full-name');
+        const phoneInput = document.getElementById('employee-phone');
+        const hourlyRadio = document.querySelector('input[name="employee-compensation-type"][value="hourly"]');
+        if (nameInput) nameInput.value = '';
+        if (phoneInput) phoneInput.value = '';
+        if (hourlyRadio) hourlyRadio.checked = true;
+        const posCbs = document.getElementById('employee-position-checkboxes');
+        if (posCbs) posCbs.innerHTML = '';
+    } else if (modal.id === 'create-position-modal') {
+        const nameInput = document.getElementById('position-name');
+        const respInput = document.getElementById('position-responsibilities');
+        if (nameInput) nameInput.value = '';
+        if (respInput) respInput.value = '';
+    }
+    // Position detail modal doesn't need reset - it's populated dynamically
+}
+
+function handleCreateEmployeeSubmit() {
+    const nameInput = document.getElementById('employee-full-name');
+    const emailInput = document.getElementById('employee-email');
+    const phoneInput = document.getElementById('employee-phone');
+    const compensationType = document.querySelector('input[name="employee-compensation-type"]:checked')?.value || 'hourly';
+    const isManager = !!document.getElementById('employee-is-manager')?.checked;
+    const fullName = (nameInput?.value || '').trim();
+    const email = (emailInput?.value || '').trim();
+    const phone = (phoneInput?.value || '').trim();
+
+    if (!fullName) {
+        showEmployeeToast('Please enter the employee\'s full name.', 'error');
+        nameInput?.focus();
+        return;
+    }
+    if (!phone && !email) {
+        showEmployeeToast('Please enter at least an email or phone number.', 'error');
+        (emailInput || phoneInput)?.focus();
+        return;
+    }
+
+    const list = document.querySelector('.employees-card .shift-list');
+    if (!list) return;
+
+    const avatarLetter = fullName.charAt(0).toUpperCase();
+
+    // Store employee data with compensation type
+    if (!window.employeeData) {
+        window.employeeData = {};
+    }
+    window.employeeData[fullName] = {
+        name: fullName,
+        email: email || null,
+        phone: phone,
+        compensationType: compensationType,
+        isManager: isManager
+    };
+
+    // Read selected positions from checkboxes
+    const selectedPositions = Array.from(
+        document.querySelectorAll('#employee-position-checkboxes input[type="checkbox"]:checked')
+    ).map(cb => cb.value);
+
+    // Save positions to data store
+    const posData = getEmployeePositions();
+    posData[fullName] = selectedPositions;
+    saveEmployeePositions(posData);
+
+    _managerFlagsByName[fullName] = isManager;
+    syncEmployeeManagerAccess(fullName, isManager);
+
+    if (email) {
+        inviteEmployeeByEmail(fullName, email, isManager);
+    }
+
+    const item = document.createElement('div');
+    item.className = 'shift-item';
+    item.dataset.employeeName = fullName;
+    item.dataset.compensationType = compensationType;
+    item.innerHTML = `
+        <div class="employee-info">
+            <div class="employee-avatar">${avatarLetter}</div>
+            <div class="employee-details">
+                <span class="employee-name">${escapeEmployeesHtml(fullName)}</span>
+                <span class="employee-role" style="display:none;"></span>
+            </div>
+        </div>
+        <div class="shift-status offline">
+            <i class="fas fa-circle"></i>
+            Off
+        </div>
+    `;
+
+    list.appendChild(item);
+    item.style.opacity = '0';
+    item.style.transform = 'translateY(10px)';
+    requestAnimationFrame(() => {
+        item.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+        item.style.opacity = '1';
+        item.style.transform = 'translateY(0)';
+    });
+
+    // Add edit button to new row
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-edit-positions';
+    editBtn.title = 'Manage positions';
+    editBtn.innerHTML = '<i class="fas fa-pen"></i>';
+    editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPositionsModal(fullName); });
+    item.appendChild(editBtn);
+
+    // Update positions section
+    updatePositionsFromEmployees();
+
+    // Clear form and close modal
+    if (nameInput) nameInput.value = '';
+    if (phoneInput) phoneInput.value = '';
+    const employeeModal = document.getElementById('create-employee-modal');
+    closeEmployeesModal(employeeModal);
+    showEmployeeToast(`Employee "${fullName}" created.`, 'success');
+}
+
+// Update positions section and employee role tags from stored data
+function updatePositionsFromEmployees() {
+    const posData = getEmployeePositions();
+
+    // Build position → employees map
+    const positionMap = {};
+    Object.entries(posData).forEach(([empName, positions]) => {
+        (positions || []).forEach(pos => {
+            if (!positionMap[pos]) positionMap[pos] = [];
+            if (!positionMap[pos].includes(empName)) positionMap[pos].push(empName);
+        });
+    });
+
+    // Update each position card
+    let totalPositions = 0;
+    document.querySelectorAll('.position-item[data-position]').forEach(positionItem => {
+        const positionName = positionItem.dataset.position;
+        const employees = positionMap[positionName] || [];
+        totalPositions++;
+
+        const countEl = positionItem.querySelector('.position-count');
+        let namesEl = positionItem.querySelector('.position-names');
+        if (!namesEl) {
+            namesEl = document.createElement('span');
+            namesEl.className = 'position-names';
+            positionItem.querySelector('.position-info')?.appendChild(namesEl);
+        }
+        if (countEl) {
+            countEl.textContent = employees.length === 1 ? '1 employee capable' : `${employees.length} employees capable`;
+        }
+        namesEl.textContent = employees.length > 0 ? employees.join(', ') : '';
+        namesEl.style.display = employees.length > 0 ? '' : 'none';
+        positionItem.dataset.employees = JSON.stringify(employees);
+    });
+
+    const badge = document.querySelector('.positions-card .card-badge');
+    if (badge) badge.textContent = `${totalPositions} Total`;
+
+    // Update role display on every employee row
+    document.querySelectorAll('.employees-card .shift-item').forEach(item => {
+        const name = item.querySelector('.employee-name')?.textContent.trim();
+        if (!name) return;
+        const positions = posData[name] || [];
+        renderEmployeeRoleTags(item, positions);
+    });
+}
+
+function renderEmployeeRoleTags(shiftItem, positions) {
+    // Replace .employee-role span with position tags (or keep span for no-position state)
+    let roleEl = shiftItem.querySelector('.employee-role');
+    let tagsEl = shiftItem.querySelector('.employee-positions-tags');
+
+    if (positions.length === 0) {
+        if (tagsEl) tagsEl.remove();
+        if (!roleEl) {
+            roleEl = document.createElement('span');
+            roleEl.className = 'employee-role';
+            shiftItem.querySelector('.employee-details')?.appendChild(roleEl);
+        }
+        roleEl.textContent = 'No position assigned';
+        roleEl.style.display = '';
+    } else {
+        if (roleEl) roleEl.style.display = 'none';
+        if (!tagsEl) {
+            tagsEl = document.createElement('div');
+            tagsEl.className = 'employee-positions-tags';
+            shiftItem.querySelector('.employee-details')?.appendChild(tagsEl);
+        }
+        tagsEl.innerHTML = positions.map(p =>
+            `<span class="emp-pos-tag">${escapeEmployeesHtml(p)}</span>`
+        ).join('');
+    }
+}
+
+// Inject a small "edit positions" button onto every employee row
+function injectEditPositionButtons() {
+    document.querySelectorAll('.employees-card .shift-item').forEach(item => {
+        if (item.querySelector('.btn-edit-positions')) return; // already added
+        const name = item.querySelector('.employee-name')?.textContent.trim();
+        if (!name) return;
+        const btn = document.createElement('button');
+        btn.className = 'btn-edit-positions';
+        btn.title = 'Manage positions';
+        btn.innerHTML = '<i class="fas fa-pen"></i>';
+        btn.addEventListener('click', e => { e.stopPropagation(); openEditPositionsModal(name); });
+        item.appendChild(btn);
+    });
+}
+
+// ── Position checkbox helpers ──────────────────────────────────────────────────
+
+function buildPositionCheckboxes(containerId, selectedPositions) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const positions = getAllPositionNames();
+    if (positions.length === 0) {
+        container.innerHTML = '<span class="position-checkboxes-empty">No positions created yet.</span>';
+        return;
+    }
+    container.innerHTML = positions.map(pos => `
+        <label class="position-checkbox-label">
+            <input type="checkbox" value="${escapeEmployeesHtml(pos)}" ${selectedPositions.includes(pos) ? 'checked' : ''}>
+            <span>${escapeEmployeesHtml(pos)}</span>
+        </label>
+    `).join('');
+}
+
+// ── Edit Positions Modal ───────────────────────────────────────────────────────
+
+let editPositionsTarget = null;
+
+function setupEditPositionsModal() {
+    const modal = document.getElementById('edit-positions-modal');
+    if (!modal) return;
+
+    document.getElementById('close-edit-positions')?.addEventListener('click', closeEditPositionsModal);
+    document.getElementById('cancel-edit-positions')?.addEventListener('click', closeEditPositionsModal);
+    document.getElementById('submit-edit-positions')?.addEventListener('click', saveEditPositions);
+
+    modal.addEventListener('click', e => { if (e.target === modal) closeEditPositionsModal(); });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeEditPositionsModal();
+    });
+}
+
+function openEditPositionsModal(employeeName) {
+    editPositionsTarget = employeeName;
+    const posData = getEmployeePositions();
+    const current = posData[employeeName] || [];
+
+    document.getElementById('edit-positions-employee-name').textContent = employeeName;
+    buildPositionCheckboxes('edit-position-checkboxes', current);
+
+    const managerCbx = document.getElementById('edit-employee-is-manager');
+    if (managerCbx) {
+        managerCbx.checked = !!_managerFlagsByName[employeeName];
+    }
+
+    const modal = document.getElementById('edit-positions-modal');
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeEditPositionsModal() {
+    document.getElementById('edit-positions-modal')?.classList.remove('active');
+    document.body.style.overflow = '';
+    editPositionsTarget = null;
+}
+
+function saveEditPositions() {
+    if (!editPositionsTarget) return;
+    const selected = Array.from(
+        document.querySelectorAll('#edit-position-checkboxes input[type="checkbox"]:checked')
+    ).map(cb => cb.value);
+
+    const isManager = !!document.getElementById('edit-employee-is-manager')?.checked;
+
+    const posData = getEmployeePositions();
+    posData[editPositionsTarget] = selected;
+    saveEmployeePositions(posData);
+
+    _managerFlagsByName[editPositionsTarget] = isManager;
+    syncEmployeeManagerAccess(editPositionsTarget, isManager);
+
+    closeEditPositionsModal();
+    updatePositionsFromEmployees();
+    showEmployeeToast(`Positions updated for ${escapeEmployeesHtml(editPositionsTarget)}.`, 'success');
+}
+
+function handleCreatePositionSubmit() {
+    const nameInput = document.getElementById('position-name');
+    const respInput = document.getElementById('position-responsibilities');
+    const positionName = (nameInput?.value || '').trim();
+    const responsibilities = (respInput?.value || '').trim();
+
+    if (!positionName) {
+        showEmployeeToast('Please enter a position name.', 'error');
+        nameInput?.focus();
+        return;
+    }
+    if (!responsibilities) {
+        showEmployeeToast('Please enter responsibilities for the position.', 'error');
+        respInput?.focus();
+        return;
+    }
+
+    // Store responsibilities
+    positionResponsibilities[positionName] = responsibilities;
+
+    // Add position to the positions list
+    const positionsList = document.querySelector('.positions-list');
+    if (positionsList) {
+        const positionItem = document.createElement('div');
+        positionItem.className = 'position-item';
+        positionItem.dataset.position = positionName;
+        positionItem.dataset.employees = '[]';
+        positionItem.innerHTML = `
+            <div class="position-icon">
+                <i class="fas fa-briefcase"></i>
+            </div>
+            <div class="position-info">
+                <span class="position-name">${escapeEmployeesHtml(positionName)}</span>
+                <span class="position-count">0 employees capable</span>
+            </div>
+        `;
+        
+        // Add click handler
+        positionItem.addEventListener('click', () => openPositionDetail(positionName));
+        
+        positionsList.appendChild(positionItem);
+        positionItem.style.opacity = '0';
+        positionItem.style.transform = 'translateY(10px)';
+        requestAnimationFrame(() => {
+            positionItem.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+            positionItem.style.opacity = '1';
+            positionItem.style.transform = 'translateY(0)';
+        });
+
+        // Update total count
+        const badge = document.querySelector('.positions-card .card-badge');
+        if (badge) {
+            const currentCount = parseInt(badge.textContent) || 0;
+            badge.textContent = `${currentCount + 1} Total`;
+        }
+        
+        // Update positions to reflect current employees
+        updatePositionsFromEmployees();
+    }
+
+    const modal = document.getElementById('create-position-modal');
+    closeEmployeesModal(modal);
+
+    if (nameInput) nameInput.value = '';
+    if (respInput) respInput.value = '';
+
+    showEmployeeToast(`Position "${positionName}" created.`, 'success');
+}
+
+// Setup position click handlers
+function setupPositionClicks() {
+    document.querySelectorAll('.position-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const positionName = this.dataset.position;
+            if (positionName) {
+                openPositionDetail(positionName);
+            }
+        });
+    });
+}
+
+// Open position detail modal
+function openPositionDetail(positionName) {
+    const modal = document.getElementById('position-detail-modal');
+    const titleEl = document.getElementById('position-detail-title');
+    const employeesListEl = document.getElementById('position-employees-list');
+    const responsibilitiesEl = document.getElementById('position-detail-responsibilities');
+    
+    if (!modal || !titleEl || !employeesListEl || !responsibilitiesEl) return;
+
+    // Set title
+    titleEl.textContent = positionName;
+
+    // Get employees for this position
+    const positionItem = document.querySelector(`[data-position="${positionName}"]`);
+    let employees = [];
+    if (positionItem && positionItem.dataset.employees) {
+        try {
+            employees = JSON.parse(positionItem.dataset.employees);
+        } catch (e) {
+            employees = [];
+        }
+    }
+
+    // Display employees
+    if (employees.length > 0) {
+        employeesListEl.innerHTML = employees.map(name => `
+            <div class="position-employee-item">
+                <div class="employee-avatar-small">${name.charAt(0).toUpperCase()}</div>
+                <span class="employee-name-small">${escapeEmployeesHtml(name)}</span>
+            </div>
+        `).join('');
+    } else {
+        employeesListEl.innerHTML = '<p style="color: #718096; font-style: italic;">No employees assigned to this position</p>';
+    }
+
+    // Set responsibilities
+    responsibilitiesEl.value = positionResponsibilities[positionName] || '';
+
+    // Store current position name for save
+    modal.dataset.currentPosition = positionName;
+
+    // Setup save handler
+    const saveBtn = document.getElementById('save-position-detail');
+    if (saveBtn) {
+        saveBtn.onclick = () => savePositionDetail(positionName);
+    }
+
+    // Open modal
+    openEmployeesModal(modal, 'position-detail-responsibilities');
+}
+
+// Save position detail changes
+function savePositionDetail(positionName) {
+    const responsibilitiesEl = document.getElementById('position-detail-responsibilities');
+    const responsibilities = (responsibilitiesEl?.value || '').trim();
+
+    if (!responsibilities) {
+        showEmployeeToast('Please enter responsibilities.', 'error');
+        responsibilitiesEl?.focus();
+        return;
+    }
+
+    // Save responsibilities
+    positionResponsibilities[positionName] = responsibilities;
+
+    // Close modal
+    const modal = document.getElementById('position-detail-modal');
+    closeEmployeesModal(modal);
+
+    showEmployeeToast(`Responsibilities updated for "${positionName}".`, 'success');
+}
+
+function escapeEmployeesHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ── Supabase employee sync ────────────────────────────────────────────────────
+// Saves a new employee to Supabase org_members (requires the employee to have
+// a Supabase auth account already — get their UUID from the Supabase dashboard).
+async function addEmployeeToOrg(userId, role, position) {
+    if (!window.supabaseClient || !window.ORG_ID) return null;
+    const { data, error } = await window.supabaseClient
+        .from('org_members')
+        .insert({ org_id: window.ORG_ID, user_id: userId, role: role || 'employee', position })
+        .select()
+        .single();
+    if (error) { console.warn('[Supabase] addEmployeeToOrg failed:', error.message); return null; }
+    return data;
+}
+window.addEmployeeToOrg = addEmployeeToOrg;
+
+async function syncEmployeeManagerAccess(employeeName, isManager) {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+    const ids = window.EMPLOYEE_IDS || {};
+    const userId = ids[employeeName];
+    if (!userId) {
+        console.warn('[Admin] No auth user mapped for employee', employeeName, '- cannot sync admin access yet.');
+        return;
+    }
+    try {
+        const payload = { user_id: userId, is_admin: !!isManager };
+        const { error } = await window.supabaseClient
+            .from('admin_users')
+            .upsert(payload, { onConflict: 'user_id' });
+        if (error) {
+            console.warn('[Admin] syncEmployeeManagerAccess failed:', error.message);
+        }
+    } catch (e) {
+        console.warn('[Admin] syncEmployeeManagerAccess error:', e.message);
+    }
+}
+
+async function inviteEmployeeByEmail(employeeName, email, isManager) {
+    if (!window.supabaseClient) {
+        console.warn('[Invite] Supabase client not ready; cannot send invite for', employeeName);
+        return;
+    }
+    const trimmed = (email || '').trim();
+    if (!trimmed) return;
+
+    try {
+        const params = new URLSearchParams({
+            org: window.ORG_ID || '',
+            name: employeeName,
+            manager: isManager ? '1' : '0',
+        });
+        const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
+        const { error } = await window.supabaseClient.auth.signInWithOtp({
+            email: trimmed,
+            options: { emailRedirectTo: redirectTo },
+        });
+        if (error) {
+            console.warn('[Invite] Failed to send invite:', error.message);
+            showEmployeeToast('Could not send invite email. Please check the address.', 'error');
+        } else {
+            showEmployeeToast(`Invite email sent to ${trimmed}.`, 'success');
+        }
+    } catch (e) {
+        console.warn('[Invite] Unexpected error:', e.message);
+        showEmployeeToast('Could not send invite email. Please try again.', 'error');
+    }
+}
+
+// When Supabase is ready, load org members and update the EMPLOYEE_IDS map
+// so task assignment can look up UUIDs by display name.
+window.addEventListener('supabase-ready', async function () {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+
+    const { data: members, error } = await window.supabaseClient
+        .from('org_members')
+        .select('user_id, role, position, profiles(full_name, email)')
+        .eq('org_id', window.ORG_ID);
+
+    if (error) { console.warn('[Supabase] Employee load failed:', error.message); return; }
+    if (!members?.length) return;
+
+    // Update the global EMPLOYEE_IDS map so scheduling can look up UUIDs by name
+    window.EMPLOYEE_IDS = window.EMPLOYEE_IDS || {};
+    _managerFlagsByName = _managerFlagsByName || {};
+
+    members.forEach(m => {
+        const name = m.profiles?.full_name || m.profiles?.email || m.user_id;
+        if (!name) return;
+        if (m.role === 'employee' || m.role === 'manager') {
+            window.EMPLOYEE_IDS[name] = m.user_id;
+        }
+        _managerFlagsByName[name] = (m.role === 'manager' || m.role === 'owner');
+    });
+
+    console.log('[Supabase] Loaded', members.length, 'org members. EMPLOYEE_IDS:', window.EMPLOYEE_IDS, 'Managers:', _managerFlagsByName);
+});

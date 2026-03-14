@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Recipes</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="recipes.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" onclick="window.location.href='index.html'"><i class="fas fa-home"></i> Home</button>
+                <button class="nav-tab" onclick="window.location.href='scheduling.html'"><i class="fas fa-calendar-alt"></i> Scheduling</button>
+                <button class="nav-tab" onclick="window.location.href='employees.html'"><i class="fas fa-users"></i> Employees</button>
+                <button class="nav-tab active"><i class="fas fa-book"></i> Recipes</button>
+                <button class="nav-tab" onclick="window.location.href='inventory.html'"><i class="fas fa-boxes"></i> Inventory</button>
+                <button class="nav-tab" onclick="window.location.href='chat.html'"><i class="fas fa-comments"></i> Chat</button>
+            </div>
+            <div class="nav-user">
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <main class="dashboard-main recipes-main">
+            <div class="recipes-header">
+                <h1>Recipes</h1>
+                <button class="btn-primary" id="create-recipe-btn"><i class="fas fa-plus"></i> Create Recipe</button>
+            </div>
+
+            <div class="recipes-search-wrap">
+                <i class="fas fa-search recipes-search-icon"></i>
+                <input type="search" id="recipe-search" class="recipe-search-input" placeholder="Search dishes by name or description...">
+            </div>
+
+            <div class="recipes-three-col">
+                <section class="recipes-col dishes-section">
+                    <div class="recipes-col-header">
+                        <h2><i class="fas fa-utensils"></i> Dishes</h2>
+                        <p class="recipes-col-subtitle">Menu items and their required recipes</p>
+                        <button class="btn-primary" id="create-dish-btn"><i class="fas fa-plus"></i> Create Dish</button>
+                    </div>
+                    <div class="recipes-list" id="dishes-list"></div>
+                    <div class="recipes-empty" id="dishes-empty" style="display:none;">
+                        <i class="fas fa-utensils"></i>
+                        <p>No dishes yet</p>
+                        <span>Create a dish to link menu items to recipes</span>
+                    </div>
+                </section>
+
+                <section class="recipes-col recipes-active">
+                    <div class="recipes-col-header">
+                        <h2><i class="fas fa-sync-alt"></i> Active Recipes</h2>
+                        <p class="recipes-col-subtitle">Recipes used in at least one dish</p>
+                    </div>
+                    <div class="recipes-list" id="active-recipes-list"></div>
+                    <div class="recipes-empty" id="active-empty" style="display:none;">
+                        <i class="fas fa-sync-alt"></i>
+                        <p>No active recipes</p>
+                        <span>Add a recipe to a dish to make it active</span>
+                    </div>
+                </section>
+
+                <section class="recipes-col recipes-inactive">
+                    <div class="recipes-col-header">
+                        <h2><i class="fas fa-pause-circle"></i> Inactive Recipes</h2>
+                        <p class="recipes-col-subtitle">Recipes not linked to any dish</p>
+                    </div>
+                    <div class="recipes-list" id="inactive-recipes-list"></div>
+                    <div class="recipes-empty" id="inactive-empty" style="display:none;">
+                        <i class="fas fa-pause-circle"></i>
+                        <p>No inactive recipes</p>
+                        <span>All recipes are used in dishes</span>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create/Edit Recipe Modal -->
+    <div class="modal-overlay" id="recipe-modal">
+        <div class="modal modal-recipe">
+            <div class="modal-header">
+                <h3 id="recipe-modal-title"><i class="fas fa-book"></i> Create Recipe</h3>
+                <button type="button" class="modal-close" id="recipe-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="recipe-name"><i class="fas fa-tag"></i> Name</label>
+                    <input type="text" id="recipe-name" class="form-control" placeholder="e.g. Vanilla Ice Cream">
+                </div>
+                <div class="form-group">
+                    <label for="recipe-desc"><i class="fas fa-align-left"></i> Description</label>
+                    <textarea id="recipe-desc" class="form-control" rows="3" placeholder="Brief description of the recipe..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="recipe-yield"><i class="fas fa-weight-hanging"></i> Yield</label>
+                    <input type="text" id="recipe-yield" class="form-control" placeholder="e.g. 4 qts">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="recipe-modal-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="recipe-modal-save"><i class="fas fa-save"></i> Save Recipe</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Dish Modal -->
+    <div class="modal-overlay" id="dish-modal">
+        <div class="modal modal-dish">
+            <div class="modal-header">
+                <h3 id="dish-modal-title"><i class="fas fa-utensils"></i> Create Dish</h3>
+                <button type="button" class="modal-close" id="dish-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="dish-name"><i class="fas fa-tag"></i> Dish Name</label>
+                    <input type="text" id="dish-name" class="form-control" placeholder="e.g. Blueberry Pie">
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-list-check"></i> Required Recipes</label>
+                    <div class="dish-recipes-search">
+                        <i class="fas fa-search"></i>
+                        <input type="search" id="dish-recipe-search" placeholder="Search recipes to add...">
+                    </div>
+                    <div class="dish-recipe-checkboxes" id="dish-recipe-checkboxes"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="dish-modal-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="dish-modal-save"><i class="fas fa-check"></i> Save Dish</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="script.js"></script>
+    <script src="recipes.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="home">
+                    <i class="fas fa-home"></i>
+                    Home
+                </button>
+                <button class="nav-tab" data-tab="scheduling" onclick="window.location.href='scheduling.html'">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scheduling
+                </button>
+                <button class="nav-tab" data-tab="employees" onclick="window.location.href='employees.html'">
+                    <i class="fas fa-users"></i>
+                    Employees
+                </button>
+                <button class="nav-tab" data-tab="recipes" onclick="window.location.href='recipes.html'">
+                    <i class="fas fa-book"></i>
+                    Recipes
+                </button>
+                <button class="nav-tab" data-tab="inventory" onclick="window.location.href='inventory.html'">
+                    <i class="fas fa-boxes"></i>
+                    Inventory
+                </button>
+                <button class="nav-tab" data-tab="chat" onclick="window.location.href='chat.html'">
+                    <i class="fas fa-comments"></i>
+                    Chat
+                </button>
+            </div>
+            <div class="nav-user">
+                <div class="notification-bell" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
+                </div>
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-main">
+            <div class="dashboard-header">
+                <h1>Kenny Kitchen Overview</h1>
+                <div class="header-center">
+                    <h2 class="current-date-header" id="current-date-header"></h2>
+                </div>
+                <div class="header-right"></div>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Notifications Section -->
+                <section class="dashboard-card notifications-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-bell"></i> Notifications</h2>
+                        <span class="card-badge" id="dashboard-notif-badge" style="display:none;">0</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="notification-list" id="dashboard-notification-list">
+                            <div class="notif-empty-state" id="dashboard-notif-empty"><i class="fas fa-check-circle"></i> No notifications</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- On Shift Section -->
+                <section class="dashboard-card shift-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-clock"></i> Currently On Shift</h2>
+                        <span class="card-badge" id="shift-count-badge">0 Active</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="shift-list" id="shift-list">
+                            <p class="no-tasks-message" id="shift-list-empty-msg" style="display:none;color:#718096;padding:1rem;">No one on shift today.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Progress Section -->
+                <section class="dashboard-card progress-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-tasks"></i> Kitchen Progress</h2>
+                        <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            <select id="filter-employee-tasks" class="task-filter-select" onchange="filterTasksByEmployee()">
+                                <option value="">All Employees</option>
+                            </select>
+                            <button class="btn-refresh" onclick="refreshProgress()">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="progress-section">
+                            <h3 class="section-title">In Progress</h3>
+                            <div class="progress-list" id="progress-list">
+                                <!-- Only employees with assigned tasks appear here; populated from stored tasks -->
+                                <p id="progress-list-empty-msg" class="no-tasks-message" style="display: none;">No tasks in progress. Assign tasks on the Scheduling page.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Urgent Tasks Section -->
+                <section class="dashboard-card urgent-tasks-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-fire-alt"></i> Urgent Tasks</h2>
+                        <span class="card-badge urgent-badge" id="urgent-tasks-count">0</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="urgent-add-row">
+                            <input type="text" id="urgent-task-input" class="urgent-task-input" placeholder="Type an urgent task…" maxlength="120">
+                            <select id="urgent-assign-to" class="urgent-assign-select" title="Assign to">
+                                <option value="">All staff</option>
+                            </select>
+                            <button type="button" class="btn-add-urgent" id="btn-add-urgent" onclick="addUrgentTaskFromWeb()">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                        <ul class="urgent-tasks-list" id="urgent-tasks-list">
+                            <!-- Populated by JS -->
+                        </ul>
+                        <p class="no-urgent-msg" id="no-urgent-msg">No urgent tasks. Add one above.</p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Employee Tasks Modal -->
+    <div class="modal-overlay" id="employee-tasks-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="employee-tasks-title"><i class="fas fa-tasks"></i> Tasks for <span id="employee-tasks-name"></span></h3>
+                <button class="modal-close" onclick="closeModal('employee-tasks-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="tasks-section unfinished-tasks-section">
+                    <h4 class="tasks-section-title">
+                        <i class="fas fa-clock"></i> Unfinished Tasks
+                        <span class="task-count" id="unfinished-count">0</span>
+                    </h4>
+                    <div id="unfinished-tasks-list" class="employee-tasks-list">
+                        <!-- Unfinished tasks will be populated here -->
+                    </div>
+                </div>
+                <div class="tasks-section finished-tasks-section">
+                    <h4 class="tasks-section-title">
+                        <i class="fas fa-check-circle"></i> Finished Tasks
+                        <span class="task-count" id="finished-count">0</span>
+                    </h4>
+                    <div id="finished-tasks-list" class="employee-tasks-list">
+                        <!-- Finished tasks will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('employee-tasks-modal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="employees.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Employees</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="employees.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" data-tab="home" onclick="window.location.href='index.html'">
+                    <i class="fas fa-home"></i>
+                    Home
+                </button>
+                <button class="nav-tab" data-tab="scheduling" onclick="window.location.href='scheduling.html'">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scheduling
+                </button>
+                <button class="nav-tab active" data-tab="employees">
+                    <i class="fas fa-users"></i>
+                    Employees
+                </button>
+                <button class="nav-tab" data-tab="recipes" onclick="window.location.href='recipes.html'">
+                    <i class="fas fa-book"></i>
+                    Recipes
+                </button>
+                <button class="nav-tab" data-tab="inventory" onclick="window.location.href='inventory.html'">
+                    <i class="fas fa-boxes"></i>
+                    Inventory
+                </button>
+                <button class="nav-tab" data-tab="chat" onclick="window.location.href='chat.html'">
+                    <i class="fas fa-comments"></i>
+                    Chat
+                </button>
+            </div>
+            <div class="nav-user">
+                <div class="notification-bell" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
+                </div>
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Employees Content -->
+        <main class="dashboard-main">
+            <div class="dashboard-header">
+                <h1>Employees</h1>
+                <div class="employees-header-actions">
+                    <button type="button" class="btn-employee-action" id="btn-create-employee">
+                        <i class="fas fa-user-plus"></i>
+                        Create Employee
+                    </button>
+                    <button type="button" class="btn-employee-action btn-secondary-action" id="btn-create-position">
+                        <i class="fas fa-briefcase"></i>
+                        Create Position
+                    </button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid employees-grid">
+                <!-- Current Employees Section -->
+                <section class="dashboard-card employees-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-users"></i> Current Employees</h2>
+                        <div class="card-header-right">
+                            <label class="employee-sort-label">
+                                Sort by hours:
+                                <select id="employee-sort-select">
+                                    <option value="asc">Least to greatest</option>
+                                    <option value="desc">Greatest to least</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="shift-list">
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">R</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Rohan</span>
+                                        <span class="employee-role">Server</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">K</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Kenny</span>
+                                        <span class="employee-role">Server</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">N</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Natalie</span>
+                                        <span class="employee-role">Server</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">M</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Meagan</span>
+                                        <span class="employee-role">Dishwasher</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">J</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Josh</span>
+                                        <span class="employee-role">Dessert</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">B</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Ben</span>
+                                        <span class="employee-role">Hot Foods</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">J</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Justin</span>
+                                        <span class="employee-role">MOD</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">H</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Hannah</span>
+                                        <span class="employee-role">Cold Foods</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">G</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Gary</span>
+                                        <span class="employee-role">Expo</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status online">
+                                    <i class="fas fa-circle"></i>
+                                    On shift
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">J</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Jake</span>
+                                        <span class="employee-role">Dish</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">S</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Sam</span>
+                                        <span class="employee-role">Line Cook</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">S</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Sophia</span>
+                                        <span class="employee-role">Prep</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">A</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Aria</span>
+                                        <span class="employee-role">Line Cook</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">A</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Alex</span>
+                                        <span class="employee-role">Line Cook</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">S</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Sarah</span>
+                                        <span class="employee-role">Prep</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">T</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Tyler</span>
+                                        <span class="employee-role">Dessert</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                            <div class="shift-item">
+                                <div class="employee-info">
+                                    <div class="employee-avatar">M</div>
+                                    <div class="employee-details">
+                                        <span class="employee-name">Martha</span>
+                                        <span class="employee-role">Prep</span>
+                                    </div>
+                                </div>
+                                <div class="shift-status offline">
+                                    <i class="fas fa-circle"></i>
+                                    Off
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Employee Requests Section -->
+                <section class="dashboard-card notifications-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-bell"></i> Employee Requests</h2>
+                        <span class="card-badge employees-requests-badge" id="employees-requests-badge" style="display:none;">0</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="notification-list" id="employees-notification-list">
+                            <div class="notif-empty-state"><i class="fas fa-check-circle"></i> No pending requests. Manage shift requests on the Scheduling page.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Positions Section -->
+                <section class="dashboard-card positions-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-briefcase"></i> Positions</h2>
+                        <span class="card-badge">11 Total</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="positions-list">
+                            <div class="position-item" data-position="Server">
+                                <div class="position-icon">
+                                    <i class="fas fa-utensils"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Server</span>
+                                    <span class="position-count">3 employees</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Line Cook">
+                                <div class="position-icon">
+                                    <i class="fas fa-fire"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Line Cook</span>
+                                    <span class="position-count">4 employees</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Dishwasher">
+                                <div class="position-icon">
+                                    <i class="fas fa-spray-can"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Dishwasher</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Dessert">
+                                <div class="position-icon">
+                                    <i class="fas fa-cookie-bite"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Dessert</span>
+                                    <span class="position-count">2 employees</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Hot Foods">
+                                <div class="position-icon">
+                                    <i class="fas fa-thermometer-half"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Hot Foods</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Cold Foods">
+                                <div class="position-icon">
+                                    <i class="fas fa-snowflake"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Cold Foods</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="MOD">
+                                <div class="position-icon">
+                                    <i class="fas fa-user-shield"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">MOD</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Expo">
+                                <div class="position-icon">
+                                    <i class="fas fa-clipboard-check"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Expo</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Dish">
+                                <div class="position-icon">
+                                    <i class="fas fa-drumstick-bite"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Dish</span>
+                                    <span class="position-count">1 employee</span>
+                                    <span class="position-names" style="display:none;"></span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="Prep">
+                                <div class="position-icon">
+                                    <i class="fas fa-cut"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">Prep</span>
+                                    <span class="position-count">3 employees</span>
+                                </div>
+                            </div>
+                            <div class="position-item" data-position="FOH Manager">
+                                <div class="position-icon">
+                                    <i class="fas fa-user-tie"></i>
+                                </div>
+                                <div class="position-info">
+                                    <span class="position-name">FOH Manager</span>
+                                    <span class="position-count">1 employee</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create Employee Modal -->
+    <div class="modal-overlay" id="create-employee-modal">
+        <div class="modal modal-employee">
+            <div class="modal-header">
+                <h3>Create New Employee</h3>
+                <button type="button" class="modal-close" id="close-create-employee" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="employee-full-name">Full name</label>
+                    <input type="text" id="employee-full-name" class="form-control" placeholder="e.g. Jamie Smith">
+                </div>
+                <div class="form-group">
+                    <label for="employee-email">Email (for login invites)</label>
+                    <input type="email" id="employee-email" class="form-control" placeholder="e.g. jamie@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="employee-phone">Phone number</label>
+                    <input type="tel" id="employee-phone" class="form-control" placeholder="e.g. (555) 123-4567">
+                </div>
+                <div class="form-group">
+                    <label>Compensation Type</label>
+                    <div class="compensation-type-group">
+                        <label class="radio-label">
+                            <input type="radio" name="employee-compensation-type" value="hourly" checked>
+                            <span>Hourly</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="employee-compensation-type" value="salary">
+                            <span>Salary</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Positions <span style="font-weight:400;color:#a0aec0;">(select all that apply)</span></label>
+                    <div class="position-checkboxes" id="employee-position-checkboxes">
+                        <!-- Populated by JS when modal opens -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Manager / Web admin</label>
+                    <label class="radio-label" style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+                        <input type="checkbox" id="employee-is-manager">
+                        <span>Allow this employee to access the web admin dashboard</span>
+                    </label>
+                    <p style="font-size:11px;color:#a0aec0;margin-top:4px;">
+                        This requires a matching Supabase auth user for their name/email.
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-create-employee">Cancel</button>
+                <button type="button" class="btn-primary" id="submit-create-employee">
+                    <i class="fas fa-check"></i>
+                    Create Employee
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Position Modal -->
+    <div class="modal-overlay" id="create-position-modal">
+        <div class="modal modal-employee">
+            <div class="modal-header">
+                <h3>Create New Position</h3>
+                <button type="button" class="modal-close" id="close-create-position" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="position-name">Position name</label>
+                    <input type="text" id="position-name" class="form-control" placeholder="e.g. Expo Lead">
+                </div>
+                <div class="form-group">
+                    <label for="position-responsibilities">Responsibilities</label>
+                    <textarea id="position-responsibilities" class="form-control" rows="3" placeholder="Briefly describe the key responsibilities"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-create-position">Cancel</button>
+                <button type="button" class="btn-primary" id="submit-create-position">
+                    <i class="fas fa-check"></i>
+                    Create Position
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Detail Modal -->
+    <div class="modal-overlay" id="position-detail-modal">
+        <div class="modal modal-employee">
+            <div class="modal-header">
+                <h3 id="position-detail-title">Position Details</h3>
+                <button type="button" class="modal-close" id="close-position-detail" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Employees with this position</label>
+                    <div class="position-employees-list" id="position-employees-list">
+                        <!-- Will be populated dynamically -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="position-detail-responsibilities">Responsibilities</label>
+                    <textarea id="position-detail-responsibilities" class="form-control" rows="5" placeholder="Enter responsibilities for this position..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-position-detail">Cancel</button>
+                <button type="button" class="btn-primary" id="save-position-detail">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Employee Positions Modal -->
+    <div class="modal-overlay" id="edit-positions-modal">
+        <div class="modal modal-employee">
+            <div class="modal-header">
+                <h3>Positions — <span id="edit-positions-employee-name"></span></h3>
+                <button type="button" class="modal-close" id="close-edit-positions" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Positions this employee is qualified for</label>
+                    <div class="position-checkboxes" id="edit-position-checkboxes">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Manager / Web admin</label>
+                    <label class="radio-label" style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+                        <input type="checkbox" id="edit-employee-is-manager">
+                        <span>Allow this employee to access the web admin dashboard</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-edit-positions">Cancel</button>
+                <button type="button" class="btn-primary" id="submit-edit-positions">
+                    <i class="fas fa-check"></i> Save Positions
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="script.js"></script>
+    <script src="employees.js"></script>
+</body>
+</html>

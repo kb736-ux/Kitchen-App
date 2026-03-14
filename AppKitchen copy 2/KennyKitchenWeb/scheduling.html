@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Schedular</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="scheduling.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" data-tab="home" onclick="window.location.href='index.html'">
+                    <i class="fas fa-home"></i>
+                    Home
+                </button>
+                <button class="nav-tab active" data-tab="scheduling">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scheduling
+                </button>
+                <button class="nav-tab" data-tab="employees" onclick="window.location.href='employees.html'">
+                    <i class="fas fa-users"></i>
+                    Employees
+                </button>
+                <button class="nav-tab" data-tab="recipes" onclick="window.location.href='recipes.html'">
+                    <i class="fas fa-book"></i>
+                    Recipes
+                </button>
+                <button class="nav-tab" data-tab="inventory" onclick="window.location.href='inventory.html'">
+                    <i class="fas fa-boxes"></i>
+                    Inventory
+                </button>
+                <button class="nav-tab" data-tab="chat" onclick="window.location.href='chat.html'">
+                    <i class="fas fa-comments"></i>
+                    Chat
+                </button>
+            </div>
+            <div class="nav-user">
+                <div class="notification-bell" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
+                </div>
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Scheduling Content -->
+        <main class="dashboard-main">
+            <div class="scheduling-header">
+                <h1>Schedular</h1>
+                <div class="header-actions">
+                    <button class="btn-secondary" id="calendar-history-btn" type="button">
+                        <i class="fas fa-history"></i>
+                        Calendar / History
+                    </button>
+                    <button class="btn-secondary" id="shift-requests-btn" type="button"
+                        onclick="openShiftRequestsPanel()"
+                        style="position:relative;">
+                        <i class="fas fa-inbox"></i>
+                        Shift Requests
+                        <span id="requests-badge" style="
+                            display:none;position:absolute;top:-6px;right:-6px;
+                            background:#e53e3e;color:white;border-radius:50%;
+                            width:18px;height:18px;font-size:11px;font-weight:700;
+                            line-height:18px;text-align:center;">0</span>
+                    </button>
+                    <button class="btn-primary" id="assign-shift-btn">
+                        <i class="fas fa-plus"></i>
+                        Assign Shift
+                    </button>
+                    <button class="btn-secondary" id="create-position-btn">
+                        <i class="fas fa-briefcase"></i>
+                        Create Position
+                    </button>
+                </div>
+            </div>
+
+            <!-- Week Navigation -->
+            <div class="week-navigation">
+                <button class="week-nav-btn" id="prev-week">
+                    <i class="fas fa-chevron-left"></i>
+                    Previous
+                </button>
+                <div class="week-display">
+                    <h2 id="current-week">Week of Jan 3 - Jan 10</h2>
+                </div>
+                <button class="week-nav-btn" id="next-week">
+                    Next
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+
+            <!-- Schedule Grid -->
+            <div class="schedule-container">
+                <div class="schedule-grid">
+                    <!-- Day Headers (dates populated by JS) -->
+                    <div class="day-header" data-day="monday">Monday</div>
+                    <div class="day-header" data-day="tuesday">Tuesday</div>
+                    <div class="day-header" data-day="wednesday">Wednesday</div>
+                    <div class="day-header" data-day="thursday">Thursday</div>
+                    <div class="day-header" data-day="friday">Friday</div>
+                    <div class="day-header" data-day="saturday">Saturday</div>
+                    <div class="day-header" data-day="sunday">Sunday</div>
+
+                    <!-- Monday Shifts -->
+                    <div class="day-column" data-day="monday">
+                        <button class="day-add-btn" title="Add Shift for Monday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+
+                    <!-- Tuesday - Sunday (Empty for now) -->
+                    <div class="day-column" data-day="tuesday">
+                        <button class="day-add-btn" title="Add Shift for Tuesday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                    
+                    <div class="day-column" data-day="wednesday">
+                        <button class="day-add-btn" title="Add Shift for Wednesday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                    
+                    <div class="day-column" data-day="thursday">
+                        <button class="day-add-btn" title="Add Shift for Thursday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                    
+                    <div class="day-column" data-day="friday">
+                        <button class="day-add-btn" title="Add Shift for Friday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                    
+                    <div class="day-column" data-day="saturday">
+                        <button class="day-add-btn" title="Add Shift for Saturday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                    
+                    <div class="day-column" data-day="sunday">
+                        <button class="day-add-btn" title="Add Shift for Sunday">
+                            <i class="fas fa-plus"></i> Add Shift
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Announcements Panel (hidden by default; click FAB to open) -->
+    <div id="announcements-panel" style="
+        display: none;
+        position: fixed; bottom: 24px; right: 24px; width: 320px;
+        background: white; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        border: 1px solid #e2e8f0; z-index: 900; overflow: hidden;">
+        <div style="background: #fffbeb; border-bottom: 1px solid #f6e05e; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-megaphone" style="color:#d97706;font-size:14px;"></i>
+                <span style="font-weight:700;font-size:14px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Announcements</span>
+            </div>
+            <button onclick="document.getElementById('announcements-panel').style.display='none';document.getElementById('announcements-fab').style.display='flex';"
+                style="background:none;border:none;cursor:pointer;color:#a0aec0;font-size:18px;line-height:1;">×</button>
+        </div>
+        <div style="padding: 14px 16px;">
+            <div style="margin-bottom:12px;">
+                <textarea id="announcement-input" placeholder="Type an announcement for all staff…"
+                    style="width:100%;box-sizing:border-box;border:1.5px solid #d97706;border-radius:8px;
+                           padding:10px 12px;font-size:13px;resize:none;height:70px;font-family:inherit;
+                           color:#2d3748;background:#fffdf5;outline:none;">
+                </textarea>
+                <button onclick="postAnnouncement()" style="
+                    margin-top:8px;width:100%;background:#4CAF50;color:white;border:none;
+                    border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
+                    Post Announcement
+                </button>
+            </div>
+            <div id="recent-announcements" style="max-height:160px;overflow-y:auto;">
+                <p style="font-size:12px;color:#a0aec0;text-align:center;margin:8px 0;">Loading…</p>
+            </div>
+        </div>
+    </div>
+    <button onclick="document.getElementById('announcements-panel').style.display='block';document.getElementById('announcements-fab').style.display='none';"
+        id="announcements-fab"
+        style="display:flex;position:fixed;bottom:24px;right:24px;width:48px;height:48px;
+               background:#d97706;color:white;border:none;border-radius:50%;cursor:pointer;
+               font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:900;align-items:center;justify-content:center;">
+        <i class="fas fa-megaphone"></i>
+    </button>
+
+    <!-- Shift Requests Modal -->
+    <div class="modal-overlay" id="shift-requests-modal">
+        <div class="modal" style="max-width:600px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-inbox" style="margin-right:8px;color:#4CAF50;"></i>Shift Requests</h3>
+                <button class="modal-close" onclick="closeModal('shift-requests-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="shift-requests-list" style="min-height:80px;">
+                    <p style="color:#a0aec0;text-align:center;padding:20px 0;">Loading requests…</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assign Shift Modal -->
+    <div class="modal-overlay" id="assign-shift-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Assign New Shift</h3>
+                <button class="modal-close" onclick="closeModal('assign-shift-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="employee-select">Employee</label>
+                    <select id="employee-select" class="form-control">
+                        <option value="">Select Employee</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="position-select">Position</label>
+                    <select id="position-select" class="form-control">
+                        <option value="">Select Position</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="start-time">Start Time</label>
+                        <input type="time" id="start-time" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="end-time">End Time</label>
+                        <input type="time" id="end-time" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group" id="day-select-group">
+                    <label for="day-select">Day</label>
+                    <select id="day-select" class="form-control">
+                        <option value="monday">Monday</option>
+                        <option value="tuesday">Tuesday</option>
+                        <option value="wednesday">Wednesday</option>
+                        <option value="thursday">Thursday</option>
+                        <option value="friday">Friday</option>
+                        <option value="saturday">Saturday</option>
+                        <option value="sunday">Sunday</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <p id="assign-shift-past-day-msg" class="assign-shift-past-day-msg" style="display: none;">This day is in the past. Shifts cannot be assigned to past days.</p>
+                <button class="btn-secondary" onclick="closeModal('assign-shift-modal')">Cancel</button>
+                <button class="btn-primary" id="assign-shift-confirm-btn" onclick="assignShift()">Assign Shift</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assign Task Modal (used by recipes.js recipe assignment flow) -->
+    <div class="modal-overlay" id="assign-task-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="assign-task-title">Assign Task</h3>
+                <button class="modal-close" onclick="closeModal('assign-task-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="task-employee-select">Employee</label>
+                    <select id="task-employee-select" class="form-control">
+                        <option value="">Select Employee</option>
+                    </select>
+                </div>
+                <div class="form-group" id="existing-tasks-group" style="display: none;">
+                    <label><i class="fas fa-list-check"></i> Currently Assigned Tasks</label>
+                    <div id="existing-tasks-list" class="existing-tasks-container">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Add New Tasks</label>
+                    <div id="task-list" class="task-list"></div>
+                    <button type="button" class="btn-add-task" id="add-task-row">
+                        <i class="fas fa-plus-circle"></i>
+                        Add another task
+                    </button>
+                </div>
+                <div class="form-group">
+                    <label>Or select from active recipes:</label>
+                    <div id="active-recipes-list" class="recipes-select-list"></div>
+                </div>
+                <div class="form-group">
+                    <label>Or select from common tasks:</label>
+                    <div class="common-tasks-list">
+                        <button type="button" class="task-option-btn" data-task="Prep vegetables">Prep vegetables</button>
+                        <button type="button" class="task-option-btn" data-task="Clean station">Clean station</button>
+                        <button type="button" class="task-option-btn" data-task="Restock supplies">Restock supplies</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('assign-task-modal')">Cancel</button>
+                <button class="btn-primary" onclick="assignTask()">Assign Task</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combined Edit Shift & Assign Task Modal -->
+    <div class="modal-overlay" id="shift-details-modal">
+        <div class="modal shift-details-modal">
+            <div class="modal-header">
+                <h3 id="shift-details-title"><i class="fas fa-user-clock"></i> Shift & Tasks</h3>
+                <button class="modal-close" onclick="closeModal('shift-details-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="shift-details-section">
+                    <h4 class="shift-details-section-title"><i class="fas fa-clock"></i> Edit Shift</h4>
+                    <div class="form-group">
+                        <label>Employee</label>
+                        <input type="text" id="shift-details-employee" class="form-control" readonly style="background:#f7fafc;">
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-details-position">Position</label>
+                        <select id="shift-details-position" class="form-control">
+                            <option value="line-cook">Line Cook</option>
+                            <option value="server">Server</option>
+                            <option value="dish">Dish</option>
+                            <option value="prep">Prep</option>
+                            <option value="foh-manager">FOH Manager</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="shift-details-start">Start Time</label>
+                            <input type="time" id="shift-details-start" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="shift-details-end">End Time</label>
+                            <input type="time" id="shift-details-end" class="form-control">
+                        </div>
+                    </div>
+                </div>
+                <div class="shift-details-divider"></div>
+                <div class="shift-details-section">
+                    <h4 class="shift-details-section-title"><i class="fas fa-clipboard-list"></i> Assign Tasks</h4>
+                    <div class="form-group" id="shift-details-existing-tasks-group" style="display: none;">
+                        <label><i class="fas fa-list-check"></i> Currently Assigned Tasks</label>
+                        <div id="shift-details-existing-tasks-list" class="existing-tasks-container"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Add New Tasks</label>
+                        <div id="shift-details-task-list" class="task-list"></div>
+                        <button type="button" class="btn-add-task" id="shift-details-add-task-row">
+                            <i class="fas fa-plus-circle"></i>
+                            Add another task
+                        </button>
+                    </div>
+                    <div class="form-group">
+                        <label>Or select from active recipes:</label>
+                        <div id="shift-details-active-recipes" class="recipes-select-list"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Or select from common tasks:</label>
+                        <div class="common-tasks-list">
+                            <button type="button" class="task-option-btn" data-task="Prep vegetables">Prep vegetables</button>
+                            <button type="button" class="task-option-btn" data-task="Clean station">Clean station</button>
+                            <button type="button" class="task-option-btn" data-task="Restock supplies">Restock supplies</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button class="btn-secondary" id="shift-details-delete-btn" style="background:#fff5f5;color:#e53e3e;border-color:#fc8181;">
+                    <i class="fas fa-trash"></i> Delete Shift
+                </button>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn-secondary" onclick="closeModal('shift-details-modal')">Cancel</button>
+                    <button class="btn-primary" id="shift-details-save-btn">
+                        <i class="fas fa-check"></i> Save & Assign
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overtime Warning Modal -->
+    <div class="modal-overlay" id="overtime-warning-modal">
+        <div class="modal">
+            <div class="modal-header" style="background: linear-gradient(135deg, #fed7d7, #fc8181);">
+                <h3 style="color: #742a2a;"><i class="fas fa-exclamation-triangle"></i> Overtime Warning</h3>
+                <button class="modal-close" onclick="closeModal('overtime-warning-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="padding: 1rem; background: #fff5f5; border-radius: 8px; margin-bottom: 1rem;">
+                    <p id="overtime-warning-text" style="margin: 0; color: #742a2a; font-weight: 600;"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="confirm-overtime-btn" style="background: #e53e3e;">
+                    <i class="fas fa-check"></i> Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar / History View Modal -->
+    <div class="modal-overlay" id="calendar-history-modal">
+        <div class="modal calendar-history-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-calendar-alt"></i> Schedule History</h3>
+                <button class="modal-close" onclick="closeModal('calendar-history-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="calendar-month-nav">
+                    <button type="button" class="calendar-nav-btn" id="calendar-prev-month" aria-label="Previous month">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <h4 id="calendar-month-title" class="calendar-month-title">February 2025</h4>
+                    <button type="button" class="calendar-nav-btn" id="calendar-next-month" aria-label="Next month">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                <div id="calendar-grid-wrap" class="calendar-grid-wrap">
+                    <!-- Calendar grid filled by JS -->
+                </div>
+                <div id="calendar-day-popup" class="calendar-day-popup" hidden>
+                    <div class="calendar-day-popup-header">
+                        <span id="calendar-day-popup-title"></span>
+                        <button type="button" class="calendar-day-popup-close" id="calendar-day-popup-close" aria-label="Close">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="calendar-day-popup-content" class="calendar-day-popup-content">
+                        <!-- Employees list filled by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipe Assignment Options Modal -->
+    <div class="modal-overlay" id="recipe-assignment-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="recipe-assignment-title">Assign Recipe</h3>
+                <button class="modal-close" onclick="closeModal('recipe-assignment-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p id="recipe-assignment-text">What would you like to assign?</p>
+                <div class="form-group" style="margin-bottom:1rem;">
+                    <label for="recipe-assignment-qty">Quantity (portions)</label>
+                    <input type="number" id="recipe-assignment-qty" class="form-control" min="1" value="1" style="max-width:100px;">
+                </div>
+                <div class="recipe-assignment-options">
+                    <button type="button" class="recipe-option-btn" id="assign-prep-only">
+                        <i class="fas fa-boxes"></i>
+                        Kit
+                    </button>
+                    <button type="button" class="recipe-option-btn" id="assign-active-only">
+                        <i class="fas fa-fire"></i>
+                        Make
+                    </button>
+                    <button type="button" class="recipe-option-btn" id="assign-both">
+                        <i class="fas fa-tasks"></i>
+                        Both
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('recipe-assignment-modal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="employees.js"></script>
+    <script src="script.js"></script>
+    <script src="recipes.js"></script>
+    <script src="scheduling.js"></script>
+</body>
+</html>

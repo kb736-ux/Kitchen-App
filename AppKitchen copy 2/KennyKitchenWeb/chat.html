@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenny Kitchen - Chat</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="chat.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Kenny Kitchen</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" data-tab="home" onclick="window.location.href='index.html'">
+                    <i class="fas fa-home"></i>
+                    Home
+                </button>
+                <button class="nav-tab" data-tab="scheduling" onclick="window.location.href='scheduling.html'">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scheduling
+                </button>
+                <button class="nav-tab" data-tab="employees" onclick="window.location.href='employees.html'">
+                    <i class="fas fa-users"></i>
+                    Employees
+                </button>
+                <button class="nav-tab" data-tab="recipes" onclick="window.location.href='recipes.html'">
+                    <i class="fas fa-book"></i>
+                    Recipes
+                </button>
+                <button class="nav-tab" data-tab="inventory" onclick="window.location.href='inventory.html'">
+                    <i class="fas fa-boxes"></i>
+                    Inventory
+                </button>
+                <button class="nav-tab active" data-tab="chat">
+                    <i class="fas fa-comments"></i>
+                    Chat
+                </button>
+            </div>
+            <div class="nav-user">
+                <div class="notification-bell" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
+                </div>
+                <div class="user-profile">
+                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Chat Content -->
+        <main class="dashboard-main chat-main">
+            <div class="chat-layout">
+                <!-- Sidebar: Conversations List -->
+                <aside class="chat-sidebar">
+                    <div class="chat-sidebar-header">
+                        <h2>Chats</h2>
+                        <div class="chat-actions">
+                            <button type="button" class="btn-chat-action" id="btn-new-message" title="New Message">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <button type="button" class="btn-chat-action btn-manager-only" id="btn-create-group" title="Create Group Chat" style="display: none;">
+                                <i class="fas fa-users"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="conversations-list">
+                        <div class="conversation-item active" data-chat-type="announcements">
+                            <i class="fas fa-bullhorn"></i>
+                            <div class="conversation-info">
+                                <span class="conversation-name">Announcements</span>
+                                <span class="conversation-preview">8 messages</span>
+                            </div>
+                        </div>
+                        <div class="conversation-item" data-chat-type="dm" data-chat-id="dm-rohan">
+                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face" alt="Rohan" class="conversation-avatar">
+                            <div class="conversation-info">
+                                <span class="conversation-name">Rohan</span>
+                                <span class="conversation-preview">Hey, can you cover my shift?</span>
+                            </div>
+                        </div>
+                        <div class="conversation-item" data-chat-type="dm" data-chat-id="dm-natalie">
+                            <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=40&h=40&fit=crop&crop=face" alt="Natalie" class="conversation-avatar">
+                            <div class="conversation-info">
+                                <span class="conversation-name">Natalie</span>
+                                <span class="conversation-preview">Thanks for the help!</span>
+                            </div>
+                        </div>
+                        <div class="conversation-item" data-chat-type="group" data-chat-id="group-kitchen">
+                            <i class="fas fa-users"></i>
+                            <div class="conversation-info">
+                                <span class="conversation-name">Kitchen Team</span>
+                                <span class="conversation-preview">Ben: Prep list updated</span>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Main Chat Area -->
+                <div class="chat-main-area">
+                    <div class="chat-card">
+                        <div class="chat-header">
+                            <h2 id="chat-title"><i class="fas fa-bullhorn"></i> Announcements</h2>
+                        </div>
+                        <div class="chat-thread" id="chat-thread">
+                            <!-- Announcements thread (default) - oldest first, newest at bottom -->
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1560250097-0b93528c311a?w=96&h=96&fit=crop&crop=face" alt="Gary" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Gary</span>
+                                        <p class="chat-text">Welcome to the team, new hires!</p>
+                                        <span class="chat-time">1 week ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=96&h=96&fit=crop&crop=face" alt="Meagan" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Meagan</span>
+                                        <p class="chat-text">Dishwasher is running smoothly today</p>
+                                        <span class="chat-time">1 week ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=96&h=96&fit=crop&crop=face" alt="Ben" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Ben</span>
+                                        <p class="chat-text">Hot foods station needs cleaning supplies restocked</p>
+                                        <span class="chat-time">5 days ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=96&h=96&fit=crop&crop=face" alt="Hannah" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Hannah</span>
+                                        <p class="chat-text">Cold storage inventory updated</p>
+                                        <span class="chat-time">4 days ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=96&h=96&fit=crop&crop=face" alt="Justin" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Justin</span>
+                                        <p class="chat-text">Please remember to clock in/out properly</p>
+                                        <span class="chat-time">3 days ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=96&h=96&fit=crop&crop=face" alt="Rohan" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Rohan</span>
+                                        <p class="chat-text">New menu items added to the prep list</p>
+                                        <span class="chat-time">2 days ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=96&h=96&fit=crop&crop=face" alt="Kenny" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Kenny</span>
+                                        <p class="chat-text">Reminder: Team meeting tomorrow at 2pm</p>
+                                        <span class="chat-time">1 day ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-message">
+                                <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=96&h=96&fit=crop&crop=face" alt="Natalie" class="chat-avatar">
+                                <div class="chat-bubble-wrap">
+                                    <div class="chat-bubble">
+                                        <span class="chat-sender">Natalie</span>
+                                        <p class="chat-text">Has someone seen my scarf?</p>
+                                        <span class="chat-time">6 hours ago</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="chat-input-wrap">
+                                <input type="text" id="chat-message-input" class="chat-input" placeholder="Type here..." autocomplete="off">
+                                <button type="button" class="chat-send-btn" id="chat-send-btn" title="Send message">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- New Message Modal (Direct Message) -->
+    <div class="modal-overlay" id="new-message-modal">
+        <div class="modal modal-chat">
+            <div class="modal-header">
+                <h3>New Message</h3>
+                <button type="button" class="modal-close" id="close-new-message" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="dm-recipient">To</label>
+                    <select id="dm-recipient" class="form-control">
+                        <option value="">Select recipient...</option>
+                        <option value="rohan">Rohan</option>
+                        <option value="kenny">Kenny</option>
+                        <option value="natalie">Natalie</option>
+                        <option value="meagan">Meagan</option>
+                        <option value="josh">Josh</option>
+                        <option value="ben">Ben</option>
+                        <option value="justin">Justin</option>
+                        <option value="hannah">Hannah</option>
+                        <option value="gary">Gary</option>
+                        <option value="jake">Jake</option>
+                        <option value="sam">Sam</option>
+                        <option value="sophia">Sophia</option>
+                        <option value="aria">Aria</option>
+                        <option value="alex">Alex</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="dm-message">Message</label>
+                    <textarea id="dm-message" class="form-control" rows="4" placeholder="Type your message..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-new-message">Cancel</button>
+                <button type="button" class="btn-primary" id="send-dm">
+                    <i class="fas fa-paper-plane"></i> Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Group Chat Modal (Managers Only) -->
+    <div class="modal-overlay" id="create-group-modal">
+        <div class="modal modal-chat">
+            <div class="modal-header">
+                <h3>Create Group Chat</h3>
+                <button type="button" class="modal-close" id="close-create-group" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="group-name">Group name</label>
+                    <input type="text" id="group-name" class="form-control" placeholder="e.g. Kitchen Team">
+                </div>
+                <div class="form-group">
+                    <label>Select members</label>
+                    <div class="member-select-list">
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="rohan">
+                            <span>Rohan</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="kenny">
+                            <span>Kenny</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="natalie">
+                            <span>Natalie</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="meagan">
+                            <span>Meagan</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="josh">
+                            <span>Josh</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="ben">
+                            <span>Ben</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="justin">
+                            <span>Justin</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="hannah">
+                            <span>Hannah</span>
+                        </label>
+                        <label class="member-checkbox">
+                            <input type="checkbox" value="gary">
+                            <span>Gary</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-create-group">Cancel</button>
+                <button type="button" class="btn-primary" id="create-group">
+                    <i class="fas fa-check"></i> Create Group
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="adminSettings.js"></script>
+    <script src="script.js"></script>
+    <script src="chat.js"></script>
+</body>
+</html>
