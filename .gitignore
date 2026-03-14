@@ -1,5 +1,7 @@
-# Dependencies
+# Dependencies (large)
 node_modules/
+bower_components/
+jspm_packages/
 
 # Expo / React Native
 .expo/
@@ -7,31 +9,80 @@ dist/
 web-build/
 expo-env.d.ts
 .metro-health-check*
+*.hprof
 
-# Native (optional — uncomment if you don't commit native folders)
-# .kotlin/
-# /ios
-# /android
+# Native build outputs (large)
+.ktlint/
+.kotlin/
+ios/
+android/
+*.xcworkspace
+*.xcodeproj
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
 *.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.keystore
+*.apk
+*.aab
+*.ipa
+*.dSYM.zip
+*.dSYM
 
-# Debug
+# Build / bundler
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+
+# Logs & debug (can be large)
+logs/
+*.log
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log.*
+
+# Testing / coverage (large)
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
 # macOS
 .DS_Store
 *.pem
 __MACOSX/
+.AppleDouble
+.LSOverride
 
 # Local env / secrets
 .env
 .env*.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# TypeScript
-*.tsbuildinfo
+# Large media / assets (optional — uncomment if you don’t want to track)
+# *.mp4
+# *.mov
+# *.zip
+# *.tar.gz
+# *.tgz
