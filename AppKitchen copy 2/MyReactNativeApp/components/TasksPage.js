@@ -170,12 +170,17 @@ const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShi
         <Text style={styles.dateText}>{getCurrentDate()}</Text>
         
         {/* Title */}
-        <Text style={styles.title}>Kenny's Tasks</Text>
+        <Text style={styles.title}>My tasks</Text>
 
         {/* Tasks List */}
         <View style={styles.tasksList}>
+          {!todayIsShift && tasks.length === 0 && (
+            <Text style={styles.offShiftTasksHint}>
+              You're not scheduled today. Your task list appears on days you have a shift.
+            </Text>
+          )}
           {/* Hint */}
-          {tasks.some(t => !t.completed) && (
+          {todayIsShift && tasks.some(t => !t.completed) && (
             <Text style={styles.swipeHint}>Swipe right to reveal, then tap to mark urgent</Text>
           )}
           {tasks.map((task) => {
@@ -385,6 +390,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
     fontStyle: 'italic',
+  },
+  offShiftTasksHint: {
+    fontSize: 14,
+    color: '#718096',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+    paddingHorizontal: 8,
   },
   taskItem: {
     flexDirection: 'row',

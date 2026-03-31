@@ -2,15 +2,110 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useEmployee } from './EmployeeContext';
-import { supabase, ORG_ID } from './utils/supabase';
+import { supabase, getOrgId } from './utils/supabase';
 import * as SecureStore from 'expo-secure-store';
 
 function resolveFromProfile(profileData, email) {
   const localPart = (email || '').split('@')[0];
-  if (!profileData) return { employeeName: localPart, displayName: localPart };
-  const employeeName = (profileData.employee_name || '').trim() || (profileData.display_name || '').trim() || localPart;
-  const displayName = (profileData.display_name || '').trim() || (profileData.employee_name || '').trim() || localPart;
-  return { employeeName, displayName };
+  if (!profileData) return { employeeName: localPart, displayName: localPart, firstName: '', lastName: '' };
+  const first = (profileData.first_name || '').trim();
+  const last = (profileData.last_name || '').trim();
+  const combined = [first, last].filter(Boolean).join(' ').trim();
+  const profileDisplay = (profileData.display_name || '').trim();
+  const profileEmployee = (profileData.employee_name || '').trim();
+  const displayName = combined || profileDisplay || profileEmployee || localPart;
+  const employeeName = profileEmployee || profileDisplay || combined || localPart;
+  return { employeeName, displayName, firstName: first, lastName: last };
+}
+
+function pickBestProfile(rows, userEmail) {
+  const arr = Array.isArray(rows) ? rows.filter(Boolean) : (rows ? [rows] : []);
+  if (!arr.length) return null;
+  const local = (userEmail || '').split('@')[0].trim().toLowerCase();
+  const score = (r) => {
+    const dn = (r?.display_name || '').trim();
+    const en = (r?.employee_name || '').trim();
+    let s = 0;
+    if (dn) s += 20;
+    if (dn.includes(' ')) s += 15;
+    if (en) s += 10;
+    if (dn && dn.toLowerCase() === local) s -= 20;
+    if (en && en.toLowerCase() === local) s -= 12;
+    return s;
+  };
+  return arr.sort((a, b) => score(b) - score(a))[0] || arr[0];
+}
+
+async function loadBestProfile(userId, userEmail, orgId = null) {
+  const safe = async (query) => {
+    try {
+      const { data, error } = await query;
+      if (error) return null;
+      return data || null;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const profileCols = 'id, user_id, employee_name, display_name, first_name, last_name, email';
+  const [byOrgUserId, byOrgEmail, byUserIdAnyOrg, byIdAnyOrg, byEmailAnyOrg] = await Promise.all([
+    orgId && userId
+      ? safe(
+          supabase
+            .from('profiles')
+            .select(profileCols)
+            .eq('org_id', orgId)
+            .eq('user_id', userId)
+            .limit(5)
+        )
+      : Promise.resolve(null),
+    orgId && userEmail
+      ? safe(
+          supabase
+            .from('profiles')
+            .select(profileCols)
+            .eq('org_id', orgId)
+            .ilike('email', userEmail)
+            .limit(5)
+        )
+      : Promise.resolve(null),
+    userId
+      ? safe(
+          supabase
+            .from('profiles')
+            .select(profileCols)
+            .eq('user_id', userId)
+            .limit(5)
+        )
+      : Promise.resolve(null),
+    userId
+      ? safe(
+          supabase
+            .from('profiles')
+            .select(profileCols)
+            .eq('id', userId)
+            .limit(5)
+        )
+      : Promise.resolve(null),
+    userEmail
+      ? safe(
+          supabase
+            .from('profiles')
+            .select(profileCols)
+            .ilike('email', userEmail)
+            .limit(5)
+        )
+      : Promise.resolve(null),
+  ]);
+
+  return (
+    pickBestProfile(byOrgUserId, userEmail) ||
+    pickBestProfile(byOrgEmail, userEmail) ||
+    pickBestProfile(byUserIdAnyOrg, userEmail) ||
+    pickBestProfile(byIdAnyOrg, userEmail) ||
+    pickBestProfile(byEmailAnyOrg, userEmail) ||
+    null
+  );
 }
 
 export default function LoginScreen() {
@@ -56,40 +151,29 @@ export default function LoginScreen() {
       }
 
       const userEmail = authData?.user?.email || trimmed;
+      const userId = authData?.user?.id || null;
+      const userMetaName = (authData?.user?.user_metadata?.full_name || authData?.user?.user_metadata?.name || '').trim();
       // Remember this email for next time (device-local only)
       try {
         await SecureStore.setItemAsync('kk_last_email', userEmail);
       } catch (e) {
         console.warn('[Login] Could not save email:', e?.message);
       }
-      let employeeName = userEmail.split('@')[0];
-      let displayName = employeeName;
+      const localPart = userEmail.split('@')[0];
+      let employeeName = userMetaName || localPart;
+      let displayName = userMetaName || employeeName;
+      let employeeId = null;
 
-      if (ORG_ID) {
-        let { data: profile } = await supabase
-          .from('profiles')
-          .select('employee_name, display_name')
-          .eq('org_id', ORG_ID)
-          .eq('email', userEmail)
-          .maybeSingle();
+      const resolvedOrgId = await getOrgId();
+      const profile = await loadBestProfile(userId, userEmail, resolvedOrgId);
+      const resolved = resolveFromProfile(profile, userEmail);
+      employeeName = resolved.employeeName || employeeName;
+      displayName = resolved.displayName || displayName;
+      const firstName = resolved.firstName || '';
+      const lastName = resolved.lastName || '';
+      employeeId = profile?.id || null;
 
-        if (!profile) {
-          const { data: altProfile } = await supabase
-            .from('profiles')
-            .select('employee_name, display_name')
-            .eq('org_id', ORG_ID)
-            .ilike('employee_name', employeeName)
-            .limit(1)
-            .maybeSingle();
-          profile = altProfile;
-        }
-
-        const resolved = resolveFromProfile(profile, userEmail);
-        employeeName = resolved.employeeName;
-        displayName = resolved.displayName;
-      }
-
-      setIdentity({ email: userEmail, employeeName, displayName });
+      setIdentity({ email: userEmail, employeeName, displayName, firstName, lastName, employeeId });
     } catch (e) {
       console.warn('[Login] Error:', e.message);
       Alert.alert('Error', e.message || 'Something went wrong. Please try again.');
@@ -104,7 +188,7 @@ export default function LoginScreen() {
         <View style={styles.iconCircle}>
           <Ionicons name="person-circle" size={40} color="#4CAF50" />
         </View>
-        <Text style={styles.title}>Sign in to the kitchen</Text>
+        <Text style={styles.title}>Sign in to Sheek</Text>
         <Text style={styles.subtitle}>
           Sign in with your work email and password. You can change your display name in Profile.
         </Text>

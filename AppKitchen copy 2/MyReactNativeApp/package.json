@@ -1,9 +1,11 @@
 {
-  "name": "myreactnativeapp",
+  "name": "sheek",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "start:clear": "expo start --clear",
+    "start:tunnel": "expo start --tunnel --clear",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

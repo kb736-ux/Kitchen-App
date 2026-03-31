@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sheek — Run your restaurant team in one place</title>
+  <meta name="description" content="Sheek helps restaurants manage staff, schedules, tasks, recipes, and chat — from the floor to the back office." />
+  <link rel="canonical" href="https://sheekapp.com/" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="https://sheekapp.com/" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-dashboard href="#">Log in</a>
+        <a class="btn btn-primary" data-sheek-dashboard href="#">Onboard</a>
+        <button type="button" class="menu-toggle" aria-expanded="false" aria-label="Open menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+    <nav class="nav-mobile" hidden>
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#contact">Contact</a>
+      <a data-sheek-dashboard href="#">Log in</a>
+      <a class="btn btn-primary nav-mobile-cta" data-sheek-dashboard href="#">Onboard</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Built for busy restaurants</p>
+          <h1>Your team, schedules, and kitchen — <em>aligned</em>.</h1>
+          <p class="lead">
+            Sheek is the operations hub for managers and staff: dashboard, scheduling, employees,
+            recipes, inventory signals, and team chat — tied to your data in Supabase.
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary btn-lg" data-sheek-dashboard href="#">Get started</a>
+          </div>
+          <p class="hero-note">Web dashboard for managers · Mobile app for your crew</p>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="glass-card">
+            <div class="mock-row"><span class="dot green"></span> Today’s shifts</div>
+            <div class="mock-bar" style="width: 78%"></div>
+            <div class="mock-row muted">Tasks · Recipes · Messages</div>
+            <div class="mock-bar" style="width: 52%"></div>
+            <div class="mock-bar short" style="width: 36%"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section features">
+      <div class="wrap">
+        <h2 class="section-title">Everything in sync</h2>
+        <p class="section-sub">One place for the work that happens every service.</p>
+        <ul class="feature-grid">
+          <li class="feature-card">
+            <h3>Tasks &amp; progress</h3>
+            <p>Assign and track work from prep to close — visible on web and mobile.</p>
+          </li>
+          <li class="feature-card">
+            <h3>Scheduling</h3>
+            <p>Shifts, requests, and open shifts so the floor stays covered.</p>
+          </li>
+          <li class="feature-card">
+            <h3>Team roster</h3>
+            <p>Employees, roles, and invites — with plans that scale by headcount.</p>
+          </li>
+          <li class="feature-card">
+            <h3>Recipes &amp; dishes</h3>
+            <p>Keep your menu and production notes where managers already work.</p>
+          </li>
+          <li class="feature-card">
+            <h3>Inventory signals</h3>
+            <p>Connect completion and recipes to what’s on hand.</p>
+          </li>
+          <li class="feature-card">
+            <h3>Team chat</h3>
+            <p>Announcements and DMs so nobody misses the message.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="pricing" class="section pricing">
+      <div class="wrap">
+        <h2 class="section-title">Simple plans by team size</h2>
+        <p class="section-sub">Pick the tier that matches how many people you run on Sheek.</p>
+        <div class="pricing-grid">
+          <article class="price-card">
+            <h3>Starter</h3>
+            <p class="price-tag">Up to <strong>20</strong> employees</p>
+            <p class="price-tag"><strong>$30/mo</strong></p>
+            <p class="price-desc">Small teams, one location, full product access.</p>
+            <a class="btn btn-outline" data-sheek-dashboard href="#">Start with Starter</a>
+          </article>
+          <article class="price-card">
+            <h3>Growth</h3>
+            <p class="price-tag"><strong>21–40</strong> employees</p>
+            <p class="price-tag"><strong>$55/mo</strong></p>
+            <p class="price-desc">Busier operations with more roles and shifts to coordinate.</p>
+            <a class="btn btn-primary" data-sheek-dashboard href="#">Choose Growth</a>
+          </article>
+          <article class="price-card">
+            <h3>Scale</h3>
+            <p class="price-tag"><strong>41+</strong> employees</p>
+            <p class="price-tag"><strong>$90/mo</strong></p>
+            <p class="price-desc">Large crews and multi-shift depth — unlimited cap in-app.</p>
+            <a class="btn btn-outline" data-sheek-dashboard href="#">Choose Scale</a>
+          </article>
+        </div>
+        <p class="pricing-footnote">Connect Stripe or your billing provider when you’re ready — plans are enforced in the app today.</p>
+      </div>
+    </section>
+
+    <section id="contact" class="section cta-band">
+      <div class="wrap cta-inner">
+        <div>
+          <h2>Ready to try Sheek?</h2>
+          <p>Open the manager dashboard, create a restaurant, and invite your team.</p>
+        </div>
+        <a class="btn btn-light btn-lg" data-sheek-dashboard href="#">Open Sheek</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i> Sheek
+      </div>
+      <p class="footer-copy">&copy; <span id="y"></span> Sheek. Restaurant operations, simplified.</p>
+    </div>
+  </footer>
+
+  <script src="site-config.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

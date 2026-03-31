@@ -2,6 +2,82 @@
   let adminUser = null;
   let modalEl = null;
   let originalRestaurantName = null;
+  let pendingAvatarFile = null;
+  let currentAvatarUrl = '';
+
+  function getInitials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'U';
+    return parts.map(p => p[0]).join('').slice(0, 2).toUpperCase();
+  }
+
+  function buildInitialAvatarDataUrl(name) {
+    const initials = getInitials(name);
+    const svg =
+      `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>` +
+      `<rect width='100%' height='100%' rx='40' ry='40' fill='#e2e8f0'/>` +
+      `<text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' fill='#4a5568' font-family='Inter,Arial,sans-serif' font-size='28' font-weight='700'>${initials}</text>` +
+      `</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
+  function splitNameParts(value) {
+    const raw = (value || '').trim();
+    if (!raw) return { first: '', last: '' };
+    const parts = raw.split(/\s+/).filter(Boolean);
+    return {
+      first: parts[0] || '',
+      last: parts.slice(1).join(' '),
+    };
+  }
+
+  function applyNavAvatar(url) {
+    const src = (url || '').trim();
+    if (!src) return;
+    document.querySelectorAll('.nav-user .user-avatar').forEach((img) => {
+      img.src = src;
+    });
+  }
+
+  function pickBestProfileRow(rows, fallbackEmail = '') {
+    const arr = Array.isArray(rows) ? rows.filter(Boolean) : (rows ? [rows] : []);
+    if (!arr.length) return null;
+    const local = String(fallbackEmail || '').split('@')[0].trim().toLowerCase();
+    const score = (r) => {
+      const dn = String(r?.display_name || '').trim();
+      const en = String(r?.employee_name || '').trim();
+      const avatar = String(r?.avatar_url || '').trim();
+      let s = 0;
+      if (dn) s += 20;
+      if (dn.includes(' ')) s += 35;
+      if (avatar) s += 20;
+      if (en && en.toLowerCase() !== local) s += 10;
+      if (dn && dn.toLowerCase() !== local) s += 10;
+      if (dn && dn.toLowerCase() === local) s -= 25;
+      if (en && en.toLowerCase() === local) s -= 10;
+      return s;
+    };
+    return arr.sort((a, b) => score(b) - score(a))[0] || arr[0];
+  }
+
+  async function uploadAdminAvatar(file) {
+    if (!window.supabaseClient || !window.ORG_ID || !file) return null;
+    const emailKey = ((adminUser?.email || '').split('@')[0] || 'admin').replace(/[^a-z0-9_-]/gi, '_');
+    const userKey = (adminUser?.id || emailKey || 'admin').replace(/[^a-z0-9_-]/gi, '_');
+    const filePath = `${window.ORG_ID}/admins/${userKey}.jpg`;
+    const { error: upErr } = await window.supabaseClient.storage
+      .from('avatars')
+      .upload(filePath, file, {
+        contentType: file.type || 'image/jpeg',
+        upsert: true,
+      });
+    if (upErr) throw upErr;
+    const { data: pub } = window.supabaseClient.storage.from('avatars').getPublicUrl(filePath);
+    if (!pub?.publicUrl) {
+      throw new Error('Avatar uploaded but public URL was unavailable.');
+    }
+    return `${pub.publicUrl}?t=${Date.now()}`;
+  }
 
   function createSettingsModal() {
     if (modalEl) return modalEl;
@@ -36,6 +112,17 @@
       </div>
       <div id="admin-settings-error" style="display:none;margin-bottom:8px;padding:6px 9px;border-radius:8px;font-size:12px;background:#fef2f2;color:#b91c1c;"></div>
       <div id="admin-settings-success" style="display:none;margin-bottom:8px;padding:6px 9px;border-radius:8px;font-size:12px;background:#ecfdf5;color:#166534;"></div>
+      <div id="admin-subscription-block" style="border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin-bottom:14px;background:#fafafa;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Subscription plan</div>
+        <div id="admin-subscription-usage" style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.4;">—</div>
+        <label for="admin-subscription-plan" style="font-size:12px;font-weight:500;color:#374151;">Plan</label>
+        <select id="admin-subscription-plan" style="width:100%;margin-top:4px;border-radius:10px;border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;box-sizing:border-box;">
+          <option value="starter">Starter — up to 20 employees</option>
+          <option value="growth">Growth — 21–40 employees</option>
+          <option value="scale">Scale — 41+ employees</option>
+        </select>
+        <p style="font-size:11px;color:#9ca3af;margin:8px 0 0;line-height:1.35;">Limits are based on roster size (profiles in Supabase). Connect billing (e.g. Stripe) separately when you&apos;re ready.</p>
+      </div>
       <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px;">
         <div style="display:flex;gap:10px;">
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
@@ -45,6 +132,18 @@
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
             <label for="admin-last-name" style="font-size:12px;font-weight:500;color:#374151;">Last name</label>
             <input id="admin-last-name" type="text" style="border-radius:10px;border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;" />
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+          <img id="admin-avatar-preview" src="" alt="Profile photo"
+            style="width:56px;height:56px;border-radius:999px;object-fit:cover;border:2px solid #e5e7eb;" />
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <label style="font-size:12px;font-weight:500;color:#374151;">Profile photo</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="admin-avatar-file" type="file" accept="image/*" style="display:none;" />
+              <button id="admin-avatar-pick" type="button" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#fff;color:#16a34a;cursor:pointer;">Choose photo</button>
+              <button id="admin-avatar-clear" type="button" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#fff;color:#6b7280;cursor:pointer;">Clear</button>
+            </div>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
@@ -97,6 +196,27 @@
     };
     modalEl.querySelector('#admin-send-reset').onclick = sendPasswordReset;
     modalEl.querySelector('#admin-settings-save').onclick = saveChanges;
+    modalEl.querySelector('#admin-avatar-pick').onclick = () => {
+      modalEl.querySelector('#admin-avatar-file')?.click();
+    };
+    modalEl.querySelector('#admin-avatar-clear').onclick = () => {
+      pendingAvatarFile = null;
+      currentAvatarUrl = '';
+      const preview = modalEl.querySelector('#admin-avatar-preview');
+      const first = (document.getElementById('admin-first-name')?.value || '').trim();
+      const last = (document.getElementById('admin-last-name')?.value || '').trim();
+      if (preview) preview.src = buildInitialAvatarDataUrl([first, last].filter(Boolean).join(' '));
+    };
+    modalEl.querySelector('#admin-avatar-file').onchange = (e) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      pendingAvatarFile = file;
+      const preview = modalEl.querySelector('#admin-avatar-preview');
+      if (preview) {
+        const local = URL.createObjectURL(file);
+        preview.src = local;
+      }
+    };
 
     return modalEl;
   }
@@ -180,13 +300,49 @@
     const lastEl = document.getElementById('admin-last-name');
     const restNameEl = document.getElementById('admin-restaurant-name');
     const restLogoEl = document.getElementById('admin-restaurant-logo');
+    const avatarPreviewEl = document.getElementById('admin-avatar-preview');
 
     if (emailEl) emailEl.value = adminUser.email || '';
+    pendingAvatarFile = null;
+
+    // Seed fields immediately so they are never blank while async data loads.
+    const resolvedIdentity = typeof window.kkGetAdminIdentity === 'function'
+      ? await window.kkGetAdminIdentity(adminUser.id, adminUser.email)
+      : null;
+    const seededName = (resolvedIdentity?.displayName || '').trim()
+      || (document.querySelector('.user-profile span')?.textContent || '').trim()
+      || (adminUser?.user_metadata?.full_name || '').trim()
+      || (adminUser?.user_metadata?.name || '').trim()
+      || (adminUser.email || '').split('@')[0];
+    const seededParts = splitNameParts(seededName);
+    if (firstEl) firstEl.value = seededParts.first || firstEl.value || '';
+    if (lastEl) lastEl.value = seededParts.last || lastEl.value || '';
+
+    const seededRestaurantName = (() => {
+      const fromBrand = (document.querySelector('.nav-brand span')?.textContent || '').trim();
+      const fromHeader = ((document.querySelector('.dashboard-header h1')?.textContent || '')
+        .replace(/\s*Overview\s*$/, '')
+        .trim());
+      const fromTitle = (document.title || '').replace(/\s*-\s*.*$/, '').trim();
+      let fromStorage = '';
+      try { fromStorage = (localStorage.getItem('kk_org_name') || '').trim(); } catch (_) {}
+      return fromStorage || fromBrand || fromHeader || fromTitle || 'Sheek';
+    })();
+    if (restNameEl) {
+      restNameEl.value = seededRestaurantName;
+      restNameEl.placeholder = seededRestaurantName;
+    }
 
     try {
       const supa = window.supabaseClient;
 
-      const [{ data: profile }, { data: orgRow, error: orgError }] = await Promise.all([
+      const [
+        { data: profile },
+        { data: orgRow, error: orgError },
+        { data: profileByEmail },
+        { data: profileByUserIdAnyOrg },
+        { count: profileCount, error: profileCountError },
+      ] = await Promise.all([
         supa
           .from('admin_profiles')
           .select('*')
@@ -195,33 +351,105 @@
           .catch(() => ({ data: null })),
         supa
           .from('orgs')
-          .select('name')
+          .select('name, subscription_plan')
           .eq('id', window.ORG_ID)
           .maybeSingle()
           .then((r) => ({ data: r.data, error: r.error })),
+        supa
+          .from('profiles')
+          .select('employee_name, display_name, email, avatar_url')
+          .eq('org_id', window.ORG_ID)
+          .eq('user_id', adminUser.id)
+          .limit(5)
+          .catch(() => ({ data: [] })),
+        supa
+          .from('profiles')
+          .select('employee_name, display_name, email, avatar_url')
+          .eq('user_id', adminUser.id)
+          .limit(5)
+          .catch(() => ({ data: [] })),
+        supa
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('org_id', window.ORG_ID)
+          .then((r) => ({ count: r.count, error: r.error }))
+          .catch(() => ({ count: null, error: null })),
       ]);
+      if (profileCountError) {
+        console.warn('[AdminSettings] Profile count failed:', profileCountError.message);
+      }
+
+      const planSel = document.getElementById('admin-subscription-plan');
+      const usageEl = document.getElementById('admin-subscription-usage');
+      const rawPlan = String(orgRow?.subscription_plan || 'starter').toLowerCase();
+      const resolvedPlan = ['starter', 'growth', 'scale'].includes(rawPlan) ? rawPlan : 'starter';
+      if (planSel) planSel.value = resolvedPlan;
+      if (usageEl && typeof window.kkGetEmployeeLimit === 'function' && typeof window.kkGetSubscriptionPlan === 'function') {
+        const lim = window.kkGetEmployeeLimit(resolvedPlan);
+        const p = window.kkGetSubscriptionPlan(resolvedPlan);
+        const n = profileCount != null ? profileCount : '—';
+        const capLabel = lim == null ? 'unlimited' : String(lim);
+        usageEl.textContent = `${p.label}: ${n} employee${n === 1 ? '' : 's'} on file — plan allows up to ${capLabel}.`;
+      } else if (usageEl) {
+        usageEl.textContent = 'Load subscriptionPlans.js to see plan limits here.';
+      }
+      let profileByEmailRow = null;
+      if (Array.isArray(profileByEmail) && profileByEmail.length > 0) {
+        profileByEmailRow = pickBestProfileRow(profileByEmail, adminUser.email || '');
+      } else if (adminUser.email) {
+        const byEmailRes = await supa
+          .from('profiles')
+          .select('employee_name, display_name, email, avatar_url')
+          .eq('org_id', window.ORG_ID)
+          .ilike('email', adminUser.email || '')
+          .limit(5)
+          .catch(() => ({ data: [] }));
+        const rows = byEmailRes?.data || [];
+        profileByEmailRow = pickBestProfileRow(rows, adminUser.email || '');
+      }
 
       if (orgError) {
         console.warn('[AdminSettings] Could not load org name:', orgError.message);
       }
 
+      const profileByUserIdAnyOrgRow = pickBestProfileRow(profileByUserIdAnyOrg, adminUser.email || '');
+
+      const preferredDisplayName = (profile?.display_name || '').trim()
+        || (profileByEmailRow?.display_name || '').trim()
+        || (profileByEmailRow?.employee_name || '').trim()
+        || (profileByUserIdAnyOrgRow?.display_name || '').trim()
+        || (profileByUserIdAnyOrgRow?.employee_name || '').trim()
+        || (resolvedIdentity?.displayName || '').trim()
+        || '';
+      const preferredAvatarUrl = (profile?.avatar_url || profileByEmailRow?.avatar_url || profileByUserIdAnyOrgRow?.avatar_url || resolvedIdentity?.avatarUrl || '').trim();
+
       if (profile) {
-        if (firstEl) firstEl.value = profile.first_name || '';
-        if (lastEl) lastEl.value = profile.last_name || '';
+        const savedFirst = (profile.first_name || '').trim();
+        const savedLast = (profile.last_name || '').trim();
+        const fallbackName = preferredDisplayName
+          || (document.querySelector('.user-profile span')?.textContent || '').trim()
+          || (adminUser?.user_metadata?.full_name || '').trim()
+          || (adminUser?.user_metadata?.name || '').trim()
+          || (adminUser.email || '').split('@')[0];
+        const fallbackParts = splitNameParts(fallbackName);
+        if (firstEl) firstEl.value = savedFirst || fallbackParts.first;
+        if (lastEl) lastEl.value = savedLast || fallbackParts.last;
+        currentAvatarUrl = preferredAvatarUrl;
       } else {
-        // Fallback: derive name from email or current nav label
-        const navLabel = document.querySelector('.nav-user .user-profile span');
+        // Fallback: prefer profiles row, then nav/email.
+        const navLabel = document.querySelector('.user-profile span');
         const navName = navLabel?.textContent?.trim() || '';
-        const base = navName || (adminUser.email || '').split('@')[0];
-        if (base) {
-          const parts = base.split(/[.\s]+/).filter(Boolean);
-          if (firstEl && !firstEl.value && parts[0]) {
-            firstEl.value = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-          }
-          if (lastEl && !lastEl.value && parts[1]) {
-            lastEl.value = parts[1].charAt(0).toUpperCase() + parts[1].slice(1);
-          }
+        const base = preferredDisplayName
+          || navName
+          || (adminUser?.user_metadata?.full_name || '').trim()
+          || (adminUser?.user_metadata?.name || '').trim()
+          || (adminUser.email || '').split('@')[0];
+        if (base && (firstEl || lastEl)) {
+          const parts = splitNameParts(base);
+          if (firstEl) firstEl.value = parts.first || '';
+          if (lastEl) lastEl.value = parts.last || '';
         }
+        currentAvatarUrl = preferredAvatarUrl;
       }
 
       // Restaurant name: prefer org row from DB, then localStorage, then nav brand or header
@@ -242,11 +470,28 @@
       const currentRestaurantName = (orgName || '').trim() || storedOrg || currentBrand || headerName;
 
       if (restNameEl) {
-        restNameEl.value = currentRestaurantName;
-        restNameEl.placeholder = currentRestaurantName ? currentRestaurantName : 'e.g. My Restaurant';
+        const resolvedRestaurantName = currentRestaurantName || seededRestaurantName;
+        restNameEl.value = resolvedRestaurantName;
+        restNameEl.placeholder = resolvedRestaurantName;
       }
       if (restLogoEl) {
         restLogoEl.value = '';
+      }
+      if (avatarPreviewEl) {
+        const fullNameForInitials = [firstEl?.value, lastEl?.value].filter(Boolean).join(' ');
+        avatarPreviewEl.src = currentAvatarUrl || buildInitialAvatarDataUrl(fullNameForInitials);
+        avatarPreviewEl.onerror = () => {
+          avatarPreviewEl.src = buildInitialAvatarDataUrl(fullNameForInitials || preferredDisplayName || 'User');
+        };
+      }
+
+      // Keep nav label/avatar in sync with the resolved profile identity.
+      if (preferredDisplayName) {
+        const navLabel = document.querySelector('.nav-user .user-profile span');
+        if (navLabel) navLabel.textContent = preferredDisplayName;
+      }
+      if (preferredAvatarUrl) {
+        applyNavAvatar(preferredAvatarUrl);
       }
 
       if (restNameEl) {
@@ -305,26 +550,110 @@
       }
 
       // Admin profile: update if row exists, otherwise insert (avoids upsert constraint issues)
+      const displayName = [firstName, lastName].filter(Boolean).join(' ') || null;
+      let avatarUrlToSave = currentAvatarUrl || null;
       if (firstName !== undefined || lastName !== undefined) {
-        const displayName = [firstName, lastName].filter(Boolean).join(' ') || null;
+        if (pendingAvatarFile) {
+          avatarUrlToSave = await uploadAdminAvatar(pendingAvatarFile);
+          if (!avatarUrlToSave) {
+            throw new Error('Could not upload profile photo. Please try again.');
+          }
+          applyNavAvatar(avatarUrlToSave);
+          currentAvatarUrl = avatarUrlToSave;
+          pendingAvatarFile = null;
+        }
         const { data: existing } = await supa.from('admin_profiles').select('user_id').eq('user_id', adminUser.id).maybeSingle();
         if (existing) {
           const { error: upErr } = await supa.from('admin_profiles').update({
             first_name: firstName || null,
             last_name: lastName || null,
             display_name: displayName,
+            avatar_url: avatarUrlToSave,
             updated_at: new Date().toISOString(),
           }).eq('user_id', adminUser.id);
-          if (upErr) throw new Error(upErr.message || 'Could not update admin name.');
+          if (upErr) {
+            if ((upErr.message || '').toLowerCase().includes('avatar_url')) {
+              const { error: retryErr } = await supa.from('admin_profiles').update({
+                first_name: firstName || null,
+                last_name: lastName || null,
+                display_name: displayName,
+                updated_at: new Date().toISOString(),
+              }).eq('user_id', adminUser.id);
+              if (retryErr) throw new Error(retryErr.message || 'Could not update admin profile.');
+            } else {
+              throw new Error(upErr.message || 'Could not update admin profile.');
+            }
+          }
         } else {
           const { error: inErr } = await supa.from('admin_profiles').insert({
             user_id: adminUser.id,
             first_name: firstName || null,
             last_name: lastName || null,
             display_name: displayName,
+            avatar_url: avatarUrlToSave,
             updated_at: new Date().toISOString(),
           });
-          if (inErr) throw new Error(inErr.message || 'Could not save admin name.');
+          if (inErr) {
+            if ((inErr.message || '').toLowerCase().includes('avatar_url')) {
+              const { error: retryErr } = await supa.from('admin_profiles').insert({
+                user_id: adminUser.id,
+                first_name: firstName || null,
+                last_name: lastName || null,
+                display_name: displayName,
+                updated_at: new Date().toISOString(),
+              });
+              if (retryErr) throw new Error(retryErr.message || 'Could not save admin profile.');
+            } else {
+              throw new Error(inErr.message || 'Could not save admin profile.');
+            }
+          }
+        }
+      }
+
+      // Keep profiles in sync with admin settings so mobile app sees the same name/avatar.
+      if (window.ORG_ID) {
+        const profilePayload = {
+          display_name: displayName,
+          full_name: displayName,
+          avatar_url: avatarUrlToSave,
+          email: email || adminUser.email || null,
+          user_id: adminUser.id || null,
+        };
+        const { data: profileByUserId } = await supa
+          .from('profiles')
+          .select('id, employee_name')
+          .eq('org_id', window.ORG_ID)
+          .eq('user_id', adminUser.id)
+          .maybeSingle();
+        const { data: profileByEmail } = await supa
+          .from('profiles')
+          .select('id, employee_name')
+          .eq('org_id', window.ORG_ID)
+          .ilike('email', email || adminUser.email || '')
+          .maybeSingle();
+
+        const existingProfile = profileByUserId || profileByEmail || null;
+
+        if (existingProfile?.id) {
+          const { error: profileUpErr } = await supa
+            .from('profiles')
+            .update(profilePayload)
+            .eq('id', existingProfile.id);
+          if (profileUpErr) {
+            console.warn('[AdminSettings] Could not sync profiles row:', profileUpErr.message);
+          }
+        } else {
+          const employeeKey = (existingProfile?.employee_name || (email || adminUser.email || '').split('@')[0] || 'admin').trim().toLowerCase();
+          const { error: profileInErr } = await supa
+            .from('profiles')
+            .insert({
+              org_id: window.ORG_ID,
+              employee_name: employeeKey,
+              ...profilePayload,
+            });
+          if (profileInErr) {
+            console.warn('[AdminSettings] Could not create profiles row:', profileInErr.message);
+          }
         }
       }
 
@@ -332,33 +661,52 @@
         await Promise.all(updates);
       }
 
-      // Org name only (avoids logo_url column missing error; add logo_url to orgs table later if needed)
-      const { error: orgErr } = await supa.from('orgs').update({ name: restaurantName }).eq('id', window.ORG_ID).select();
-      if (orgErr) {
-        throw new Error(orgErr.message || 'Could not update restaurant name. Check RLS on orgs table.');
-      }
-      if (restaurantName) {
-        try { localStorage.setItem('kk_org_name', restaurantName); } catch (_) {}
+      const planEl = document.getElementById('admin-subscription-plan');
+      let newPlan = String(planEl?.value || 'starter').toLowerCase();
+      if (!['starter', 'growth', 'scale'].includes(newPlan)) newPlan = 'starter';
+
+      if (typeof window.kkGetEmployeeLimit === 'function' && window.ORG_ID) {
+        const { count: pc, error: pcErr } = await supa
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('org_id', window.ORG_ID);
+        if (!pcErr) {
+          const lim = window.kkGetEmployeeLimit(newPlan);
+          if (lim != null && (pc ?? 0) > lim) {
+            throw new Error(
+              `Plan "${window.kkGetSubscriptionPlan(newPlan).label}" allows up to ${lim} employees. You have ${pc}. Remove roster entries or choose Scale.`
+            );
+          }
+        }
       }
 
-      // Immediately reflect new restaurant name in the UI without waiting for reload
-      if (restaurantName) {
-        const brandEls = document.querySelectorAll('.nav-brand span');
-        brandEls.forEach(el => { el.textContent = restaurantName; });
-        const header = document.querySelector('.dashboard-header h1');
-        if (header && /Overview$/.test(header.textContent || '')) {
-          header.textContent = `${restaurantName} Overview`;
+      const { error: orgErr } = await supa
+        .from('orgs')
+        .update({ name: restaurantName, subscription_plan: newPlan })
+        .eq('id', window.ORG_ID)
+        .select();
+      if (orgErr) {
+        const msg = orgErr.message || 'Could not update restaurant. Check RLS on orgs table.';
+        if ((msg || '').toLowerCase().includes('subscription_plan')) {
+          throw new Error(`${msg} Run orgs-subscription-plan.sql in Supabase to add the column.`);
         }
-        if (document.title.includes('Kenny Kitchen')) {
-          document.title = document.title.replace('Kenny Kitchen', restaurantName);
-        }
+        throw new Error(msg);
+      }
+      // Nav/header always shows product name "Sheek" (orgs.name is still saved for records).
+      if (typeof updateOrgBranding === 'function') {
+        try { updateOrgBranding(); } catch (_) {}
       }
 
       showSuccess('Settings saved.');
-      const displayName = [firstName, lastName].filter(Boolean).join(' ');
       if (displayName) {
         const label = document.querySelector('.nav-user .user-profile span');
         if (label) label.textContent = displayName;
+      }
+      if (currentAvatarUrl) {
+        applyNavAvatar(currentAvatarUrl);
+      }
+      if (typeof window.kkRefreshNavIdentity === 'function') {
+        try { await window.kkRefreshNavIdentity(adminUser); } catch (_) {}
       }
       setTimeout(() => {
         hideModal();

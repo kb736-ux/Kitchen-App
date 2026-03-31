@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId, requestTaskTransfer, fetchEmployeesOnShift }) => {
@@ -31,19 +31,34 @@ const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId, request
   const handleSelectEmployee = async (employeeName) => {
     if (!requestTaskTransfer || !task?.id) return;
     setTransferringTo(employeeName);
-    const ok = await requestTaskTransfer(task.id, employeeName);
+    const result = await requestTaskTransfer(task.id, employeeName);
     setTransferringTo(null);
-    if (ok) {
-      setShowTransferModal(false);
+    // Always dismiss the bottom sheet so the user isn't stuck under an alert
+    setShowTransferModal(false);
+    if (result?.ok) {
       onBack?.();
+    } else {
+      const msg = result?.message || 'Unknown error';
+      const hint = /stack depth/i.test(msg)
+        ? '\n\nFix: Supabase → SQL Editor → run fix-task-transfer-stack-depth.sql from your project.'
+        : /task_transfer_requests|schema cache/i.test(msg)
+          ? '\n\nFix: Supabase → SQL Editor → run supabase-task-transfer-requests.sql (creates task_transfer_requests).'
+          : '';
+      Alert.alert('Transfer failed', `${msg}${hint}`);
     }
   };
 
-  const handleComplete = () => {
-    // Only allow completing, not uncompleting
-    if (!task.completed) {
-      toggleTask(task.id);
-    }
+  const handleComplete = async () => {
+    if (task.completed) return;
+    const r = await toggleTask(task.id);
+    if (r?.ok) onBack?.();
+    else if (r?.message) Alert.alert('Could not update task', r.message);
+  };
+
+  const handleUrgentPress = async () => {
+    const r = await toggleUrgent(task.id);
+    if (r?.ok) onBack?.();
+    else if (r?.message) Alert.alert('Could not update task', r.message);
   };
 
   return (
@@ -63,7 +78,7 @@ const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId, request
         {toggleUrgent && !task.completed && (
           <TouchableOpacity
             style={[styles.transferButton, styles.urgentButton, task.is_urgent && styles.urgentButtonActive]}
-            onPress={() => toggleUrgent(task.id)}
+            onPress={handleUrgentPress}
           >
             <Ionicons name="flame" size={18} color={task.is_urgent ? '#718096' : '#e53e3e'} style={{ marginRight: 8 }} />
             <Text style={[styles.transferButtonText, task.is_urgent && styles.urgentButtonText]}>

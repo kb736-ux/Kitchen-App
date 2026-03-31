@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MyReactNativeApp",
-    "slug": "MyReactNativeApp",
+    "name": "Sheek",
+    "slug": "sheek",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -19,8 +19,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Kenny Kitchen to access your photos so you can set a profile picture.",
-          "cameraPermission": "Allow Kenny Kitchen to use your camera to take a profile photo."
+          "photosPermission": "Allow Sheek to access your photos so you can set a profile picture.",
+          "cameraPermission": "Allow Sheek to use your camera to take a profile photo."
         }
       ]
     ],

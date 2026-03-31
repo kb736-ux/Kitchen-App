@@ -74,6 +74,36 @@ MyReactNativeApp/
 yarn start --clear
 ```
 
+### **Changes save on your Mac but the phone still shows the old UI**
+This is almost always **stale JavaScript on the device** or **Expo Go talking to the wrong dev server**.
+
+1. **Confirm the bundle version on the phone**  
+   In development, a small line at the **bottom of the screen** shows `Build <stamp>`. That string comes from `constants/buildInfo.js` (`JS_BUNDLE_BUILD`).  
+   - If the stamp **does not change** after you edit `buildInfo.js` and reload, the phone is **not** loading your latest project.
+
+2. **Full reset (do this first)**  
+   Stop Metro (Ctrl+C), then from **this** folder (`MyReactNativeApp`):
+   ```bash
+   npx expo start --tunnel --clear
+   ```
+   In **Expo Go**: shake device → **Reload** (or kill Expo Go and scan the QR again).
+
+3. **Same project folder**  
+   Make sure the terminal running Expo is `.../AppKitchen copy 2/MyReactNativeApp` — not another copy of the repo elsewhere.
+
+4. **Tunnel vs LAN**  
+   `--tunnel` can lag or stick to an old session. If Mac and phone are on the **same Wi‑Fi**, try **without** tunnel:
+   ```bash
+   npx expo start --clear
+   ```
+   Use the **LAN** URL/QR from the terminal.
+
+5. **Watchman (Mac)**  
+   If files never trigger a rebundle:
+   ```bash
+   watchman watch-del-all
+   ```
+
 ### **Package conflicts**
 ```bash
 # Clean install

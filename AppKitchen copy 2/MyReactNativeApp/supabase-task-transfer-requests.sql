@@ -1,4 +1,9 @@
 -- Run this in Supabase SQL Editor to add task transfer requests
+--
+-- If inserts fail with "stack depth limit exceeded", run (once) in SQL Editor:
+--   ../fix-task-transfer-stack-depth.sql
+-- or the full ../fix-rls-stack-depth-recursion.sql
+--
 CREATE TABLE IF NOT EXISTS public.task_transfer_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id uuid NOT NULL,

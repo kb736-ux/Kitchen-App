@@ -688,8 +688,9 @@ body {
 
 .shift-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 0.75rem;
     padding: 1rem;
     background: #f7fafc;
     border-radius: 12px;
@@ -735,12 +736,21 @@ body {
     color: #718096;
 }
 
+.employee-task-summary {
+    font-size: 0.82rem;
+    color: #4a5568;
+    font-weight: 600;
+    margin-top: 0.2rem;
+}
+
 .shift-status {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.8rem;
     font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 0.25rem;
 }
 
 .shift-status.online {
@@ -749,6 +759,15 @@ body {
 
 .shift-status.online i {
     animation: pulse 2s infinite;
+}
+
+.shift-status.offline {
+    color: #a0aec0;
+}
+
+.shift-status.offline i {
+    animation: none;
+    opacity: 0.55;
 }
 
 @keyframes pulse {

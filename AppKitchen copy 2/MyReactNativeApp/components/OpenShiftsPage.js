@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, ORG_ID } from '../utils/supabase';
+import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
+import { formatLocalDateYMD } from '../utils/shiftMatching';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const OpenShiftsPage = ({ onBack, orgId }) => {
-  const { employeeName } = useEmployee();
+  const { employeeName, employeeId } = useEmployee();
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -21,7 +22,7 @@ const OpenShiftsPage = ({ onBack, orgId }) => {
 
   async function fetchOpenShifts() {
     setLoading(true);
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDateYMD(new Date());
     const nextMonth = new Date();
     nextMonth.setDate(nextMonth.getDate() + 30);
 
@@ -31,7 +32,7 @@ const OpenShiftsPage = ({ onBack, orgId }) => {
       .eq('org_id', orgId)
       .eq('status', 'open')
       .gte('shift_date', today)
-      .lte('shift_date', nextMonth.toISOString().split('T')[0])
+      .lte('shift_date', formatLocalDateYMD(nextMonth))
       .order('shift_date', { ascending: true });
 
     if (error) console.warn('[Supabase] fetchOpenShifts failed:', error.message);
@@ -50,7 +51,11 @@ const OpenShiftsPage = ({ onBack, orgId }) => {
           onPress: async () => {
             const { error } = await supabase
               .from('shifts')
-              .update({ employee_name: employeeName, status: 'assigned' })
+              .update({
+                employee_name: employeeName,
+                employee_id: employeeId || null,
+                status: 'assigned',
+              })
               .eq('id', shift.id);
 
             if (error) {

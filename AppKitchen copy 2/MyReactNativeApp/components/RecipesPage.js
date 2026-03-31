@@ -5,6 +5,7 @@ import { supabase, ORG_ID } from '../utils/supabase';
 import { quickAdjustKitted, quickAdjustAvailable } from '../utils/inventorySync';
 
 const FRACTIONAL_UNITS = ['qt', 'pt', 'liters', 'cups', 'oz', 'lbs', 'kg', 'g'];
+const SHOULD_SEED_SAMPLE_DATA = false;
 function getAdjustStep(unit) {
   return FRACTIONAL_UNITS.includes((unit || '').toLowerCase()) ? 0.5 : 1;
 }
@@ -17,7 +18,7 @@ const RecipesPage = ({ orgId }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updating, setUpdating] = useState(null);
-  const [view, setView] = useState('dishes'); // 'dishes' | 'active' | 'inactive'
+  const [view, setView] = useState('active'); // 'dishes' | 'active' | 'inactive'
   const [expandedId, setExpandedId] = useState(null);
 
   const fetchInventory = useCallback(async () => {
@@ -69,18 +70,19 @@ const RecipesPage = ({ orgId }) => {
   }, [recipes, orgId, fetchInventory]);
 
   async function fetchRecipes() {
-    if (!orgId) return;
+    const effectiveOrgId = orgId || ORG_ID;
+    if (!effectiveOrgId) return;
     setLoading(true);
     const cols = 'id, name, status, desc, ingredients, steps, yield_amount, yield_unit';
     let { data, error } = await supabase
       .from('recipes')
       .select(cols)
-      .eq('org_id', orgId)
+      .eq('org_id', effectiveOrgId)
       .order('name', { ascending: true });
 
     if (error && (error.message?.includes('desc') || error.message?.includes('column'))) {
       const fallbackCols = 'id, name, status, ingredients, steps, yield_amount, yield_unit';
-      const res = await supabase.from('recipes').select(fallbackCols).eq('org_id', orgId).order('name', { ascending: true });
+      const res = await supabase.from('recipes').select(fallbackCols).eq('org_id', effectiveOrgId).order('name', { ascending: true });
       data = res.data;
       error = res.error;
       if (!error && data) data = data.map((r) => ({ ...r, desc: r.desc || '' }));
@@ -92,15 +94,15 @@ const RecipesPage = ({ orgId }) => {
     } else {
       const list = data || [];
       setRecipes(list);
-      if (list.length === 0) {
-        await seedRecipes();
+      if (list.length === 0 && SHOULD_SEED_SAMPLE_DATA) {
+        await seedRecipes(effectiveOrgId);
       }
     }
     setLoading(false);
   }
 
-  async function seedRecipes() {
-    if (!orgId) return;
+  async function seedRecipes(effectiveOrgId) {
+    if (!effectiveOrgId) return;
     try {
       const samples = [
         { name: 'Focaccia Kit', desc: 'House focaccia with olive oil and sea salt', status: 'active', ingredients: ['500g flour', '400ml warm water', '10g salt', '7g yeast', '50ml olive oil', 'Sea salt, rosemary'], steps: [{ prep: 'Measure flour, water, salt, yeast. Oil a large baking pan.', active: 'Mix dough, knead 10 min. Proof 1 hr. Stretch into pan, dimple, drizzle oil. Bake 220°C 25 min.' }], yield_amount: 4, yield_unit: 'portions' },
@@ -108,14 +110,14 @@ const RecipesPage = ({ orgId }) => {
         { name: 'Chilled Pea Soup', desc: 'Creamy pea soup with mint', status: 'active', ingredients: ['500g frozen peas', '1 onion', '500ml veg stock', '100ml cream', 'Mint'], steps: [{ prep: 'Dice onion. Defrost peas.', active: 'Sauté onion. Add peas + stock. Simmer 5 min. Blend, stir in cream. Chill.' }], yield_amount: 4, yield_unit: 'portions' },
       ];
       for (const r of samples) {
-        const row = { org_id: orgId, name: r.name, status: r.status, desc: r.desc, ingredients: r.ingredients, steps: r.steps, yield_amount: r.yield_amount, yield_unit: r.yield_unit };
+        const row = { org_id: effectiveOrgId, name: r.name, status: r.status, desc: r.desc, ingredients: r.ingredients, steps: r.steps, yield_amount: r.yield_amount, yield_unit: r.yield_unit };
         const { error } = await supabase.from('recipes').insert(row);
         if (error && error.message?.includes('desc')) {
           const { desc, ...rest } = row;
           await supabase.from('recipes').insert(rest);
         }
       }
-      const { data } = await supabase.from('recipes').select('id, name, status, ingredients, steps, yield_amount, yield_unit').eq('org_id', orgId).order('name', { ascending: true });
+      const { data } = await supabase.from('recipes').select('id, name, status, ingredients, steps, yield_amount, yield_unit').eq('org_id', effectiveOrgId).order('name', { ascending: true });
       setRecipes((data || []).map((r) => ({ ...r, desc: r.desc || '' })));
     } catch (e) {
       console.warn('[RecipesPage] seedRecipes failed:', e?.message);
@@ -125,11 +127,20 @@ const RecipesPage = ({ orgId }) => {
   async function fetchDishes() {
     const effectiveOrgId = orgId || ORG_ID;
     if (!effectiveOrgId) return;
-    const { data, error } = await supabase
+    const errFull = (e) => [e?.message, e?.details, e?.hint].filter(Boolean).join(' ');
+    let { data, error } = await supabase
       .from('dishes')
       .select('id, name, recipes')
       .eq('org_id', effectiveOrgId)
-      .order('created_at', { ascending: true });
+      .order('id', { ascending: true });
+    if (error && /column|does not exist|400/i.test(errFull(error))) {
+      const res = await supabase
+        .from('dishes')
+        .select('id, name, recipes')
+        .eq('org_id', effectiveOrgId);
+      data = res.data;
+      error = res.error;
+    }
 
     if (error) {
       console.warn('[Supabase] fetchDishes failed:', error.message);
@@ -137,7 +148,7 @@ const RecipesPage = ({ orgId }) => {
     } else {
       const list = data || [];
       setDishes(list);
-      if (list.length === 0) {
+      if (list.length === 0 && SHOULD_SEED_SAMPLE_DATA) {
         await seedDishes();
       }
     }
@@ -156,7 +167,7 @@ const RecipesPage = ({ orgId }) => {
           recipes: recipeNames.slice(0, 2),
         });
         if (!error) {
-          const { data } = await supabase.from('dishes').select('id, name, recipes').eq('org_id', effectiveOrgId).order('created_at', { ascending: true });
+          const { data } = await supabase.from('dishes').select('id, name, recipes').eq('org_id', effectiveOrgId).order('id', { ascending: true });
           setDishes(data || []);
         }
       }
@@ -168,7 +179,14 @@ const RecipesPage = ({ orgId }) => {
   const componentNamesLower = new Set(
     dishes.flatMap(d => (d.recipes || []).map(r => (typeof r === 'string' ? r : r?.name || '').toLowerCase()).filter(Boolean))
   );
-  const componentNames = new Set(dishes.flatMap(d => d.recipes || []));
+  const componentNames = new Set(
+    dishes.flatMap((d) => (d.recipes || []).map((r) => (typeof r === 'string' ? r : (r?.name || ''))).filter(Boolean))
+  );
+  const isRecipeActive = (recipe) => {
+    const name = (recipe?.name || '').toLowerCase();
+    if (name && componentNamesLower.has(name)) return true;
+    return ((recipe?.status || '').toString().trim().toLowerCase() === 'active');
+  };
   // Deduplicate recipes by name (case-insensitive, normalize typos like vanila->vanilla)
   const normalizeKey = (s) => (s || '').toLowerCase().replace(/\bvanila\b/g, 'vanilla');
   const byKey = {};
@@ -186,16 +204,19 @@ const RecipesPage = ({ orgId }) => {
   });
   const filtered = dedupedRecipes.filter(r => {
     const matchSearch = (r.name || '').toLowerCase().includes(searchText.toLowerCase());
-    const isInDish = componentNames.has(r.name) || componentNamesLower.has((r.name || '').toLowerCase());
     if (view === 'active') {
-      return isInDish && matchSearch; // only recipes used in dishes
+      return isRecipeActive(r) && matchSearch;
     }
-    return !isInDish && matchSearch; // all other recipes
+    if (view === 'inactive') {
+      return !isRecipeActive(r) && matchSearch;
+    }
+    // dishes view does not use this filtered list
+    return matchSearch;
   });
 
-  // Active = recipes used in dishes. Inactive = all other recipes.
-  const activeCount = dedupedRecipes.filter(r => componentNames.has(r.name) || componentNamesLower.has((r.name || '').toLowerCase())).length;
-  const inactiveCount = dedupedRecipes.filter(r => !componentNames.has(r.name) && !componentNamesLower.has((r.name || '').toLowerCase())).length;
+  // Active/Inactive are based on manager-set recipe.status from Supabase.
+  const activeCount = dedupedRecipes.filter((r) => isRecipeActive(r)).length;
+  const inactiveCount = dedupedRecipes.filter((r) => !isRecipeActive(r)).length;
   const filteredDishes = dishes.filter(d => (d.name || '').toLowerCase().includes(searchText.toLowerCase()));
 
   const toggleExpand = (id) => setExpandedId(prev => (prev === id ? null : id));
@@ -439,15 +460,15 @@ const RecipesPage = ({ orgId }) => {
                       <Text style={[styles.cardName, view === 'inactive' && styles.cardNameInactive]}>
                         {recipe.name}
                       </Text>
-                      {extra?.desc ? (
+                      {isExpanded && extra?.desc ? (
                         <Text style={styles.cardDesc} numberOfLines={isExpanded ? undefined : 1}>
                           {extra.desc}
                         </Text>
                       ) : null}
-                      {(recipe.yield_amount != null && recipe.yield_unit) ? (
+                      {isExpanded && (recipe.yield_amount != null && recipe.yield_unit) ? (
                         <Text style={styles.cardYield}>Makes {recipe.yield_amount} {recipe.yield_unit}</Text>
                       ) : null}
-                      {extra?.ingredients?.length > 0 && (
+                      {isExpanded && extra?.ingredients?.length > 0 && (
                         <Text style={styles.cardMeta}>
                           {extra.ingredients.length} ingredient{extra.ingredients.length !== 1 ? 's' : ''}
                         </Text>
@@ -462,7 +483,7 @@ const RecipesPage = ({ orgId }) => {
                 </TouchableOpacity>
 
                 {/* Inventory +/- for active recipes */}
-                {showInventory && (() => {
+                {showInventory && isExpanded && (() => {
                   const stockUnit = recipe?.yield_unit || inv.unit || 'portions';
                   return (
                   <View style={styles.inventoryRow}>
@@ -515,10 +536,16 @@ const RecipesPage = ({ orgId }) => {
                 })()}
 
                 {/* Expanded ingredient list + steps */}
-                {isExpanded && (extra?.ingredients?.length > 0 || extra?.steps?.length > 0) && (
+                {isExpanded && (extra?.desc || extra?.ingredients?.length > 0 || extra?.steps?.length > 0) && (
                   <View style={styles.ingredientsList}>
-                    {extra.ingredients?.length > 0 && (
+                    {extra?.desc ? (
                       <>
+                        <Text style={styles.ingredientsTitle}>Description</Text>
+                        <Text style={styles.ingredientText}>{extra.desc}</Text>
+                      </>
+                    ) : null}
+                    {extra.ingredients?.length > 0 && (
+                      <View style={{ marginTop: extra?.desc ? 14 : 0 }}>
                         <Text style={styles.ingredientsTitle}>Ingredients</Text>
                         {extra.ingredients.map((ing, i) => (
                           <View key={`ing-${i}`} style={styles.ingredientRow}>
@@ -528,7 +555,7 @@ const RecipesPage = ({ orgId }) => {
                             </Text>
                           </View>
                         ))}
-                      </>
+                      </View>
                     )}
                     {extra.steps?.length > 0 && (
                       <View style={{ marginTop: extra.ingredients?.length ? 14 : 0 }}>

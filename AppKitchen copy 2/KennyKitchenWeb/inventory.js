@@ -34,18 +34,34 @@ async function loadRecipesForInventory() {
 
 async function loadDishesForInventory() {
     if (!window.supabaseClient || !window.ORG_ID) return [];
-    const { data, error } = await window.supabaseClient
-        .from('dishes')
-        .select('id, name, recipes')
-        .eq('org_id', window.ORG_ID);
+    const client = window.supabaseClient;
+    const org = String(window.ORG_ID).trim();
+    const attempts = [
+        () => client.from('dishes').select('id, name, recipes').eq('org_id', org),
+        () => client.from('dishes').select('id, name').eq('org_id', org),
+        () => client.from('dishes').select('id').eq('org_id', org),
+        () => client.from('dishes').select('*').eq('org_id', org),
+    ];
+    let data = null;
+    let error = null;
+    for (const run of attempts) {
+        const res = await run();
+        if (!res.error) {
+            data = res.data;
+            error = null;
+            break;
+        }
+        error = res.error;
+    }
     if (error) {
         console.warn('[Inventory] Dishes load failed:', error.message);
         return [];
     }
+    const rawRecipes = (d) => d.recipes ?? d.recipe_list ?? d.linked_recipes ?? [];
     return (data || []).map(d => ({
         id: d.id,
         name: norm(d.name),
-        recipes: (d.recipes || []).map(r => typeof r === 'string' ? norm(r) : norm(r?.name || '')),
+        recipes: (rawRecipes(d) || []).map(r => typeof r === 'string' ? norm(r) : norm(r?.name || '')),
     }));
 }
 

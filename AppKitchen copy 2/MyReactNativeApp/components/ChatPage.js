@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ActivityIndicator, SafeAreaView, Modal,
+  KeyboardAvoidingView, Platform, ActivityIndicator, SafeAreaView, Modal, Alert, Image, Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, ORG_ID } from '../utils/supabase';
@@ -14,28 +14,56 @@ const BASE_CHANNELS = [
     icon: 'megaphone',
     iconColor: '#d97706',
     iconBg: '#fffbeb',
-    preview: 'From management',
-    readOnly: true,
-  },
-  {
-    id: 'group-kitchen',
-    name: 'Kitchen Team',
-    icon: 'people',
-    iconColor: '#4CAF50',
-    iconBg: '#f0fff4',
-    preview: 'Group chat',
+    preview: 'Public channel',
     readOnly: false,
   },
 ];
 
 const normalizeName = (name) => (name || '').trim().toLowerCase();
+const normalizeLoose = (name) => normalizeName(name).replace(/[^a-z0-9]/g, '');
+const normalizeId = (value) => String(value || '').trim().toLowerCase();
+const localPart = (value) => String(value || '').split('@')[0].trim();
+const buildPersonName = (row) => {
+  const first = (row?.first_name || '').trim();
+  const last = (row?.last_name || '').trim();
+  return [first, last].filter(Boolean).join(' ').trim();
+};
+const toCanonicalSenderName = (row, fallback = '') =>
+  (
+    buildPersonName(row) ||
+    localPart(row?.email) ||
+    fallback
+  ).trim();
+/** One row per profiles.id — no merged "alias" employees or name-only deduping. */
+const dedupeEmployeesByProfileId = (rows) => {
+  const byId = new Map();
+  (rows || []).forEach((row) => {
+    if (!row?.id) return;
+    const k = normalizeId(row.id);
+    if (!byId.has(k)) byId.set(k, row);
+  });
+  return Array.from(byId.values());
+};
 
-const buildDmChannelId = (a, b) => {
-  const aKey = normalizeName(a);
-  const bKey = normalizeName(b);
-  if (!aKey || !bKey) return null;
-  const [first, second] = [aKey, bKey].sort();
-  return `dm:${first}__${second}`;
+const buildSortedDmChannelId = (idA, idB) => {
+  if (!idA || !idB) return null;
+  const a = String(idA).trim().toLowerCase();
+  const b = String(idB).trim().toLowerCase();
+  return a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`;
+};
+
+const parseDmParticipant = (channelId, myIds) => {
+  if (!channelId || !channelId.startsWith('dm:')) return null;
+  const rest = channelId.slice(3);
+  const idx = rest.indexOf(':');
+  if (idx < 0) return null;
+  const a = rest.slice(0, idx);
+  const b = rest.slice(idx + 1);
+  if (!a || !b) return null;
+  const aIsMe = myIds.has(normalizeId(a));
+  const bIsMe = myIds.has(normalizeId(b));
+  if (!aIsMe && !bIsMe) return null;
+  return aIsMe ? normalizeId(b) : normalizeId(a);
 };
 
 const getInitials = (name) =>
@@ -63,7 +91,10 @@ const formatTime = (isoStr) => {
 };
 
 const ChatPage = ({ orgId }) => {
-  const { employeeName } = useEmployee();
+  const { employeeName, displayName, employeeId, firstName, lastName, email } = useEmployee();
+  const activeOrgId = orgId || ORG_ID;
+  const myPreferredName = [firstName, lastName].filter(Boolean).join(' ').trim() || displayName || employeeName;
+  const myLocalPart = localPart(email);
   const [activeChannel, setActiveChannel] = useState(null);
   const [channelMessages, setChannelMessages] = useState({});
   const [announcements, setAnnouncements] = useState([]);
@@ -73,31 +104,57 @@ const ChatPage = ({ orgId }) => {
   const [loading, setLoading] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [dmChannels, setDmChannels] = useState([]);
+  const [dmParticipantByChannel, setDmParticipantByChannel] = useState({});
   const [showNewDmModal, setShowNewDmModal] = useState(false);
   const [dmSearchQuery, setDmSearchQuery] = useState('');
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [channelLastTs, setChannelLastTs] = useState({});
+  const [channelSeenTs, setChannelSeenTs] = useState({});
+  const [channelLastSenderId, setChannelLastSenderId] = useState({});
   const flatListRef = useRef(null);
   const pollRef = useRef(null);
+  const myProfileIdsRef = useRef(new Set());
+  const employeesRef = useRef([]);
+  const activeChannelRef = useRef(null);
+  const [authUserId, setAuthUserId] = useState(null);
 
   useEffect(() => {
-    loadEmployees();
-    fetchAnnouncements();
-    // Web app sends direct messages using channel_id = `dm-${employee_name}` (no normalization)
-    // so the mobile "Manager" channel should match that exact pattern.
-    if (employeeName) {
-      fetchChannelPreview(`dm-${employeeName}`);
-    }
-    fetchChannelPreview('group-kitchen');
-    fetchDmThreads();
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!mounted) return;
+        setAuthUserId(data?.user?.id || null);
+      } catch (_) {
+        if (!mounted) return;
+        setAuthUserId(null);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => { employeesRef.current = employees; }, [employees]);
+  useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
+
+  useEffect(() => {
+    if (!employeeName) return;
+    (async () => {
+      const list = await loadEmployees();
+      fetchAnnouncements();
+      if (list) fetchDmThreads(false, list);
+      else fetchDmThreads();
+    })();
 
     pollRef.current = setInterval(() => {
       fetchAnnouncements();
       fetchDmThreads(false);
-      if (activeChannel && activeChannel !== 'announcements') {
-        fetchMessages(activeChannel, false);
+      const ch = activeChannelRef.current;
+      if (ch && ch !== 'announcements') {
+        fetchMessages(ch, false);
       }
     }, 8000);
     return () => clearInterval(pollRef.current);
-  }, []);
+  }, [employeeName, displayName, employeeId, firstName, lastName, email]);
 
   // Re-fetch when switching channels
   useEffect(() => {
@@ -110,64 +167,331 @@ const ChatPage = ({ orgId }) => {
   }, [activeChannel]);
 
   const loadEmployees = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('employee_name, display_name')
-      .eq('org_id', ORG_ID)
-      .order('employee_name', { ascending: true });
-    if (data) setEmployees(data);
+    if (!activeOrgId) {
+      setEmployees([]);
+      return [];
+    }
+    const safeRows = async (query) => {
+      try {
+        const { data, error } = await query;
+        if (error) return { rows: [], error };
+        return { rows: Array.isArray(data) ? data : (data ? [data] : []), error: null };
+      } catch (error) {
+        return { rows: [], error };
+      }
+    };
+
+    // Schema-safe profile fetch: falls back when first_name/last_name are not present yet.
+    let profileRes = await safeRows(
+      supabase
+        .from('profiles')
+        .select('id, user_id, employee_name, display_name, first_name, last_name, email, avatar_url')
+        .eq('org_id', activeOrgId)
+    );
+    if (profileRes.error) {
+      console.warn('[Chat] loadEmployees profiles query error:', profileRes.error.message || profileRes.error);
+    } else {
+      const n = (profileRes.rows || []).length;
+      if (__DEV__) console.log('[Chat] loadEmployees profiles count:', n, 'org:', activeOrgId);
+    }
+    if ((profileRes.rows || []).length === 0 && profileRes.error) {
+      const msg = String(profileRes.error?.message || '').toLowerCase();
+      if (msg.includes('first_name') || msg.includes('last_name')) {
+        profileRes = await safeRows(
+          supabase
+            .from('profiles')
+            .select('id, user_id, employee_name, display_name, email, avatar_url')
+            .eq('org_id', activeOrgId)
+        );
+        profileRes.rows = (profileRes.rows || []).map((p) => ({
+          ...p,
+          first_name: '',
+          last_name: '',
+        }));
+      }
+    }
+
+    const [adminRes] = await Promise.all([
+      safeRows(
+        supabase
+          .from('admin_profiles')
+          .select('user_id, first_name, last_name, display_name, avatar_url')
+      ),
+    ]);
+
+    const profiles = profileRes.rows || [];
+    const admins = adminRes.rows || [];
+
+    const adminByUserId = {};
+    const adminByDisplayName = {};
+    (admins || []).forEach((a) => {
+      if (a?.user_id) adminByUserId[a.user_id] = a;
+      const dn = (a?.display_name || '').trim();
+      const fn = (a?.first_name || '').trim();
+      const ln = (a?.last_name || '').trim();
+      const combined = [fn, ln].filter(Boolean).join(' ');
+      if (dn) adminByDisplayName[normalizeName(dn)] = a;
+      if (combined) adminByDisplayName[normalizeName(combined)] = a;
+    });
+
+    const listFromProfiles = (profiles || [])
+      .filter((p) => !!p.id)
+      .map((p) => {
+        // admin_profiles is keyed by auth user_id, not profiles.id
+        const adminProfile = adminByUserId[p.user_id] || null;
+        const profileFullName = buildPersonName(p);
+        const adminFullName = buildPersonName(adminProfile || {});
+        const displayName =
+          adminFullName ||
+          (adminProfile?.display_name || '').trim() ||
+          profileFullName ||
+          p.employee_name;
+        const adminByDisplay = adminByDisplayName[normalizeName(displayName)] || adminByDisplayName[normalizeName(p.employee_name || '')];
+        const avatarUrl = adminProfile?.avatar_url || p.avatar_url || adminByDisplay?.avatar_url || null;
+        return {
+          id: p.id,
+          user_id: p.user_id || adminProfile?.user_id || null,
+          employee_name: p.employee_name,
+          first_name: p.first_name || '',
+          last_name: p.last_name || '',
+          email: p.email || '',
+          display_name: displayName,
+          avatar_url: avatarUrl,
+        };
+      });
+
+    let list = dedupeEmployeesByProfileId(listFromProfiles)
+      .filter((e) => !!e?.id)
+      .sort((a, b) =>
+      (a.display_name || a.employee_name || '').localeCompare(
+        b.display_name || b.employee_name || '',
+        undefined,
+        { sensitivity: 'base' }
+      )
+    );
+
+    if (__DEV__) {
+      const withAvatar = list.filter(e => !!e.avatar_url);
+      console.log('[Chat] loadEmployees final:', list.length, 'employees,', withAvatar.length, 'with avatar_url');
+      if (list.length > 0) console.log('[Chat] sample employee:', JSON.stringify({ id: list[0].id, display_name: list[0].display_name, avatar_url: list[0].avatar_url }));
+    }
+    setEmployees(list);
+    return list;
+  };
+
+  const resolveProfileDisplayNameById = (id, fallback = '') => {
+    const hit = resolveEmployeeById(id);
+    return (buildPersonName(hit) || fallback).trim();
   };
 
   const getDisplayNameForKey = (key) => {
-    const match = employees.find(e => normalizeName(e.employee_name) === key);
+    const match = employees.find(e => normalizeName(e.employee_name) === key || normalizeName(e.display_name) === key);
     if (!match) return key;
     return (match.display_name || match.employee_name || key).trim() || key;
   };
 
+  const resolveEmployeeByAny = (raw) => {
+    const key = normalizeName(raw);
+    const looseKey = normalizeLoose(raw);
+    if (!key) return null;
+    return employees.find(e =>
+      normalizeName(e.employee_name) === key ||
+      normalizeName(e.display_name) === key ||
+      normalizeName(buildPersonName(e)) === key ||
+      normalizeLoose(e.employee_name) === looseKey ||
+      normalizeLoose(e.display_name) === looseKey ||
+      normalizeLoose(buildPersonName(e)) === looseKey
+    ) || null;
+  };
+
+  const resolveEmployeeById = (id) => {
+    if (!id) return null;
+    const normalized = normalizeId(id);
+    return employees.find((e) => {
+      if (normalizeId(e.id) === normalized) return true;
+      if (normalizeId(e.user_id) === normalized) return true;
+      return false;
+    }) || null;
+  };
+
+  const resolveCurrentSenderForWrite = async () => {
+    // Enforce UUID/profile-backed identity for writes.
+    let senderId = employeeId || null;
+    let senderName = '';
+    const byKnownId = resolveEmployeeById(senderId);
+    if (byKnownId) {
+      senderId = senderId || byKnownId.id || null;
+      senderName = toCanonicalSenderName(byKnownId, senderName);
+    }
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user || null;
+      const userId = user?.id || null;
+      const userEmail = String(user?.email || email || '').trim().toLowerCase();
+      const makeProfileQuery = () =>
+        supabase
+          .from('profiles')
+          .select('id, user_id, org_id, employee_name, display_name, first_name, last_name, email')
+          .limit(10);
+      const pickBestProfile = (rows) => {
+        const arr = Array.isArray(rows) ? rows.filter(Boolean) : [];
+        if (!arr.length) return null;
+        const orgKey = normalizeId(activeOrgId);
+        const score = (r) => {
+          let s = 0;
+          if (normalizeId(r?.org_id) === orgKey) s += 50;
+          if ((r?.first_name || '').trim()) s += 10;
+          if ((r?.last_name || '').trim()) s += 10;
+          if ((r?.display_name || '').trim()) s += 6;
+          if ((r?.employee_name || '').trim()) s += 4;
+          if ((r?.email || '').trim()) s += 2;
+          return s;
+        };
+        return arr.sort((a, b) => score(b) - score(a))[0] || arr[0];
+      };
+      const queryOne = async (query) => {
+        try {
+          const { data, error } = await query;
+          if (error) return null;
+          return pickBestProfile(data);
+        } catch (_) {
+          return null;
+        }
+      };
+      let profileHit = null;
+      if (activeOrgId && userId) {
+        profileHit = await queryOne(makeProfileQuery().eq('org_id', activeOrgId).eq('user_id', userId));
+      }
+      if (!profileHit && userId) {
+        profileHit = await queryOne(makeProfileQuery().eq('user_id', userId));
+      }
+      if (!profileHit && activeOrgId && userEmail) {
+        profileHit = await queryOne(makeProfileQuery().eq('org_id', activeOrgId).ilike('email', userEmail));
+      }
+      if (!profileHit && userEmail) {
+        profileHit = await queryOne(makeProfileQuery().ilike('email', userEmail));
+      }
+      if (!profileHit && senderId && activeOrgId) {
+        profileHit = await queryOne(makeProfileQuery().eq('org_id', activeOrgId).eq('id', senderId));
+      }
+      if (!profileHit && senderId) {
+        profileHit = await queryOne(makeProfileQuery().eq('id', senderId));
+      }
+      if (!profileHit && senderId && activeOrgId) {
+        profileHit = await queryOne(makeProfileQuery().eq('org_id', activeOrgId).eq('user_id', senderId));
+      }
+      if (!profileHit && senderId) {
+        profileHit = await queryOne(makeProfileQuery().eq('user_id', senderId));
+      }
+      if (!profileHit && activeOrgId && userId) {
+        const first = (firstName || '').trim();
+        const last = (lastName || '').trim();
+        const fallbackDisplay = [first, last].filter(Boolean).join(' ').trim() || (displayName || '').trim() || (employeeName || '').trim();
+        const fallbackEmployee = (employeeName || fallbackDisplay || '').trim();
+        const payload = {
+          org_id: activeOrgId,
+          user_id: userId,
+          email: userEmail || null,
+          first_name: first || null,
+          last_name: last || null,
+          display_name: fallbackDisplay || null,
+          employee_name: fallbackEmployee || null,
+        };
+        try {
+          await supabase
+            .from('profiles')
+            .insert(payload);
+        } catch (_) {}
+        profileHit = await queryOne(makeProfileQuery().eq('org_id', activeOrgId).eq('user_id', userId));
+      }
+      if (profileHit) {
+        senderId = profileHit.id || senderId;
+        senderName = toCanonicalSenderName(profileHit, senderName);
+      }
+    } catch (_) {
+      // Keep current resolved values.
+    }
+
+    return {
+      senderId: senderId || null,
+      senderName: (senderName || '').trim(),
+    };
+  };
+
   const fetchAnnouncements = async () => {
+    if (!activeOrgId) return;
     const { data } = await supabase
       .from('announcements')
       .select('*')
-      .eq('org_id', ORG_ID)
+      .eq('org_id', activeOrgId)
       .order('created_at', { ascending: true })
       .limit(80);
     if (data) {
       setAnnouncements(data);
       if (data.length > 0) {
+        const latest = data[data.length - 1];
         setChannelPreviews(prev => ({
           ...prev,
-          announcements: data[data.length - 1].message,
+          announcements: latest.message,
         }));
+        setChannelLastTs(prev => ({ ...prev, announcements: latest.created_at || prev.announcements || null }));
       }
     }
   };
 
   const fetchMessages = async (channelId, showLoader = false) => {
+    if (!activeOrgId) return;
+    if (channelId.startsWith('dm:')) {
+      if (showLoader) setLoading(true);
+      const { data } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('org_id', activeOrgId)
+        .eq('channel_id', channelId)
+        .order('created_at', { ascending: true })
+        .limit(200);
+      if (data) {
+        setChannelMessages(prev => ({ ...prev, [channelId]: data }));
+        if (data.length > 0) {
+          const latest = data[data.length - 1];
+          setChannelPreviews(prev => ({ ...prev, [channelId]: latest.text }));
+          setChannelLastTs(prev => ({ ...prev, [channelId]: latest.created_at || prev[channelId] || null }));
+          setChannelLastSenderId(prev => ({ ...prev, [channelId]: normalizeId(latest.employee_id) }));
+        }
+      }
+      if (showLoader) setLoading(false);
+      return;
+    }
     if (showLoader) setLoading(true);
     const { data } = await supabase
       .from('messages')
       .select('*')
-      .eq('org_id', ORG_ID)
+      .eq('org_id', activeOrgId)
       .eq('channel_id', channelId)
       .order('created_at', { ascending: true })
       .limit(100);
     if (data) {
       setChannelMessages(prev => ({ ...prev, [channelId]: data }));
       if (data.length > 0) {
+        const latest = data[data.length - 1];
         setChannelPreviews(prev => ({
           ...prev,
-          [channelId]: data[data.length - 1].text,
+          [channelId]: latest.text,
         }));
+        setChannelLastTs(prev => ({ ...prev, [channelId]: latest.created_at || prev[channelId] || null }));
+        setChannelLastSenderId(prev => ({ ...prev, [channelId]: normalizeId(latest.employee_id) }));
       }
     }
     if (showLoader) setLoading(false);
   };
 
   const fetchChannelPreview = async (channelId) => {
+    if (!activeOrgId) return;
     const { data } = await supabase
       .from('messages')
       .select('text')
-      .eq('org_id', ORG_ID)
+      .eq('org_id', activeOrgId)
       .eq('channel_id', channelId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -177,66 +501,159 @@ const ChatPage = ({ orgId }) => {
     }
   };
 
-  const fetchDmThreads = async (showLoader = false) => {
-    if (!employeeName) return;
-    const myKey = normalizeName(employeeName);
+  const fetchDmThreads = async (showLoader = false, employeesOverride = null) => {
+    if (!employeeName || !activeOrgId) return;
+    const empList = employeesOverride ?? employeesRef.current ?? employees;
+    const resolveById = (id) => {
+      const normalized = normalizeId(id);
+      if (!normalized) return null;
+      return empList.find((e) => {
+        if (normalizeId(e.id) === normalized) return true;
+        if (normalizeId(e.user_id) === normalized) return true;
+        return false;
+      }) || null;
+    };
+    const myProfileIds = new Set(
+      empList
+        .filter((e) =>
+          (!!employeeId && normalizeId(e.id) === normalizeId(employeeId)) ||
+          (!!authUserId && normalizeId(e.user_id) === normalizeId(authUserId))
+        )
+        .flatMap((e) => [e.id, e.user_id].filter(Boolean))
+        .map(normalizeId)
+        .filter(Boolean)
+    );
+    if (employeeId) myProfileIds.add(normalizeId(employeeId));
+    if (authUserId) myProfileIds.add(normalizeId(authUserId));
     if (showLoader) setLoading(true);
     const { data } = await supabase
       .from('messages')
-      .select('channel_id, text, created_at')
-      .eq('org_id', ORG_ID)
-      .like('channel_id', 'dm:%')
+      .select('*')
+      .eq('org_id', activeOrgId)
       .order('created_at', { ascending: false });
     if (showLoader) setLoading(false);
     if (!data) return;
 
-    const seen = new Set();
-    const channels = [];
+    const channelById = new Map();
+    const participantMap = {};
+    const latestByChannel = {};
+    const latestSenderByChannel = {};
 
     for (const row of data) {
       const cid = row.channel_id;
-      if (!cid || seen.has(cid)) continue;
-      const raw = cid.startsWith('dm:') ? cid.slice(3) : cid;
-      const parts = raw.split('__');
-      if (parts.length !== 2) continue;
-      const [aKey, bKey] = parts;
-      if (aKey !== myKey && bKey !== myKey) continue;
-      const otherKey = aKey === myKey ? bKey : aKey;
-      const displayName = getDisplayNameForKey(otherKey);
-
-      channels.push({
-        id: cid,
-        name: displayName,
-        icon: 'person',
-        iconColor: '#3182ce',
-        iconBg: '#ebf8ff',
-        preview: row.text,
-        readOnly: false,
-      });
-      seen.add(cid);
+      if (!cid) continue;
+      if (cid.startsWith('dm:') && cid.indexOf(':', 3) > 3) {
+        const participantId = parseDmParticipant(cid, myProfileIds);
+        if (!participantId) continue;
+        const resolvedProfile = resolveById(participantId);
+        if (!resolvedProfile?.id) continue;
+        participantMap[cid] = normalizeId(resolvedProfile.id);
+        if (!channelById.has(cid)) {
+          const resolvedName = (
+            buildPersonName(resolvedProfile) ||
+            resolvedProfile?.employee_name ||
+            'Direct Message'
+          ).trim();
+          channelById.set(cid, {
+            id: cid,
+            name: resolvedName,
+            avatarUrl: resolvedProfile?.avatar_url || null,
+            icon: 'person',
+            iconColor: '#3182ce',
+            iconBg: '#ebf8ff',
+            preview: row.text,
+            readOnly: false,
+          });
+          latestSenderByChannel[cid] = normalizeId(row.employee_id);
+        }
+        latestByChannel[cid] = latestByChannel[cid] || row.created_at || null;
+      }
     }
 
+    const channels = Array.from(channelById.values());
+    myProfileIdsRef.current = myProfileIds;
     setDmChannels(channels);
+    setDmParticipantByChannel(participantMap);
     setChannelPreviews(prev => {
       const next = { ...prev };
-      channels.forEach(c => {
-        next[c.id] = c.preview;
-      });
+      channels.forEach(c => { next[c.id] = c.preview; });
       return next;
     });
+    setChannelLastTs(prev => ({ ...prev, ...latestByChannel }));
+    setChannelLastSenderId(prev => ({ ...prev, ...latestSenderByChannel }));
   };
 
   const sendMessage = async () => {
+    if (!activeOrgId) {
+      Alert.alert('Missing org', 'Could not resolve restaurant. Please reopen the app.');
+      return;
+    }
     const text = inputText.trim();
     if (!text || sending) return;
+    const senderIdentity = await resolveCurrentSenderForWrite();
+    const writeSenderName = senderIdentity.senderName;
+    const writeSenderId = senderIdentity.senderId;
+    if (!writeSenderId || !writeSenderName) {
+      Alert.alert('Profile sync required', 'Unable to resolve your UUID-backed profile. Please reopen the app and try again.');
+      return;
+    }
     setInputText('');
     setSending(true);
 
+    if (activeChannel === 'announcements') {
+      const optimisticAnnouncement = {
+        id: `opt-ann-${Date.now()}`,
+        org_id: activeOrgId,
+        message: text,
+        created_by: writeSenderName,
+        created_by_id: writeSenderId || null,
+        created_at: new Date().toISOString(),
+      };
+      setAnnouncements(prev => [...prev, optimisticAnnouncement]);
+      setChannelPreviews(prev => ({ ...prev, announcements: text }));
+      scrollToBottom();
+
+      let { error } = await supabase.from('announcements').insert({
+        org_id: activeOrgId,
+        message: text,
+        created_by: writeSenderName,
+        created_by_id: writeSenderId || null,
+      });
+      if (error && /created_by_id/i.test(error.message || '')) {
+        const fallback = await supabase.from('announcements').insert({
+          org_id: activeOrgId,
+          message: text,
+          created_by: writeSenderName,
+        });
+        error = fallback.error;
+      }
+
+      setSending(false);
+      if (!error) {
+        fetchAnnouncements();
+      } else {
+        // Keep a visible local record instead of "disappearing instantly"
+        // so the sender can see that send failed and retry.
+        setAnnouncements(prev =>
+          prev.map(a =>
+            a.id === optimisticAnnouncement.id
+              ? { ...a, message: `${a.message} (failed to send)` }
+              : a
+          )
+        );
+        Alert.alert('Send failed', error.message || 'Could not post announcement.');
+      }
+      return;
+    }
+
+    const insertChannelId = activeChannel;
+
     const optimistic = {
       id: `opt-${Date.now()}`,
-      org_id: ORG_ID,
-      channel_id: activeChannel,
-      sender: employeeName,
+      org_id: activeOrgId,
+      channel_id: insertChannelId,
+      sender: writeSenderName,
+      employee_id: writeSenderId || undefined,
       text,
       created_at: new Date().toISOString(),
     };
@@ -247,9 +664,10 @@ const ChatPage = ({ orgId }) => {
     scrollToBottom();
 
     const { error } = await supabase.from('messages').insert({
-      org_id: ORG_ID,
-      channel_id: activeChannel,
-      sender: employeeName,
+      org_id: activeOrgId,
+      channel_id: insertChannelId,
+      sender: writeSenderName,
+      employee_id: writeSenderId || undefined,
       text,
     });
 
@@ -257,6 +675,9 @@ const ChatPage = ({ orgId }) => {
     if (!error) {
       fetchMessages(activeChannel, false);
       setChannelPreviews(prev => ({ ...prev, [activeChannel]: text }));
+      setChannelSeenTs(prev => ({ ...prev, [activeChannel]: new Date().toISOString() }));
+    } else {
+      Alert.alert('Send failed', error.message || 'Could not send message.');
     }
   };
 
@@ -264,34 +685,79 @@ const ChatPage = ({ orgId }) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  // Must match the channel_id format used by the web app (dm-${employee_name})
-  const myManagerDmId = employeeName ? `dm-${employeeName}` : 'dm-';
-
   const CHANNELS = [
     BASE_CHANNELS[0], // announcements
-    {
-      id: myManagerDmId,
-      name: 'Manager',
-      icon: 'person-circle',
-      iconColor: '#4a6fa5',
-      iconBg: '#ebf4ff',
-      preview: 'Direct message',
-      readOnly: false,
-    },
-    BASE_CHANNELS[1], // group-kitchen
   ];
 
   const allChannels = [...CHANNELS, ...dmChannels];
+  const hasUnreadChannel = (channelId) => {
+    const last = Date.parse(channelLastTs[channelId] || '');
+    if (Number.isNaN(last)) return false;
+
+    const lastSender = channelLastSenderId[channelId] || '';
+    const myIds = myProfileIdsRef.current || new Set();
+    if (lastSender && myIds.has(lastSender)) return false;
+
+    const seen = Date.parse(channelSeenTs[channelId] || '');
+    if (Number.isNaN(seen)) return true;
+    return last > seen;
+  };
+
+  const filteredChannels = allChannels.filter((c) => {
+    if (!chatSearchQuery.trim()) return true;
+    const q = chatSearchQuery.trim().toLowerCase();
+    const name = (c.name || '').toLowerCase();
+    const preview = (channelPreviews[c.id] || c.preview || '').toLowerCase();
+    return name.includes(q) || preview.includes(q);
+  }).sort((a, b) => {
+    const aUnread = hasUnreadChannel(a.id) ? 1 : 0;
+    const bUnread = hasUnreadChannel(b.id) ? 1 : 0;
+    if (aUnread !== bUnread) return bUnread - aUnread;
+    const aTs = Date.parse(channelLastTs[a.id] || '');
+    const bTs = Date.parse(channelLastTs[b.id] || '');
+    const av = Number.isNaN(aTs) ? 0 : aTs;
+    const bv = Number.isNaN(bTs) ? 0 : bTs;
+    return bv - av;
+  });
   const currentChannel =
     allChannels.find(c => c.id === activeChannel) || null;
+  const enrichedCurrentChannel = (() => {
+    if (!currentChannel) return null;
+    if (!currentChannel.id?.startsWith('dm:')) return currentChannel;
+    const identity = parseDmParticipant(currentChannel.id, myProfileIdsRef.current || new Set());
+    if (!identity) return currentChannel;
+    const hit = resolveEmployeeById(identity);
+    if (!hit) return currentChannel;
+    const resolvedName = (
+      buildPersonName(hit) ||
+      hit.employee_name ||
+      hit.display_name ||
+      currentChannel.name ||
+      'Direct Message'
+    ).trim();
+    const resolvedAvatar = hit.avatar_url || currentChannel.avatarUrl || null;
+    return { ...currentChannel, name: resolvedName, avatarUrl: resolvedAvatar };
+  })();
   const currentMessages = activeChannel === 'announcements'
-    ? announcements.map(a => ({
-        id: a.id,
-        sender: a.created_by || 'Manager',
-        text: a.message,
-        created_at: a.created_at,
-      }))
+    ? announcements.map(a => {
+        const byId = resolveEmployeeById(a.created_by_id);
+        const byName = !byId ? resolveEmployeeByAny(a.created_by) : null;
+        const profile = byId || byName || null;
+        return {
+          id: a.id,
+          sender: buildPersonName(profile) || (a.created_by || '').trim() || 'Unknown user',
+          employee_id: a.created_by_id || null,
+          avatar_url: profile?.avatar_url || null,
+          text: a.message || a.text || '',
+          created_at: a.created_at || a.updated_at || new Date().toISOString(),
+        };
+      })
     : channelMessages[activeChannel] || [];
+
+  useEffect(() => {
+    if (!activeChannel) return;
+    setChannelSeenTs(prev => ({ ...prev, [activeChannel]: new Date().toISOString() }));
+  }, [activeChannel]);
 
   // ── Channel list ────────────────────────────────────────────────────────────
   if (!activeChannel) {
@@ -301,15 +767,31 @@ const ChatPage = ({ orgId }) => {
           <Text style={styles.headerTitle}>Messages</Text>
           <TouchableOpacity
             style={styles.headerIconBtn}
-            onPress={() => setShowNewDmModal(true)}
+            onPress={async () => {
+              setDmSearchQuery('');
+              await loadEmployees();
+              setShowNewDmModal(true);
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="add" size={24} color="#4CAF50" />
           </TouchableOpacity>
         </View>
 
+        <View style={styles.chatSearchBarContainer}>
+          <Ionicons name="search" size={18} color="#a0aec0" style={styles.chatSearchIcon} />
+          <TextInput
+            style={styles.chatSearchInput}
+            placeholder="Search chats..."
+            placeholderTextColor="#a0aec0"
+            value={chatSearchQuery}
+            onChangeText={setChatSearchQuery}
+            autoCapitalize="none"
+          />
+        </View>
+
         <FlatList
-          data={allChannels}
+          data={filteredChannels}
           keyExtractor={c => c.id}
           contentContainerStyle={styles.channelList}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -319,9 +801,13 @@ const ChatPage = ({ orgId }) => {
               onPress={() => setActiveChannel(item.id)}
               activeOpacity={0.7}
             >
-              <View style={[styles.channelIconBg, { backgroundColor: item.iconBg }]}>
-                <Ionicons name={item.icon} size={22} color={item.iconColor} />
-              </View>
+              {item.avatarUrl ? (
+                <Image source={{ uri: item.avatarUrl }} style={styles.channelAvatarImage} />
+              ) : (
+                <View style={[styles.channelIconBg, { backgroundColor: item.iconBg }]}>
+                  <Ionicons name={item.icon} size={22} color={item.iconColor} />
+                </View>
+              )}
               <View style={styles.channelInfo}>
                 <View style={styles.channelNameRow}>
                   <Text style={styles.channelName}>{item.name}</Text>
@@ -335,6 +821,7 @@ const ChatPage = ({ orgId }) => {
                   {channelPreviews[item.id] || item.preview}
                 </Text>
               </View>
+              {hasUnreadChannel(item.id) && <View style={styles.channelUnreadDot} />}
               <Ionicons name="chevron-forward" size={18} color="#cbd5e0" />
             </TouchableOpacity>
           )}
@@ -347,15 +834,20 @@ const ChatPage = ({ orgId }) => {
           animationType="slide"
           onRequestClose={() => setShowNewDmModal(false)}
         >
-          <TouchableOpacity
-            style={styles.dmOverlay}
-            activeOpacity={1}
-            onPress={() => setShowNewDmModal(false)}
+          <KeyboardAvoidingView
+            style={styles.dmKeyboardWrap}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
           >
             <TouchableOpacity
+              style={styles.dmOverlay}
               activeOpacity={1}
-              style={styles.dmSheet}
+              onPress={() => setShowNewDmModal(false)}
             >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.dmSheet}
+              >
               <View style={styles.dmHandle} />
               <Text style={styles.dmTitle}>New message</Text>
               <Text style={styles.dmSubtitle}>Select someone in the restaurant</Text>
@@ -373,21 +865,42 @@ const ChatPage = ({ orgId }) => {
               </View>
 
               <FlatList
-                data={employees.filter(e => {
-                  if (normalizeName(e.employee_name) === normalizeName(employeeName)) return false;
+                data={dedupeEmployeesByProfileId(employees).filter(e => {
+                  // For DM selection, show only UUID-linked users when available.
+                  if (!e?.id) return false;
+                  const currentNames = new Set([
+                    normalizeName(employeeName),
+                    normalizeName(displayName),
+                  ].filter(Boolean));
+                  const rowName = buildPersonName(e);
+                  if ((employeeId && e.id === employeeId) || currentNames.has(normalizeName(rowName)) || currentNames.has(normalizeName(e.employee_name))) return false;
                   if (!dmSearchQuery.trim()) return true;
                   const query = dmSearchQuery.trim().toLowerCase();
-                  const dName = (e.display_name || '').toLowerCase();
+                  const dName = buildPersonName(e).toLowerCase();
                   const eName = (e.employee_name || '').toLowerCase();
                   return dName.includes(query) || eName.includes(query);
                 })}
-                keyExtractor={(item) => item.employee_name}
+                keyExtractor={(item) => item.id || `name:${normalizeName(buildPersonName(item) || item.employee_name || item.display_name)}`}
                 ItemSeparatorComponent={() => <View style={styles.dmSeparator} />}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                onScrollBeginDrag={Keyboard.dismiss}
                 renderItem={({ item }) => {
-                  const displayName = (item.display_name || item.employee_name || '').trim() || item.employee_name;
+                  const displayName = buildPersonName(item) || item.employee_name;
                   const initials = getInitials(displayName);
                   const handlePress = () => {
-                    const channelId = buildDmChannelId(employeeName, item.employee_name);
+                    if (!item.id) {
+                      Alert.alert(
+                        'Profile not ready',
+                        `${displayName} needs to sign in once before direct messaging is available.`
+                      );
+                      return;
+                    }
+                    if (!employeeId) {
+                      Alert.alert('Profile sync required', 'Your profile is not loaded. Please reopen the app.');
+                      return;
+                    }
+                    const channelId = buildSortedDmChannelId(employeeId, item.id);
                     if (!channelId) return;
                     const existing = dmChannels.find(c => c.id === channelId);
                     if (!existing) {
@@ -399,10 +912,12 @@ const ChatPage = ({ orgId }) => {
                           icon: 'person',
                           iconColor: '#3182ce',
                           iconBg: '#ebf8ff',
+                          avatarUrl: item.avatar_url || null,
                           preview: 'Direct message',
                           readOnly: false,
                         },
                       ]);
+                      setDmParticipantByChannel(prev => ({ ...prev, [channelId]: normalizeId(item.id) }));
                     }
                     setShowNewDmModal(false);
                     setActiveChannel(channelId);
@@ -414,9 +929,13 @@ const ChatPage = ({ orgId }) => {
                       onPress={handlePress}
                       activeOpacity={0.8}
                     >
-                      <View style={styles.dmAvatar}>
-                        <Text style={styles.dmAvatarText}>{initials}</Text>
-                      </View>
+                      {item.avatar_url ? (
+                        <Image source={{ uri: item.avatar_url }} style={styles.dmAvatarImage} />
+                      ) : (
+                        <View style={styles.dmAvatar}>
+                          <Text style={styles.dmAvatarText}>{initials}</Text>
+                        </View>
+                      )}
                       <View style={styles.dmInfo}>
                         <Text style={styles.dmName}>{displayName}</Text>
                         <Text style={styles.dmHint}>Direct message</Text>
@@ -438,8 +957,9 @@ const ChatPage = ({ orgId }) => {
               >
                 <Text style={styles.dmCancelText}>Cancel</Text>
               </TouchableOpacity>
+              </TouchableOpacity>
             </TouchableOpacity>
-          </TouchableOpacity>
+          </KeyboardAvoidingView>
         </Modal>
       </View>
     );
@@ -457,11 +977,15 @@ const ChatPage = ({ orgId }) => {
         <TouchableOpacity onPress={() => setActiveChannel(null)} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color="#2d3748" />
         </TouchableOpacity>
-        <View style={[styles.chatHeaderIcon, { backgroundColor: currentChannel?.iconBg }]}>
-          <Ionicons name={currentChannel?.icon} size={18} color={currentChannel?.iconColor} />
-        </View>
-        <Text style={styles.headerTitle}>{currentChannel?.name}</Text>
-        {currentChannel?.readOnly && (
+        {enrichedCurrentChannel?.avatarUrl ? (
+          <Image source={{ uri: enrichedCurrentChannel.avatarUrl }} style={styles.chatHeaderAvatar} />
+        ) : (
+          <View style={[styles.chatHeaderIcon, { backgroundColor: enrichedCurrentChannel?.iconBg }]}>
+            <Ionicons name={enrichedCurrentChannel?.icon} size={18} color={enrichedCurrentChannel?.iconColor} />
+          </View>
+        )}
+        <Text style={styles.headerTitle}>{enrichedCurrentChannel?.name}</Text>
+        {enrichedCurrentChannel?.readOnly && (
           <View style={styles.readOnlyBadge}>
             <Text style={styles.readOnlyText}>View only</Text>
           </View>
@@ -478,29 +1002,49 @@ const ChatPage = ({ orgId }) => {
           keyExtractor={m => String(m.id)}
           contentContainerStyle={styles.messagesList}
           onContentSizeChange={scrollToBottom}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          onScrollBeginDrag={Keyboard.dismiss}
           ListEmptyComponent={
             <View style={styles.emptyChat}>
               <Ionicons name="chatbubbles-outline" size={40} color="#cbd5e0" />
               <Text style={styles.emptyChatText}>No messages yet</Text>
-              {!currentChannel?.readOnly && (
+              {!enrichedCurrentChannel?.readOnly && (
                 <Text style={styles.emptyChatSub}>Send the first message!</Text>
               )}
             </View>
           }
           renderItem={({ item }) => {
-            const isMe = item.sender?.toLowerCase() === employeeName.toLowerCase();
+            const senderById = resolveEmployeeById(item.employee_id);
+            const senderByName = !senderById ? resolveEmployeeByAny(item.sender) : null;
+            const senderProfile = senderById || senderByName || null;
+            const isMe =
+              (!!item.employee_id && !!employeeId && item.employee_id === employeeId) ||
+              (!!senderProfile?.id && !!employeeId && senderProfile.id === employeeId);
+            const senderLabel = isMe
+              ? 'You'
+              : (
+                buildPersonName(senderProfile) ||
+                (item.sender || '').trim() ||
+                'Unknown user'
+              );
+            const senderAvatarUrl = item?.avatar_url || senderProfile?.avatar_url || null;
             return (
               <View style={[styles.messageRow, isMe && styles.messageRowMe]}>
                 {!isMe && (
-                  <View style={styles.avatarCircle}>
-                    <Text style={styles.avatarText}>
-                      {(item.sender || '?').charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
+                  senderAvatarUrl ? (
+                    <Image source={{ uri: senderAvatarUrl }} style={styles.avatarImage} />
+                  ) : (
+                    <View style={styles.avatarCircle}>
+                      <Text style={styles.avatarText}>
+                        {(senderLabel || '?').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )
                 )}
                 <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
                   {!isMe && (
-                    <Text style={styles.bubbleSender}>{item.sender}</Text>
+                    <Text style={styles.bubbleSender}>{senderLabel}</Text>
                   )}
                   <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>
                     {item.text}
@@ -516,7 +1060,7 @@ const ChatPage = ({ orgId }) => {
       )}
 
       {/* Input bar */}
-      {!currentChannel?.readOnly && (
+      {!enrichedCurrentChannel?.readOnly && (
         <View style={styles.inputBar}>
           <TextInput
             style={styles.input}
@@ -541,11 +1085,11 @@ const ChatPage = ({ orgId }) => {
         </View>
       )}
 
-      {currentChannel?.readOnly && (
+      {enrichedCurrentChannel?.readOnly && (
         <View style={styles.readOnlyBar}>
           <Ionicons name="lock-closed-outline" size={14} color="#a0aec0" style={{ marginRight: 6 }} />
           <Text style={styles.readOnlyBarText}>
-            Announcements are posted by management
+            View only channel
           </Text>
         </View>
       )}
@@ -582,6 +1126,10 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 10,
     justifyContent: 'center', alignItems: 'center',
   },
+  chatHeaderAvatar: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: '#edf2f7',
+  },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: '#2d3748' },
 
   // Channel list
@@ -596,10 +1144,23 @@ const styles = StyleSheet.create({
     width: 46, height: 46, borderRadius: 14,
     justifyContent: 'center', alignItems: 'center',
   },
+  channelAvatarImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#edf2f7',
+  },
   channelInfo: { flex: 1 },
   channelNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
   channelName: { fontSize: 16, fontWeight: '600', color: '#2d3748' },
   channelPreview: { fontSize: 13, color: '#a0aec0' },
+  channelUnreadDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: '#3182ce',
+    marginRight: 6,
+  },
 
   readOnlyBadge: {
     backgroundColor: '#f7fafc', borderWidth: 1, borderColor: '#e2e8f0',
@@ -626,6 +1187,13 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: '#4CAF50',
     justifyContent: 'center', alignItems: 'center',
+    flexShrink: 0,
+  },
+  avatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#edf2f7',
     flexShrink: 0,
   },
   avatarText: { color: 'white', fontSize: 13, fontWeight: '700' },
@@ -674,6 +1242,10 @@ const styles = StyleSheet.create({
   readOnlyBarText: { fontSize: 13, color: '#a0aec0' },
 
   // New DM modal
+  dmKeyboardWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   dmOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -745,6 +1317,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+  dmAvatarImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 12,
+    backgroundColor: '#edf2f7',
+  },
   dmAvatarText: {
     fontSize: 14,
     fontWeight: '700',
@@ -778,5 +1357,27 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#718096',
     fontWeight: '500',
+  },
+  // Chat list search bar
+  chatSearchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f7fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  chatSearchIcon: {
+    marginRight: 8,
+  },
+  chatSearchInput: {
+    flex: 1,
+    height: 38,
+    fontSize: 15,
+    color: '#2d3748',
   },
 });

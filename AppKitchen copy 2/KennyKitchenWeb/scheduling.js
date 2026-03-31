@@ -220,7 +220,30 @@ async function loadShiftRequests() {
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
 
-    if (error || !requests || requests.length === 0) {
+    if (error) {
+        console.warn('[ShiftRequests] load error:', error.message, error.hint || '', error.code || '');
+        container.innerHTML = `
+            <div style="text-align:center;padding:40px 0;color:#e53e3e;">
+                <i class="fas fa-exclamation-triangle" style="font-size:32px;margin-bottom:12px;display:block;"></i>
+                Could not load requests: ${error.message || 'unknown error'}
+                <br><small style="color:#a0aec0;font-size:11px;">Run rls-fix-org-members-shifts.sql in Supabase SQL Editor</small>
+            </div>`;
+        return;
+    }
+
+    console.log('[ShiftRequests] loaded', (requests || []).length, 'pending requests');
+
+    // Also check ALL statuses to verify data exists at all
+    const { data: allReqs, error: allErr } = await window.supabaseClient
+        .from('shift_requests')
+        .select('id, status, employee_name, request_type, shift_id, created_at')
+        .eq('org_id', window.ORG_ID)
+        .order('created_at', { ascending: false })
+        .limit(10);
+    console.log('[ShiftRequests] all statuses:', (allReqs || []).length, 'rows', allErr ? `ERROR: ${allErr.message}` : 'OK');
+    if (allReqs?.length) console.log('[ShiftRequests] sample:', JSON.stringify(allReqs[0]));
+
+    if (!requests || requests.length === 0) {
         container.innerHTML = `
             <div style="text-align:center;padding:40px 0;color:#a0aec0;">
                 <i class="fas fa-check-circle" style="font-size:32px;color:#c6f6d5;margin-bottom:12px;display:block;"></i>
@@ -254,7 +277,7 @@ async function loadShiftRequests() {
 
         const shiftDate = shift.shift_date
             ? new Date(shift.shift_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-            : 'Unknown date';
+            : (req.note || 'See note');
         const shiftTime = shift.start_time
             ? `${formatTimeLabel(shift.start_time)} – ${formatTimeLabel(shift.end_time)}`
             : '';
@@ -265,6 +288,8 @@ async function loadShiftRequests() {
             if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
             return `${Math.floor(diff/86400)}d ago`;
         })();
+
+        const safeShiftId = req.shift_id || '';
 
         return `
             <div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">
@@ -284,7 +309,7 @@ async function loadShiftRequests() {
                 ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;">"${escapeHtml(req.note)}"</p>` : ''}
                 ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;">Transfer to: <strong>${escapeHtml(req.target_employee)}</strong></p>` : ''}
                 <div style="display:flex;gap:8px;">
-                    <button onclick="approveShiftRequest('${req.id}','${req.shift_id}','${escapeHtml(req.employee_name)}','${escapeHtml(shift.position || '')}','${req.request_type}','${req.target_employee || ''}')"
+                    <button onclick="approveShiftRequest('${req.id}','${safeShiftId}','${escapeHtml(req.employee_name)}','${escapeHtml(shift.position || '')}','${req.request_type}','${req.target_employee || ''}')"
                         style="flex:1;background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;
                                font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-check"></i> Approve
@@ -306,63 +331,270 @@ function formatTimeLabel(t) {
     return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
 }
 
+/** YYYY-MM-DD for a shift card entry (uses that week's Monday in shiftData). */
+function getShiftEntryDateStr(s) {
+    if (!s || !s.day || !s.weekStart) return null;
+    const dayIndex = DAY_NAMES.indexOf(String(s.day).toLowerCase());
+    if (dayIndex < 0) return null;
+    const d = new Date(String(s.weekStart).slice(0, 10) + 'T12:00:00');
+    d.setDate(d.getDate() + dayIndex);
+    return d.toISOString().split('T')[0];
+}
+
+function removeEmployeeShiftsInDateRangeLocal(employeeName, startDateStr, endDateStr) {
+    if (!window.shiftData || !employeeName || !startDateStr || !endDateStr) return;
+    const list = window.shiftData[employeeName];
+    if (!list || !list.length) return;
+    window.shiftData[employeeName] = list.filter((x) => {
+        const dstr = getShiftEntryDateStr(x);
+        if (!dstr) return true;
+        return !(dstr >= startDateStr && dstr <= endDateStr);
+    });
+    persistShiftData();
+}
+
+/** True if this employee has an approved calendar time-off that covers dateStr. */
+async function employeeHasApprovedTimeOffOnDate(employeeDisplayName, dateStr) {
+    if (!window.supabaseClient || !window.ORG_ID || !dateStr) return false;
+    const mine = normEmployeeKey(employeeDisplayName);
+    const { data, error } = await window.supabaseClient
+        .from('shift_requests')
+        .select('employee_name, time_off_start_date, time_off_end_date')
+        .eq('org_id', window.ORG_ID)
+        .eq('status', 'approved')
+        .eq('request_type', 'time_off');
+    if (error || !data?.length) return false;
+    for (const r of data) {
+        if (normEmployeeKey(r.employee_name || '') !== mine) continue;
+        const s = r.time_off_start_date;
+        const e = r.time_off_end_date || r.time_off_start_date;
+        if (!s || !e) continue;
+        if (dateStr >= s && dateStr <= e) return true;
+    }
+    return false;
+}
+
+async function fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, dateStr) {
+    if (!window.supabaseClient || !window.ORG_ID || !dateStr) return [];
+    const { data, error } = await window.supabaseClient
+        .from('shifts')
+        .select('id, start_time, end_time, employee_name')
+        .eq('org_id', window.ORG_ID)
+        .eq('shift_date', dateStr);
+    if (error || !data) return [];
+    const mine = normEmployeeKey(employeeDisplayName);
+    return data.filter((row) => normEmployeeKey(row.employee_name || '') === mine);
+}
+
+/** Overlap vs other saved shifts for same person on same day (Supabase). */
+async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, startTime, endTime, excludeShiftId = null) {
+    const rows = await fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, dateStr);
+    for (const row of rows) {
+        if (excludeShiftId && String(row.id) === String(excludeShiftId)) continue;
+        if (shiftTimeRangesOverlap(startTime, endTime, row.start_time, row.end_time)) {
+            return { overlap: true, other: row };
+        }
+    }
+    return { overlap: false };
+}
+
 async function approveShiftRequest(requestId, shiftId, employeeName, position, requestType, targetEmployee) {
     if (!window.supabaseClient || !window.ORG_ID) return;
 
-    // 1. Mark request approved
-    await window.supabaseClient
+    const { data: reqRow, error: fetchErr } = await window.supabaseClient
         .from('shift_requests')
-        .update({ status: 'approved' })
-        .eq('id', requestId);
-
-    // 2. Mark the shift as open (remove employee assignment)
-    const { error: shiftErr } = await window.supabaseClient
-        .from('shifts')
-        .update({ status: 'open', employee_name: null })
-        .eq('id', shiftId);
-
-    if (shiftErr) {
-        showNotification('Could not update shift: ' + shiftErr.message, 'error');
+        .select('*')
+        .eq('id', requestId)
+        .maybeSingle();
+    if (fetchErr || !reqRow) {
+        showNotification('Could not load this request: ' + (fetchErr?.message || 'not found'), 'error');
         return;
     }
 
-    // 3. Notify employee their request was approved
+    if (requestType === 'transfer' && targetEmployee) {
+        // ── TRANSFER: reassign shift to the target employee ─────────────
+        const targetId = typeof window.getEmployeeIdFromName === 'function'
+            ? window.getEmployeeIdFromName(targetEmployee) : null;
+
+        const { error: shiftErr } = await window.supabaseClient
+            .from('shifts')
+            .update({ employee_name: targetEmployee, employee_id: targetId })
+            .eq('id', shiftId);
+
+        if (shiftErr) {
+            showNotification('Could not transfer shift: ' + shiftErr.message, 'error');
+            return;
+        }
+
+        await window.supabaseClient
+            .from('shift_requests')
+            .update({ status: 'approved' })
+            .eq('id', requestId);
+
+        // Notify original employee
+        await window.supabaseClient.from('notifications').insert({
+            org_id: window.ORG_ID,
+            employee_name: employeeName,
+            type: 'request_approved',
+            title: 'Transfer Approved',
+            body: `Your shift has been transferred to ${targetEmployee}.`,
+            read: false,
+        });
+
+        // Notify the new assignee
+        await window.supabaseClient.from('notifications').insert({
+            org_id: window.ORG_ID,
+            employee_name: targetEmployee,
+            type: 'shift_assigned',
+            title: 'Shift Transferred to You',
+            body: `A ${position || ''} shift has been transferred to you from ${employeeName}. Check your schedule!`.trim(),
+            read: false,
+        });
+        sendPushToEmployee(targetEmployee, 'Shift Transferred to You',
+            `A ${position || ''} shift from ${employeeName} is now yours!`.trim());
+
+        showNotification(`Transfer approved — shift reassigned to ${targetEmployee}.`, 'success');
+
+        // Update local shiftData for the web grid
+        if (window.shiftData) {
+            const empShifts = window.shiftData[employeeName] || [];
+            const idx = empShifts.findIndex(s => s.shiftId === shiftId);
+            if (idx >= 0) {
+                const moved = empShifts.splice(idx, 1)[0];
+                if (!window.shiftData[targetEmployee]) window.shiftData[targetEmployee] = [];
+                window.shiftData[targetEmployee].push(moved);
+                persistShiftData();
+            }
+        }
+
+        await loadShiftRequests();
+        if (typeof renderSchedule === 'function') renderSchedule();
+        return;
+    }
+
+    // ── TIME OFF: remove shift(s) and record approved date range (blocks future scheduling) ──
+    let ds = reqRow.time_off_start_date;
+    let de = reqRow.time_off_end_date || reqRow.time_off_start_date;
+    if (!ds || !de) {
+        if (shiftId) {
+            const { data: sh } = await window.supabaseClient
+                .from('shifts')
+                .select('shift_date')
+                .eq('id', shiftId)
+                .maybeSingle();
+            if (sh?.shift_date) {
+                ds = sh.shift_date;
+                de = sh.shift_date;
+            }
+        }
+    }
+
+    const positionsToAnnounce = new Set();
+    if (position) positionsToAnnounce.add(position);
+
+    if (ds && de) {
+        const { data: rangeShifts, error: rangeErr } = await window.supabaseClient
+            .from('shifts')
+            .select('id, employee_name, position')
+            .eq('org_id', window.ORG_ID)
+            .gte('shift_date', ds)
+            .lte('shift_date', de);
+        if (rangeErr) {
+            showNotification('Could not load shifts for time off: ' + rangeErr.message, 'error');
+            return;
+        }
+        const mine = normEmployeeKey(employeeName);
+        const matched = (rangeShifts || []).filter((s) => normEmployeeKey(s.employee_name || '') === mine);
+
+        for (const srow of matched) {
+            const { error: delErr } = await window.supabaseClient
+                .from('shifts')
+                .delete()
+                .eq('id', srow.id);
+            if (delErr) {
+                showNotification('Could not remove shift: ' + delErr.message, 'error');
+                return;
+            }
+            if (srow.position) positionsToAnnounce.add(srow.position);
+        }
+        removeEmployeeShiftsInDateRangeLocal(employeeName, ds, de);
+    } else if (shiftId) {
+        const { data: oneShift } = await window.supabaseClient
+            .from('shifts')
+            .select('position')
+            .eq('id', shiftId)
+            .maybeSingle();
+        if (oneShift?.position) positionsToAnnounce.add(oneShift.position);
+
+        const { error: shiftErr } = await window.supabaseClient
+            .from('shifts')
+            .delete()
+            .eq('id', shiftId);
+
+        if (shiftErr) {
+            showNotification('Could not remove shift: ' + shiftErr.message, 'error');
+            return;
+        }
+
+        if (window.shiftData && window.shiftData[employeeName]) {
+            window.shiftData[employeeName] = window.shiftData[employeeName].filter((s) => s.shiftId !== shiftId);
+            persistShiftData();
+        }
+    }
+
+    await window.supabaseClient
+        .from('shift_requests')
+        .update({
+            status: 'approved',
+            time_off_start_date: ds || reqRow.time_off_start_date,
+            time_off_end_date: (de || ds) || reqRow.time_off_end_date,
+        })
+        .eq('id', requestId);
+
     await window.supabaseClient.from('notifications').insert({
         org_id: window.ORG_ID,
         employee_name: employeeName,
         type: 'request_approved',
-        title: 'Request Approved',
-        body: `Your ${requestType === 'time_off' ? 'time off' : 'transfer'} request has been approved.`,
+        title: 'Time Off Approved',
+        body: ds && de
+            ? `Your time off from ${ds} through ${de} has been approved.`
+            : 'Your time off request has been approved. The shift has been removed from your schedule.',
         read: false,
     });
 
-    // 4. Find all other employees who have worked this position and notify them
-    const { data: capable } = await window.supabaseClient
-        .from('shifts')
-        .select('employee_name')
-        .eq('org_id', window.ORG_ID)
-        .eq('position', position)
-        .neq('employee_name', employeeName)
-        .not('employee_name', 'is', null);
+    let notifiedOpenShift = 0;
+    for (const pos of positionsToAnnounce) {
+        const { data: capable } = await window.supabaseClient
+            .from('shifts')
+            .select('employee_name')
+            .eq('org_id', window.ORG_ID)
+            .eq('position', pos)
+            .neq('employee_name', employeeName)
+            .not('employee_name', 'is', null);
 
-    const uniqueEmployees = [...new Set((capable || []).map(s => s.employee_name).filter(Boolean))];
-
-    for (const name of uniqueEmployees) {
-        // In-app notification
-        await window.supabaseClient.from('notifications').insert({
-            org_id: window.ORG_ID,
-            employee_name: name,
-            type: 'open_shift',
-            title: 'Open Shift Available',
-            body: `A ${position} shift is now open. Check Open Shifts to pick it up!`,
-            read: false,
-        });
-        // Push notification
-        sendPushToEmployee(name, 'Open Shift Available', `A ${position} shift is now open. Check the app!`);
+        const uniqueEmployees = [...new Set((capable || []).map((s) => s.employee_name).filter(Boolean))];
+        for (const name of uniqueEmployees) {
+            await window.supabaseClient.from('notifications').insert({
+                org_id: window.ORG_ID,
+                employee_name: name,
+                type: 'open_shift',
+                title: 'Open Shift Available',
+                body: `A ${pos} shift is now open. Check Open Shifts to pick it up!`,
+                read: false,
+            });
+            sendPushToEmployee(name, 'Open Shift Available', `A ${pos} shift is now open. Check the app!`);
+            notifiedOpenShift += 1;
+        }
     }
 
-    showNotification(`Request approved — shift is now open. Notified ${uniqueEmployees.length} eligible employee(s).`, 'success');
+    if (positionsToAnnounce.size > 0) {
+        showNotification(`Time off approved — shifts removed. Open-shift notices sent (${notifiedOpenShift} notification(s)).`, 'success');
+    } else {
+        showNotification('Time off approved — no shifts were on the schedule for that period.', 'success');
+    }
+
     await loadShiftRequests();
+    if (typeof renderSchedule === 'function') renderSchedule();
 }
 
 async function denyShiftRequest(requestId, employeeName) {
@@ -405,8 +637,8 @@ async function sendPushToEmployee(employeeName, title, body) {
     }).catch((err) => console.warn('[Push] send failed:', err?.message || err));
 }
 
-// Poll badge count on load
-document.addEventListener('supabase-ready', async () => {
+// Poll badge count on load — MUST use window (supabase-config dispatches on window, not document)
+window.addEventListener('supabase-ready', async () => {
     if (!window.supabaseClient || !window.ORG_ID) return;
 
     // Clean up any past-dated requests on load
@@ -421,7 +653,182 @@ document.addEventListener('supabase-ready', async () => {
         const badge = document.getElementById('requests-badge');
         if (badge) { badge.textContent = count; badge.style.display = 'block'; }
     }
+
+    // Sync current week's Supabase shifts → grid so ghost/orphan shifts are visible
+    await syncSupabaseShiftsToGrid();
 });
+
+/** Normalize DB/UI times to HH:MM for comparison (handles 03:19:00 vs 03:19). */
+function normShiftTimeHM(t) {
+    if (t == null || t === '') return '';
+    const s = String(t).trim();
+    const m = s.match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return s;
+    return `${String(parseInt(m[1], 10)).padStart(2, '0')}:${m[2]}`;
+}
+
+/** All shiftData rows for the same person (matches "Rohan" with "Rohan Kumar" buckets). */
+function collectShiftDataRowsForSamePerson(displayName) {
+    const mine = normEmployeeKey(displayName);
+    const out = [];
+    Object.entries(window.shiftData || {}).forEach(([key, list]) => {
+        if (normEmployeeKey(key) !== mine) return;
+        (list || []).forEach((s) => out.push({ ...s, _bucketKey: key }));
+    });
+    return out;
+}
+
+function findShiftIndexInBucket(bucket, day, weekStart, start24, end24, shiftId) {
+    const rs = normShiftTimeHM;
+    if (shiftId) {
+        const i = bucket.findIndex((s) => s.shiftId && String(s.shiftId) === String(shiftId));
+        if (i !== -1) return i;
+    }
+    return bucket.findIndex(
+        (s) =>
+            s.day === day &&
+            s.weekStart === weekStart &&
+            rs(s.startTime) === rs(start24) &&
+            rs(s.endTime) === rs(end24)
+    );
+}
+
+/**
+ * Load all shifts for the displayed week from Supabase and add any that are
+ * missing from the visual grid.  This exposes "ghost" duplicates that exist in
+ * the DB but were never rendered (e.g. from a past session or a bug).
+ */
+async function syncSupabaseShiftsToGrid() {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+
+    const hasGrid = document.querySelector('.day-column[data-day]');
+    if (!hasGrid) {
+        syncSupabaseShiftsToGrid._retries = (syncSupabaseShiftsToGrid._retries || 0) + 1;
+        if (syncSupabaseShiftsToGrid._retries <= 24) {
+            console.warn('[Supabase] syncSupabaseShiftsToGrid: no schedule grid yet, retrying…');
+            setTimeout(() => void syncSupabaseShiftsToGrid(), 250);
+        }
+        return;
+    }
+    syncSupabaseShiftsToGrid._retries = 0;
+
+    const weekStart = getWeekStart(currentWeekStart);
+    // Build date range for the 7 days starting on Monday (local calendar — avoid UTC toISOString drift)
+    const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
+    const sundayDate = new Date(mondayDate);
+    sundayDate.setDate(mondayDate.getDate() + 6);
+    const localYmd = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+    const startStr = localYmd(mondayDate);
+    const endStr = localYmd(sundayDate);
+
+    const { data: rows, error } = await window.supabaseClient
+        .from('shifts')
+        .select('id, shift_date, start_time, end_time, position, employee_name')
+        .eq('org_id', window.ORG_ID)
+        .gte('shift_date', startStr)
+        .lte('shift_date', endStr)
+        .order('shift_date', { ascending: true });
+
+    if (error) {
+        console.warn('[Supabase] syncSupabaseShiftsToGrid error:', error.message);
+        return;
+    }
+
+    const rs = normShiftTimeHM;
+    const rowStart = (r) => rs(r.start_time);
+    const rowEnd = (r) => rs(r.end_time);
+
+    let added = 0;
+    (rows || []).forEach(row => {
+        if (!row.employee_name || !row.shift_date || !row.start_time || !row.end_time) return;
+
+        const dayKey = getDayKeyForDate(row.shift_date);
+        if (!dayKey) {
+            console.warn('[Supabase] sync: could not map shift_date to day', row.shift_date, row.id);
+            return;
+        }
+
+        const empName = row.employee_name;
+        const rS = rowStart(row);
+        const rE = rowEnd(row);
+
+        // Match shiftData under this employee OR any key (short name vs full name)
+        let alreadyLocal = (window.shiftData[empName] || []).some(s =>
+            s.day === dayKey &&
+            s.weekStart === weekStart &&
+            rs(s.startTime) === rS &&
+            rs(s.endTime) === rE
+        );
+        if (!alreadyLocal && window.shiftData) {
+            alreadyLocal = Object.values(window.shiftData).some(list =>
+                (list || []).some(s => s.shiftId && String(s.shiftId) === String(row.id))
+            );
+        }
+        if (!alreadyLocal && window.shiftData) {
+            alreadyLocal = Object.entries(window.shiftData).some(([key, list]) =>
+                normEmployeeKey(key) === normEmployeeKey(empName) &&
+                (list || []).some(s =>
+                    s.day === dayKey &&
+                    s.weekStart === weekStart &&
+                    rs(s.startTime) === rS &&
+                    rs(s.endTime) === rE
+                )
+            );
+        }
+
+        const alreadyDOM = !!document.querySelector(`.shift-card[data-shift-id="${row.id}"]`);
+
+        if (alreadyLocal || alreadyDOM) return;
+
+        // ── This shift is in Supabase but NOT on the grid — add it ───────────
+        const timeDisplay = formatTo12h(row.start_time) + ' - ' + formatTo12h(row.end_time);
+        const posSlug = String(row.position || 'line-cook').toLowerCase().replace(/\s+/g, '-');
+        const posLabel = row.position || 'Line Cook';
+        const hours = calculateShiftHours(row.start_time, row.end_time);
+
+        const card = createShiftCard(empName, posSlug, timeDisplay, dayKey, hours, posLabel);
+        if (!card) {
+            console.warn('[Supabase] sync: createShiftCard failed for', empName, dayKey, row.id);
+            return;
+        }
+
+        card.dataset.shiftId = row.id;
+        card.style.outline = '2px dashed #e53e3e';
+        card.title = 'Database-only shift (was missing from this grid). Open to edit or delete.';
+
+        if (!window.shiftData[empName]) window.shiftData[empName] = [];
+        window.shiftData[empName].push({
+            day: dayKey,
+            startTime: row.start_time,
+            endTime: row.end_time,
+            hours,
+            weekStart,
+            position: posLabel,
+            shiftId: row.id,
+        });
+
+        added++;
+    });
+
+    if (added > 0) {
+        persistShiftData();
+        console.log(`[Supabase] Synced ${added} DB-only shift(s) to the grid (red dashed outline).`);
+        showNotification(
+            `${added} shift(s) from the database were missing from the grid — they now appear with a red outline. Delete any duplicate.`,
+            'error'
+        );
+    } else {
+        console.log('[Supabase] syncSupabaseShiftsToGrid: no extra DB rows to render (week', startStr, '–', endStr, ',', (rows || []).length, 'rows from API).');
+    }
+}
+
+// DevTools: window.syncSupabaseShiftsFromDatabase()
+window.syncSupabaseShiftsFromDatabase = syncSupabaseShiftsToGrid;
 
 // ── In-app notification row ────────────────────────────────────────────────────
 
@@ -446,14 +853,13 @@ async function notifyTaskAssigned(employeeName, taskDescription) {
 // Write an in-app notification row so the mobile bell shows it immediately
 async function insertInAppNotification(employeeName, day, timeStr, shiftId) {
     if (!window.supabaseClient || !window.ORG_ID) return;
-    const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
     const { error } = await window.supabaseClient.from('notifications').insert({
         org_id: window.ORG_ID,
         employee_name: employeeName,
         employee_id: typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(employeeName) : null,
         type: 'shift_assigned',
         title: 'New Shift Assigned',
-        body: `You've been scheduled for ${dayLabel} — ${timeStr}.`,
+        body: 'Hey, you were assigned new shifts!',
         read: false,
         shift_id: shiftId || null,
     });
@@ -479,7 +885,6 @@ async function sendShiftNotification(employeeName, day, timeStr) {
             return;
         }
 
-        const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
         await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',
             headers: {
@@ -489,10 +894,10 @@ async function sendShiftNotification(employeeName, day, timeStr) {
             },
             body: JSON.stringify({
                 to: data.token,
-                title: '📅 New Shift Assigned',
-                body: `You've been scheduled for ${dayLabel} — ${timeStr}.`,
+                title: 'Hey, you were assigned new shifts!',
+                body: 'Check your schedule to see your new shifts.',
                 sound: 'default',
-                data: { screen: 'Schedule' },
+                data: { type: 'shift_assigned', screen: 'Schedule' },
             }),
         });
         console.log(`[Notifications] Push notification sent to ${employeeName}.`);
@@ -529,6 +934,10 @@ function initializeScheduling() {
     animateShiftCards();
     checkEmployeeTasks();
     initializeEmployeeHours();
+    // supabase-ready may have fired before this listener was registered; merge DB shifts after grid exists
+    queueMicrotask(() => {
+        if (window.supabaseClient && window.ORG_ID) void syncSupabaseShiftsToGrid();
+    });
 }
 
 // Week Navigation
@@ -552,6 +961,8 @@ function setupWeekNavigation() {
             updateWeekDisplay();
             // Reinitialize hours for new week
             initializeEmployeeHours();
+            // Sync any DB-only shifts for the new week
+            syncSupabaseShiftsToGrid();
         });
     }
     
@@ -561,6 +972,8 @@ function setupWeekNavigation() {
             updateWeekDisplay();
             // Reinitialize hours for new week
             initializeEmployeeHours();
+            // Sync any DB-only shifts for the new week
+            syncSupabaseShiftsToGrid();
         });
     }
     
@@ -702,6 +1115,114 @@ function setupModalHandlers() {
             }
         }
     });
+
+    // Save & Assign — stable handler (reads context when clicked)
+    document.getElementById('shift-details-save-btn')?.addEventListener('click', async function handleShiftDetailsSave() {
+        const ctx = _shiftModalContext;
+        if (!ctx) return;
+        const { shiftCard: cardRef, displayName, day, start24, end24, posSelect, taskList } = ctx;
+        const newPos = posSelect?.value;
+        const newStart = document.getElementById('shift-details-start')?.value;
+        const newEnd = document.getElementById('shift-details-end')?.value;
+        if (!newStart || !newEnd) {
+            showNotification('Please fill in both start and end times.', 'error');
+            return;
+        }
+
+        const weekStart = getWeekStart(currentWeekStart);
+        const empShifts = window.shiftData[displayName] || [];
+        const supabaseId = cardRef?.dataset?.shiftId;
+        const rs = normShiftTimeHM;
+
+        // Exclude THIS card only by shift id + normalized times (02:06 vs 02:06:00 must match).
+        const samePersonDayShifts = collectShiftDataRowsForSamePerson(displayName).filter(
+            (s) => s.day === day && s.weekStart === weekStart
+        );
+        const othersLocal = samePersonDayShifts.filter((s) => {
+            if (supabaseId && s.shiftId && String(s.shiftId) === String(supabaseId)) return false;
+            if (rs(s.startTime) === rs(start24) && rs(s.endTime) === rs(end24)) return false;
+            return true;
+        });
+        for (const s of othersLocal) {
+            if (shiftTimeRangesOverlap(newStart, newEnd, s.startTime, s.endTime)) {
+                showNotification(`${displayName} already has another shift this day that overlaps those times. Edit or delete the other shift first.`, 'error');
+                return;
+            }
+        }
+
+        const shiftDateStr = getDateForDay(day);
+        if (window.supabaseClient && window.ORG_ID && shiftDateStr) {
+            if (await employeeHasApprovedTimeOffOnDate(displayName, shiftDateStr)) {
+                showNotification(
+                    `${displayName} has approved time off that includes this day. Cannot save this shift during that period.`,
+                    'error'
+                );
+                return;
+            }
+            const supOv = await employeeHasSupabaseShiftOverlap(displayName, shiftDateStr, newStart, newEnd, supabaseId);
+            if (supOv.overlap) {
+                const o = supOv.other || {};
+                showNotification(
+                    `This overlaps another shift for this person that day (${o.start_time}–${o.end_time}). Delete the duplicate or change the times.`,
+                    'error'
+                );
+                return;
+            }
+        }
+
+        const newPosLabel = posSelect?.selectedOptions?.[0]?.textContent?.trim()
+            || String(newPos || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const newTimeStr = `${formatTo12h(newStart)} - ${formatTo12h(newEnd)}`;
+        const newHours = calculateShiftHours(newStart, newEnd);
+        const posEl = cardRef?.querySelector('.shift-position');
+        const timeEl = cardRef?.querySelector('.shift-time');
+        if (posEl) posEl.textContent = newPosLabel;
+        if (timeEl) timeEl.textContent = newTimeStr;
+        const oldPosClasses = cardRef ? Array.from(cardRef.classList).filter(c => c !== 'shift-card') : [];
+        if (oldPosClasses.length && cardRef) cardRef.classList.remove(...oldPosClasses);
+        if (cardRef) cardRef.classList.add(newPos || 'line-cook');
+        const idx = findShiftIndexInBucket(empShifts, day, weekStart, start24, end24, supabaseId);
+        if (idx !== -1) {
+            const oldHours = empShifts[idx].hours || 0;
+            if (window.employeeHours[displayName]?.[weekStart] !== undefined) {
+                window.employeeHours[displayName][weekStart] -= oldHours;
+                window.employeeHours[displayName][weekStart] += newHours;
+            }
+            empShifts[idx].startTime = newStart;
+            empShifts[idx].endTime = newEnd;
+            empShifts[idx].hours = newHours;
+            window.shiftData[displayName] = empShifts;
+            persistShiftData();
+        }
+        if (supabaseId && window.supabaseClient) {
+            const { error: updErr } = await window.supabaseClient.from('shifts')
+                .update({ start_time: newStart, end_time: newEnd, position: newPosLabel })
+                .eq('id', supabaseId);
+            if (updErr) {
+                showNotification('Could not update shift in database: ' + updErr.message, 'error');
+                return;
+            }
+        }
+        const taskInputs = taskList?.querySelectorAll('.task-input') || [];
+        const descriptions = Array.from(taskInputs).map(i => i.value.trim()).filter(Boolean);
+        let taskSyncFailed = 0;
+        let taskSyncError = '';
+        for (const desc of descriptions) {
+            const r = await addTaskToProgress(displayName, desc);
+            if (r && r.ok === false) {
+                taskSyncFailed += 1;
+                taskSyncError = r.error || 'Unknown error';
+            }
+        }
+        if (descriptions.length) updateEmployeeShiftCards(displayName);
+        _shiftModalContext = null;
+        closeModal('shift-details-modal');
+        if (taskSyncFailed > 0) {
+            showNotification(`Shift saved, but ${taskSyncFailed} task(s) failed to save: ${taskSyncError}. In Supabase SQL Editor run the tasks RLS section in rls-fix-org-members-shifts.sql`, 'error');
+        } else {
+            showNotification(`Shift updated${descriptions.length ? ` and ${descriptions.length} task(s) assigned` : ''} for ${displayName}.`, 'success');
+        }
+    });
 }
 
 // Enable/disable Assign button and show message when selected day is in the past
@@ -718,43 +1239,74 @@ function updateAssignShiftConfirmState() {
     if (pastDayMsg) pastDayMsg.style.display = isPast ? 'block' : 'none';
 }
 
-// Seed employees when org has none (fallback if bootstrap hasn't run yet)
-async function seedEmployeesIfEmpty() {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-    const { data: existing } = await window.supabaseClient
-        .from('employee_positions')
-        .select('id')
-        .eq('org_id', window.ORG_ID)
-        .limit(1);
-    if (existing?.length) return;
-    const employees = [
-        { employee_name: 'Kenny', positions: ['Server'] },
-        { employee_name: 'Rohan', positions: ['Server'] },
-        { employee_name: 'Natalie', positions: ['Server'] },
-        { employee_name: 'Jake', positions: ['Line Cook', 'Dish'] },
-        { employee_name: 'Sam', positions: ['Line Cook'] },
-        { employee_name: 'Sophia', positions: ['Prep'] },
-        { employee_name: 'Aria', positions: ['Line Cook'] },
-        { employee_name: 'Alex', positions: ['Line Cook'] },
-        { employee_name: 'Meagan', positions: ['Dishwasher'] },
-        { employee_name: 'Josh', positions: ['Dessert'] },
-        { employee_name: 'Ben', positions: ['Hot Foods'] },
-        { employee_name: 'Justin', positions: ['MOD'] },
-        { employee_name: 'Hannah', positions: ['Cold Foods'] },
-        { employee_name: 'Gary', positions: ['Expo'] },
-    ];
-    for (const e of employees) {
-        await window.supabaseClient.from('employee_positions').insert({
-            org_id: window.ORG_ID,
-            employee_name: e.employee_name,
-            positions: e.positions,
-        });
-    }
+const DEFAULT_EMPLOYEES = [];
+const EMPLOYEE_VALUE_MAP = {};
+
+function normEmployeeKey(s) {
+    return String(s || '').trim().toLowerCase();
 }
 
-// Default employees when DB is empty or unavailable
-const DEFAULT_EMPLOYEES = ['Kenny', 'Rohan', 'Natalie', 'Jake', 'Sam', 'Sophia', 'Aria', 'Alex', 'Meagan', 'Josh', 'Ben', 'Justin', 'Hannah', 'Gary'];
-const EMPLOYEE_VALUE_MAP = { 'Kenny': 'kenny', 'Rohan': 'rohan', 'Natalie': 'natalie', 'Jake': 'jake', 'Sam': 'sam', 'Sophia': 'sophia', 'Aria': 'aria', 'Alex': 'alex', 'Meagan': 'meagan', 'Josh': 'josh', 'Ben': 'ben', 'Justin': 'justin', 'Hannah': 'hannah', 'Gary': 'gary' };
+/** Prefer "First Last", then display_name, then employee_name — for schedule dropdown labels */
+function profileScheduleDisplayLabel(p) {
+    if (!p) return '';
+    const fn = (p.first_name || '').trim();
+    const ln = (p.last_name || '').trim();
+    const both = [fn, ln].filter(Boolean).join(' ');
+    if (both) return both;
+    const dn = (p.display_name || '').trim();
+    if (dn) return dn;
+    return (p.employee_name || '').trim() || '';
+}
+
+/**
+ * Map normalized employee_positions.employee_name -> full display label from profiles.
+ */
+async function buildEmployeePositionDisplayLabelMap() {
+    const labelByKey = new Map();
+    if (!window.supabaseClient || !window.ORG_ID) return labelByKey;
+
+    const [{ data: profiles }, { data: positions }] = await Promise.all([
+        window.supabaseClient
+            .from('profiles')
+            .select('employee_name, display_name, first_name, last_name')
+            .eq('org_id', window.ORG_ID),
+        window.supabaseClient
+            .from('employee_positions')
+            .select('employee_name')
+            .eq('org_id', window.ORG_ID),
+    ]);
+
+    const positionNames = [...new Set((positions || []).map((r) => r.employee_name).filter(Boolean))];
+    const profList = profiles || [];
+
+    const byEmp = new Map();
+    const byDisplay = new Map();
+    profList.forEach((p) => {
+        const label = profileScheduleDisplayLabel(p);
+        if (!label) return;
+        const ek = normEmployeeKey(p.employee_name);
+        if (ek) byEmp.set(ek, label);
+        const dk = normEmployeeKey(p.display_name);
+        if (dk) byDisplay.set(dk, label);
+    });
+
+    positionNames.forEach((posName) => {
+        const k = normEmployeeKey(posName);
+        let label = byEmp.get(k) || byDisplay.get(k);
+        if (!label) {
+            const hit = profList.find((p) => {
+                const dn = (p.display_name || '').trim();
+                if (!dn) return false;
+                const first = dn.split(/\s+/)[0];
+                return normEmployeeKey(first) === k;
+            });
+            if (hit) label = profileScheduleDisplayLabel(hit);
+        }
+        if (label) labelByKey.set(k, label);
+    });
+
+    return labelByKey;
+}
 
 // Populate employee dropdown from org's employee_positions (multi-restaurant isolation)
 async function populateEmployeeSelectFromOrg() {
@@ -769,21 +1321,16 @@ async function populateEmployeeSelectFromOrg() {
             .eq('org_id', window.ORG_ID)
             .order('employee_name');
         names = (data || []).map(r => r.employee_name).filter(Boolean);
-        if (names.length === 0) {
-            await seedEmployeesIfEmpty();
-            const res = await window.supabaseClient
-                .from('employee_positions')
-                .select('employee_name')
-                .eq('org_id', window.ORG_ID)
-                .order('employee_name');
-            names = (res.data || []).map(r => r.employee_name).filter(Boolean);
-        }
     }
     if (names.length === 0) names = DEFAULT_EMPLOYEES;
 
+    const labelMap = await buildEmployeePositionDisplayLabelMap();
+
     employeeSelect.innerHTML = '<option value="">Select Employee</option>' + names.map(n => {
         const val = EMPLOYEE_VALUE_MAP[n] || n.toLowerCase().replace(/\s+/g, '-');
-        return `<option value="${val}">${escapeHtml(n)}</option>`;
+        const nk = normEmployeeKey(n);
+        const displayText = labelMap.get(nk) || n;
+        return `<option value="${val}">${escapeHtml(displayText)}</option>`;
     }).join('');
     updateEmployeeDropdownForDay();
     await populatePositionSelect();
@@ -896,6 +1443,7 @@ function closeModal(modalId) {
     if (modal) {
         modal.classList.remove('active');
         document.body.style.overflow = '';
+        if (modalId === 'shift-details-modal') _shiftModalContext = null;
         
         // Reset form
         const form = modal.querySelector('form');
@@ -919,7 +1467,7 @@ function closeModal(modalId) {
 }
 
 // Shift Assignment
-function assignShift() {
+async function assignShift() {
     const employeeSelect = document.getElementById('employee-select');
     const positionSelect = document.getElementById('position-select');
     const startTimeInput = document.getElementById('start-time');
@@ -951,7 +1499,35 @@ function assignShift() {
         showNotification(`${employeeName} has an approved drop for ${formatDateForDisplay(selectedDate)}. Cannot schedule shift.`, 'error');
         return;
     }
-    
+
+    if (window.supabaseClient && window.ORG_ID && selectedDate) {
+        if (await employeeHasApprovedTimeOffOnDate(employeeName, selectedDate)) {
+            showNotification(
+                `${employeeName} has approved time off that includes ${formatDateForDisplay(selectedDate)}. You cannot schedule a shift during that period.`,
+                'error'
+            );
+            return;
+        }
+        const supOv = await employeeHasSupabaseShiftOverlap(employeeName, selectedDate, startTime, endTime);
+        if (supOv.overlap) {
+            const o = supOv.other || {};
+            showNotification(
+                `${employeeName} already has a shift that day (${o.start_time || '?'}–${o.end_time || '?'}) that overlaps these times. Change times or remove the other shift first.`,
+                'error'
+            );
+            return;
+        }
+    }
+
+    // Prevent overlapping shifts for the same employee on the same day (local grid)
+    const existingShifts = (window.shiftData[employeeName] || []).filter(s => s.day === day);
+    for (const s of existingShifts) {
+        if (shiftTimeRangesOverlap(startTime, endTime, s.startTime, s.endTime)) {
+            showNotification(`${employeeName} already has a shift on ${day} that overlaps (${s.startTime}–${s.endTime}). Remove it first.`, 'error');
+            return;
+        }
+    }
+
     // Calculate hours for this shift
     const shiftHours = calculateShiftHours(startTime, endTime);
     const weekStart = getWeekStart(currentWeekStart);
@@ -1102,6 +1678,19 @@ function calculateShiftHours(startTime, endTime) {
     
     const diffMinutes = endMinutes - startMinutes;
     return diffMinutes / 60; // Convert to hours
+}
+
+/** True if two HH:MM ranges overlap (same calendar day). */
+function shiftTimeRangesOverlap(startA, endA, startB, endB) {
+    const toMin = (t) => {
+        const [h, m] = String(t || '0:0').split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+    };
+    const a0 = toMin(startA);
+    const a1 = toMin(endA);
+    const b0 = toMin(startB);
+    const b1 = toMin(endB);
+    return a0 < b1 && a1 > b0;
 }
 
 // Get week start date (Monday) as string
@@ -1521,6 +2110,9 @@ function formatTo12h(time24) {
     return m ? `${h12}:${String(m).padStart(2, '0')}${period}` : `${h12}${period}`;
 }
 
+// Combined Edit Shift + Assign Task modal — context for Save & Assign handler
+let _shiftModalContext = null;
+
 // Combined Edit Shift + Assign Task modal
 function openShiftDetailsModal(shiftCard, employee, position, time, day) {
     const modal = document.getElementById('shift-details-modal');
@@ -1534,14 +2126,15 @@ function openShiftDetailsModal(shiftCard, employee, position, time, day) {
     const existingGroup = document.getElementById('shift-details-existing-tasks-group');
     const addTaskBtn = document.getElementById('shift-details-add-task-row');
     const recipesList = document.getElementById('shift-details-active-recipes');
-    const saveBtn = document.getElementById('shift-details-save-btn');
     const deleteBtn = document.getElementById('shift-details-delete-btn');
 
     if (!modal || !empInput || !taskList) return;
 
     const NAMES = { kenny:'Kenny', rohan:'Rohan', jake:'Jake', natalie:'Natalie',
                     sam:'Sam', sophia:'Sophia', aria:'Aria', alex:'Alex' };
-    const displayName = NAMES[employee] || employee.charAt(0).toUpperCase() + employee.slice(1);
+    const fromCard = (shiftCard && shiftCard.dataset && shiftCard.dataset.employeeName || '').trim();
+    const empKey = (employee || '').toLowerCase();
+    const displayName = fromCard || NAMES[empKey] || (employee && employee.charAt(0).toUpperCase() + employee.slice(1));
 
     const parts = time.split('-').map(s => s.trim());
     const start24 = parts[0] ? parseTo24h(parts[0]) : '';
@@ -1555,79 +2148,13 @@ function openShiftDetailsModal(shiftCard, employee, position, time, day) {
 
     taskList.innerHTML = '';
     addTaskRow(taskList);
+    // Show tasks already assigned to this employee (kitchenTasks + home progress list if present).
     loadExistingTasksForEmployee(displayName, existingList, existingGroup);
     loadActiveRecipesInto(recipesList, taskList);
 
     modal.dataset.employeeName = displayName;
     const cardRef = shiftCard;
-
-    const newSaveBtn = saveBtn.cloneNode(true);
-    saveBtn.replaceWith(newSaveBtn);
-    newSaveBtn.addEventListener('click', () => {
-        const newPos = posSelect.value;
-        const newStart = startInput.value;
-        const newEnd = endInput.value;
-        if (!newStart || !newEnd) {
-            showNotification('Please fill in both start and end times.', 'error');
-            return;
-        }
-
-        const newPosLabel = posSelect.selectedOptions?.[0]?.textContent?.trim()
-            || String(newPos || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        const newTimeStr = `${formatTo12h(newStart)} - ${formatTo12h(newEnd)}`;
-        const newHours = calculateShiftHours(newStart, newEnd);
-
-        const posEl = cardRef.querySelector('.shift-position');
-        const timeEl = cardRef.querySelector('.shift-time');
-        if (posEl) posEl.textContent = newPosLabel;
-        if (timeEl) timeEl.textContent = newTimeStr;
-
-        const oldPosClasses = Array.from(cardRef.classList).filter(c => c !== 'shift-card');
-        if (oldPosClasses.length) cardRef.classList.remove(...oldPosClasses);
-        cardRef.classList.add(newPos);
-
-        const weekStart = getWeekStart(currentWeekStart);
-        const empShifts = window.shiftData[displayName] || [];
-        const idx = empShifts.findIndex(s =>
-            s.day === day && s.weekStart === weekStart &&
-            s.startTime === start24 && s.endTime === end24
-        );
-        if (idx !== -1) {
-            const oldHours = empShifts[idx].hours || 0;
-            if (window.employeeHours[displayName]?.[weekStart] !== undefined) {
-                window.employeeHours[displayName][weekStart] -= oldHours;
-                window.employeeHours[displayName][weekStart] += newHours;
-            }
-            empShifts[idx].startTime = newStart;
-            empShifts[idx].endTime = newEnd;
-            empShifts[idx].hours = newHours;
-            window.shiftData[displayName] = empShifts;
-            persistShiftData();
-        }
-
-        const supabaseId = cardRef.dataset.shiftId;
-        if (supabaseId && window.supabaseClient) {
-            window.supabaseClient
-                .from('shifts')
-                .update({
-                    start_time: newStart,
-                    end_time: newEnd,
-                    position: newPosLabel
-                })
-                .eq('id', supabaseId)
-                .then(({ error }) => {
-                    if (error) console.warn('[Supabase] Could not update shift:', error.message);
-                });
-        }
-
-        const taskInputs = taskList.querySelectorAll('.task-input');
-        const descriptions = Array.from(taskInputs).map(i => i.value.trim()).filter(Boolean);
-        descriptions.forEach(desc => addTaskToProgress(displayName, desc));
-        if (descriptions.length) updateEmployeeShiftCards(displayName);
-
-        closeModal('shift-details-modal');
-        showNotification(`Shift updated${descriptions.length ? ` and ${descriptions.length} task(s) assigned` : ''} for ${displayName}.`, 'success');
-    });
+    _shiftModalContext = { shiftCard, displayName, day, start24, end24, posSelect, taskList };
 
     const newDeleteBtn = deleteBtn.cloneNode(true);
     deleteBtn.replaceWith(newDeleteBtn);
@@ -1673,12 +2200,34 @@ function openShiftDetailsModal(shiftCard, employee, position, time, day) {
     if (firstInput) firstInput.focus();
 }
 
-function loadActiveRecipesInto(container, targetTaskList) {
+function isRecipeMarkedActive(recipe) {
+    const status = (recipe?.status || '').toString().trim().toLowerCase();
+    if (status) return status === 'active';
+    if (typeof recipe?.active === 'boolean') return recipe.active;
+    return true;
+}
+
+async function fetchActiveRecipesFromSupabase() {
+    if (!window.supabaseClient || !window.ORG_ID) return [];
+    const { data, error } = await window.supabaseClient
+        .from('recipes')
+        .select('name, status')
+        .eq('org_id', window.ORG_ID)
+        .eq('status', 'active')
+        .order('name', { ascending: true });
+    if (error) {
+        console.warn('[Scheduling] Could not load active recipes:', error.message);
+        return [];
+    }
+    return (data || []).filter(r => (r.name || '').trim()).map(r => ({ name: r.name, status: r.status }));
+}
+
+async function loadActiveRecipesInto(container, targetTaskList) {
     if (!container) return;
     const taskList = targetTaskList || document.getElementById('shift-details-task-list');
     let activeRecipes = [];
     if (typeof window.recipesData !== 'undefined' && Object.keys(window.recipesData).length > 0) {
-        activeRecipes = Object.values(window.recipesData).filter(r => r.name && r.active !== false);
+        activeRecipes = Object.values(window.recipesData).filter(r => r.name && isRecipeMarkedActive(r));
     } else {
         try {
             document.querySelectorAll('.recipes-active .recipe-card').forEach(card => {
@@ -1686,11 +2235,11 @@ function loadActiveRecipesInto(container, targetTaskList) {
                 if (name) activeRecipes.push({ name });
             });
         } catch (e) {
-            activeRecipes = [
-                { name: 'Focaccia Kit' }, { name: 'Balsamic Glaze' }, { name: 'Smoked Salmon' },
-                { name: 'Meringue' }, { name: 'Chilled Pea Soup' }, { name: 'Pickled Garlic' }
-            ];
+            activeRecipes = [];
         }
+    }
+    if (activeRecipes.length === 0) {
+        activeRecipes = await fetchActiveRecipesFromSupabase();
     }
     container.innerHTML = '';
     activeRecipes.forEach(recipe => {
@@ -1732,8 +2281,8 @@ function setupShiftInteractions() {
                                'Dish':'dish', 'Prep':'prep', 'FOH Manager':'foh-manager' };
             const posLabel = posEl?.textContent.trim() || '';
             const posValue = POS_MAP[posLabel] || (posLabel ? posLabel.toLowerCase().replace(/\s+/g, '-') : 'line-cook');
-            const empName = empEl?.textContent.trim() || '';
-            const empKey = empName.toLowerCase();
+            const label = (card.dataset.employeeName || empEl?.textContent || '').trim();
+            const empKey = label ? label.toLowerCase() : '';
             const timeStr = timeEl?.textContent.trim() || '';
             editShift(card, empKey, posValue, timeStr, cardDay);
         });
@@ -1952,7 +2501,7 @@ function setupTaskAssignment() {
 }
 
 // Load active recipes from recipes page
-function loadActiveRecipes() {
+async function loadActiveRecipes() {
     const recipesList = document.getElementById('active-recipes-list');
     if (!recipesList) return;
 
@@ -1960,7 +2509,7 @@ function loadActiveRecipes() {
     let activeRecipes = [];
     
     if (typeof window.recipesData !== 'undefined' && Object.keys(window.recipesData).length > 0) {
-        activeRecipes = Object.values(window.recipesData).filter(r => r.name && r.active !== false);
+        activeRecipes = Object.values(window.recipesData).filter(r => r.name && isRecipeMarkedActive(r));
     } else {
         // Fallback: try to get from recipes page DOM if available
         try {
@@ -1972,16 +2521,11 @@ function loadActiveRecipes() {
                 }
             });
         } catch (e) {
-            // If recipes page not loaded, use sample data
-            activeRecipes = [
-                { name: 'Focaccia Kit' },
-                { name: 'Balsamic Glaze' },
-                { name: 'Smoked Salmon' },
-                { name: 'Meringue' },
-                { name: 'Chilled Pea Soup' },
-                { name: 'Pickled Garlic' }
-            ];
+            activeRecipes = [];
         }
+    }
+    if (activeRecipes.length === 0) {
+        activeRecipes = await fetchActiveRecipesFromSupabase();
     }
 
     recipesList.innerHTML = '';
@@ -2041,10 +2585,10 @@ function handleRecipeAssignment(type) {
     if (type === 'prep') {
         tasks.push(qty > 1 ? `kit ${qty} ${recipeName}` : `kit ${recipeName}`);
     } else if (type === 'active') {
-        tasks.push(qty > 1 ? `make ${qty} ${recipeName}` : recipeName);
+        tasks.push(qty > 1 ? `make ${qty} ${recipeName}` : `make ${recipeName}`);
     } else if (type === 'both') {
         tasks.push(qty > 1 ? `kit ${qty} ${recipeName}` : `kit ${recipeName}`);
-        tasks.push(qty > 1 ? `make ${qty} ${recipeName}` : recipeName);
+        tasks.push(qty > 1 ? `make ${qty} ${recipeName}` : `make ${recipeName}`);
     }
 
     // Add tasks to the task list
@@ -2164,21 +2708,16 @@ async function populateTaskEmployeeSelect() {
             .eq('org_id', window.ORG_ID)
             .order('employee_name');
         names = (data || []).map(r => r.employee_name).filter(Boolean);
-        if (names.length === 0) {
-            await seedEmployeesIfEmpty();
-            const res = await window.supabaseClient
-                .from('employee_positions')
-                .select('employee_name')
-                .eq('org_id', window.ORG_ID)
-                .order('employee_name');
-            names = (res.data || []).map(r => r.employee_name).filter(Boolean);
-        }
     }
     if (names.length === 0) names = DEFAULT_EMPLOYEES;
 
+    const labelMap = await buildEmployeePositionDisplayLabelMap();
+
     select.innerHTML = '<option value="">Select Employee</option>' + names.map(n => {
         const val = EMPLOYEE_VALUE_MAP[n] || n.toLowerCase().replace(/\s+/g, '-');
-        return `<option value="${val}">${escapeHtml(n)}</option>`;
+        const nk = normEmployeeKey(n);
+        const displayText = labelMap.get(nk) || n;
+        return `<option value="${val}">${escapeHtml(displayText)}</option>`;
     }).join('');
 }
 
@@ -2197,6 +2736,9 @@ async function openAssignTaskModal(employeeName, day) {
     addTaskRow(taskList);
     modal.dataset.day = day || '';
     
+    if (typeof loadEmployeePositionsFromSupabase === 'function') {
+        await loadEmployeePositionsFromSupabase();
+    }
     await populateTaskEmployeeSelect();
     
     const val = employeeName ? (EMPLOYEE_VALUE_MAP[employeeName] || employeeName.toLowerCase().replace(/\s+/g, '-')) : '';
@@ -2223,7 +2765,7 @@ function loadExistingTasksForEmployee(employeeName, container, groupElement) {
     const existingTasks = [];
     if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
         window.kitchenTasks.forEach(task => {
-            if (task.assignee && task.assignee.toLowerCase() === employeeName.toLowerCase()) {
+            if (task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName)) {
                 existingTasks.push({
                     assignee: task.assignee,
                     description: task.description
@@ -2240,7 +2782,7 @@ function loadExistingTasksForEmployee(employeeName, container, groupElement) {
             const description = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
             const isCompleted = item.dataset.completed === 'true' || item.classList.contains('task-completed');
             
-            if (assignee && assignee.toLowerCase() === employeeName.toLowerCase() && description) {
+            if (assignee && assigneeMatchesEmployeeName(assignee, employeeName) && description) {
                 // Check if already added
                 const alreadyExists = existingTasks.some(t => 
                     t.assignee === assignee && t.description === description
@@ -2437,13 +2979,18 @@ function updateTaskInProgressList(employeeName, taskDescription, isCompleted) {
     }
 }
 
-function assignTask() {
+async function assignTask() {
     const modal = document.getElementById('assign-task-modal');
     const employeeSelect = document.getElementById('task-employee-select');
-    const employeeName = employeeSelect?.value ? getEmployeeDisplayName(employeeSelect.value) : (modal?.dataset.employeeName || null);
+    // Use actual employee_name from dropdown (so mobile can match by profile.employee_name)
+    const selectedOpt = employeeSelect?.options[employeeSelect?.selectedIndex];
+    const rawVal = (selectedOpt?.textContent || selectedOpt?.text || '').trim()
+        || (employeeSelect?.value ? getEmployeeDisplayName(employeeSelect.value) : null)
+        || (modal?.dataset.employeeName || null);
+    const employeeName = (rawVal && rawVal !== 'Select Employee') ? rawVal : null;
     const taskInputs = modal ? modal.querySelectorAll('.task-input') : null;
     
-    if (!employeeName) {
+    if (!employeeName || !employeeSelect?.value) {
         showNotification('Please select an employee.', 'error');
         return;
     }
@@ -2464,27 +3011,33 @@ function assignTask() {
         return;
     }
     
-    // Add each task to Kitchen Progress
-    descriptions.forEach(desc => {
-        addTaskToProgress(employeeName, desc);
-    });
-    
-    // Update shift card indicators for this employee
+    let failed = 0;
+    let lastErr = '';
+    for (const desc of descriptions) {
+        const r = await addTaskToProgress(employeeName, desc);
+        if (r && r.ok === false) {
+            failed += 1;
+            lastErr = r.error || '';
+        }
+    }
+
     updateEmployeeShiftCards(employeeName);
-    
-    // Refresh existing tasks display in modal before closing
+
     const existingTasksList = document.getElementById('existing-tasks-list');
     const existingTasksGroup = document.getElementById('existing-tasks-group');
     if (existingTasksList && existingTasksGroup) {
         loadExistingTasksForEmployee(employeeName, existingTasksList, existingTasksGroup);
     }
-    
-    // Close modal
+
     closeModal('assign-task-modal');
-    const message = descriptions.length === 1
-        ? `Task "${descriptions[0]}" assigned to ${employeeName}.`
-        : `${descriptions.length} tasks assigned to ${employeeName}.`;
-    showNotification(message, 'success');
+    if (failed > 0) {
+        showNotification(`${failed} task(s) failed to save: ${lastErr || 'database error'}. Apply tasks RLS policies in Supabase.`, 'error');
+    } else {
+        const message = descriptions.length === 1
+            ? `Task "${descriptions[0]}" assigned to ${employeeName}.`
+            : `${descriptions.length} tasks assigned to ${employeeName}.`;
+        showNotification(message, 'success');
+    }
 }
 
 // Helper to add a new task row to the assign-task modal
@@ -2524,18 +3077,18 @@ function addTaskRow(listEl) {
     return input;
 }
 
-// Add task to Kitchen Progress section (shared function)
-function addTaskToProgress(employeeName, taskDescription) {
+// Add task to Kitchen Progress section (shared function). Returns { ok, error?, skipped?, localOnly? }.
+async function addTaskToProgress(employeeName, taskDescription) {
     // Store task data globally
     if (typeof window.kitchenTasks === 'undefined') {
         window.kitchenTasks = [];
     }
-    
-    // Check if task already exists to avoid duplicates
-    const taskExists = window.kitchenTasks.some(task => 
+
+    const existing = window.kitchenTasks.find(task =>
         task.assignee === employeeName && task.description === taskDescription
     );
-    
+    const taskExists = !!existing;
+
     if (!taskExists) {
         window.kitchenTasks.push({
             assignee: employeeName,
@@ -2544,18 +3097,17 @@ function addTaskToProgress(employeeName, taskDescription) {
             completed: false
         });
     }
-    
+
     // If we're on the home page, add it immediately to the progress list
     const progressList = document.querySelector('.progress-list');
     if (progressList) {
-        // Check if task already exists in the DOM
         const existingTasks = Array.from(progressList.querySelectorAll('.progress-item'));
         const existsInDOM = existingTasks.some(item => {
             const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
             const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
             return assignee === employeeName && desc === taskDescription;
         });
-        
+
         if (!existsInDOM) {
             if (typeof window.createTaskItem === 'function') {
                 window.createTaskItem(progressList, employeeName, taskDescription);
@@ -2564,37 +3116,62 @@ function addTaskToProgress(employeeName, taskDescription) {
             }
         }
     }
-    
-    // Store in localStorage for persistence across page reloads
+
     try {
         localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
     } catch (e) {
         console.warn('Could not save tasks to localStorage:', e);
     }
 
-    // Sync to Supabase (use employee_name to match mobile)
-    if (window.supabaseClient && window.ORG_ID && !taskExists) {
-        window.supabaseClient.from('tasks').insert({
-            org_id: window.ORG_ID,
-            text: taskDescription,
-            employee_id: typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(employeeName) : null,
-            status: 'todo',
-            is_urgent: false
-        }).select().then(({ data, error }) => {
-            if (error) {
-                console.warn('[Supabase] Task insert failed:', error.message);
-            } else if (data?.[0]) {
-                const local = window.kitchenTasks.find(t =>
-                    t.assignee === employeeName && t.description === taskDescription
-                );
-                if (local) {
-                    local.supabase_id = data[0].id;
-                    localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-                }
-                notifyTaskAssigned(employeeName, taskDescription);
-            }
-        });
+    if (!window.supabaseClient || !window.ORG_ID) {
+        if (!taskExists) {
+            console.warn('[Tasks] No Supabase client or ORG_ID — task stored locally only');
+        }
+        return { ok: true, localOnly: true };
     }
+
+    const localRow = window.kitchenTasks.find(t =>
+        t.assignee === employeeName && t.description === taskDescription
+    );
+    if (localRow?.supabase_id) {
+        return { ok: true, skipped: true };
+    }
+
+    const canonicalName = typeof window.getCanonicalEmployeeName === 'function'
+        ? window.getCanonicalEmployeeName(employeeName) : employeeName;
+    const assigneeId = typeof window.getEmployeeIdFromName === 'function'
+        ? window.getEmployeeIdFromName(canonicalName) || window.getEmployeeIdFromName(employeeName)
+        : null;
+    const payload = {
+        org_id: window.ORG_ID,
+        text: taskDescription,
+        employee_name: canonicalName,
+        employee_id: assigneeId,
+        status: 'todo',
+        is_urgent: false
+    };
+
+    let { data, error } = await window.supabaseClient.from('tasks').insert(payload).select();
+    if (error && /employee_name/i.test(error.message || '')) {
+        const fallback = { ...payload };
+        delete fallback.employee_name;
+        const retry = await window.supabaseClient.from('tasks').insert(fallback).select();
+        data = retry.data;
+        error = retry.error;
+    }
+    if (error) {
+        console.warn('[Supabase] Task insert failed:', error.message);
+        return { ok: false, error: error.message };
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row?.id && localRow) {
+        localRow.supabase_id = row.id;
+        try {
+            localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+        } catch (_) {}
+        notifyTaskAssigned(employeeName, taskDescription);
+    }
+    return { ok: true };
 }
 
 // Remove a task from an employee
@@ -2888,28 +3465,74 @@ window.checkAllTasksComplete = checkAllTasksComplete;
 window.createTaskItem = createTaskItem;
 window.getCurrentUser = getCurrentUser;
 
+/**
+ * True if a task assignee string refers to the same person as the schedule card / modal label.
+ * Handles case differences and short roster names vs profile full names (e.g. Kenny ↔ Kenny Bae).
+ */
+function assigneeMatchesEmployeeName(assignee, employeeName) {
+    if (!assignee || !employeeName) return false;
+    const raw = assignee.trim().toLowerCase();
+    const me = employeeName.trim().toLowerCase();
+    if (!raw || !me) return false;
+    if (raw === me) return true;
+    // Same profile: roster label "Kenny" vs canonical DB employee_name / username
+    if (typeof window.getCanonicalEmployeeName === 'function') {
+        const canAssignee = (window.getCanonicalEmployeeName(assignee) || '').trim().toLowerCase();
+        const canCard = (window.getCanonicalEmployeeName(employeeName) || '').trim().toLowerCase();
+        if (canAssignee && canCard && canAssignee === canCard) return true;
+        if (canAssignee && raw === canAssignee) return true;
+        if (canCard && raw === canCard) return true;
+        if (canAssignee && me === canAssignee) return true;
+        if (canCard && me === canCard) return true;
+    }
+    const rawTokens = raw.split(/\s+/).filter(Boolean);
+    const meTokens = me.split(/\s+/).filter(Boolean);
+    const rawFirst = rawTokens[0] || '';
+    const meFirst = meTokens[0] || '';
+    if (rawFirst && meFirst && rawFirst === meFirst) return true;
+    if (raw.startsWith(`${me} `) || raw.endsWith(` ${me}`) || raw.includes(` ${me} `)) return true;
+    if (me.startsWith(`${raw} `) || me.endsWith(` ${raw}`) || me.includes(` ${raw} `)) return true;
+    if (rawTokens.length === 1 && meFirst === raw) return true;
+    if (meTokens.length === 1 && rawFirst === me) return true;
+    return false;
+}
+
+/** Up to `max` task lines for shift-card preview (same matching rules as employeeHasTasks). */
+function getEmployeeTasksForCardPreview(employeeName, max = 3) {
+    const out = [];
+    if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
+        for (const task of window.kitchenTasks) {
+            if (task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName) && task.description) {
+                out.push({ text: task.description, completed: !!task.completed });
+                if (out.length >= max) break;
+            }
+        }
+    }
+    return out;
+}
+
 // Check if employee has assigned tasks
 function employeeHasTasks(employeeName) {
     // Check in window.kitchenTasks
     if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
-        const hasTask = window.kitchenTasks.some(task => 
-            task.assignee && task.assignee.trim() === employeeName.trim()
+        const hasTask = window.kitchenTasks.some(task =>
+            task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName)
         );
         if (hasTask) return true;
     }
-    
+
     // Also check in DOM (Kitchen Progress section) if on home page
     const progressList = document.querySelector('.progress-list');
     if (progressList) {
         const taskItems = progressList.querySelectorAll('.progress-item');
         for (const item of taskItems) {
             const assigneeEl = item.querySelector('.task-assignee');
-            if (assigneeEl && assigneeEl.textContent.trim() === employeeName.trim()) {
+            if (assigneeEl && assigneeMatchesEmployeeName(assigneeEl.textContent, employeeName)) {
                 return true;
             }
         }
     }
-    
+
     return false;
 }
 
@@ -2921,6 +3544,10 @@ function updateShiftCardTaskIndicator(shiftCard, employeeName) {
     const existingWarning = shiftCard.querySelector('.task-warning');
     if (existingWarning) {
         existingWarning.remove();
+    }
+    const existingPreview = shiftCard.querySelector('.shift-task-preview');
+    if (existingPreview) {
+        existingPreview.remove();
     }
     
     // Remove warning class
@@ -2938,6 +3565,20 @@ function updateShiftCardTaskIndicator(shiftCard, employeeName) {
             <span class="warning-text">This employee has not been assigned any tasks</span>
         `;
         shiftCard.appendChild(warningDiv);
+    } else {
+        const lines = getEmployeeTasksForCardPreview(employeeName, 3);
+        if (lines.length > 0) {
+            const preview = document.createElement('div');
+            preview.className = 'shift-task-preview';
+            preview.setAttribute('aria-label', 'Assigned tasks');
+            lines.forEach(({ text, completed }) => {
+                const span = document.createElement('span');
+                span.className = 'shift-task-preview-line' + (completed ? ' completed' : '');
+                span.textContent = text;
+                preview.appendChild(span);
+            });
+            shiftCard.appendChild(preview);
+        }
     }
 }
 
@@ -2961,8 +3602,8 @@ function updateEmployeeShiftCards(employeeName) {
     const shiftCards = document.querySelectorAll('.shift-card');
     shiftCards.forEach(card => {
         const cardEmployeeName = card.dataset.employeeName || card.querySelector('.employee-name')?.textContent.trim();
-        if (cardEmployeeName && cardEmployeeName.trim() === employeeName.trim()) {
-            updateShiftCardTaskIndicator(card, employeeName);
+        if (cardEmployeeName && assigneeMatchesEmployeeName(cardEmployeeName, employeeName)) {
+            updateShiftCardTaskIndicator(card, cardEmployeeName.trim());
         }
     });
 }
@@ -3011,6 +3652,28 @@ notificationStyles.textContent = `
     .notification-close:hover {
         background: rgba(255, 255, 255, 0.2);
     }
+
+    .shift-task-preview {
+        margin-top: 0.35rem;
+        padding-top: 0.35rem;
+        border-top: 1px solid rgba(0, 0, 0, 0.08);
+        font-size: 0.72rem;
+        line-height: 1.25;
+        color: rgba(0, 0, 0, 0.65);
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+    .shift-task-preview-line {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .shift-task-preview-line.completed {
+        text-decoration: line-through;
+        opacity: 0.65;
+    }
 `;
 document.head.appendChild(notificationStyles);
 
@@ -3033,15 +3696,33 @@ window.addEventListener('supabase-ready', async function () {
     // 1) Sync localStorage tasks → Supabase (tasks assigned before insert fix)
     const toSync = window.kitchenTasks.filter(t => !t.supabase_id && !t.completed);
     for (const t of toSync) {
-        const { data, error } = await window.supabaseClient.from('tasks').insert({
+        const canonicalName = (t.assignee && typeof window.getCanonicalEmployeeName === 'function')
+            ? window.getCanonicalEmployeeName(t.assignee)
+            : (t.assignee || null);
+        const assigneeId = (canonicalName && typeof window.getEmployeeIdFromName === 'function')
+            ? window.getEmployeeIdFromName(canonicalName) || window.getEmployeeIdFromName(t.assignee)
+            : null;
+        const payload = {
             org_id: window.ORG_ID,
             text: t.description,
-            employee_id: (t.assignee && typeof window.getEmployeeIdFromName === 'function') ? window.getEmployeeIdFromName(t.assignee) : null,
+            employee_name: canonicalName,
+            employee_id: assigneeId,
             status: 'todo',
             is_urgent: false,
-        }).select().single();
+        };
+        let { data, error } = await window.supabaseClient.from('tasks').insert(payload).select().single();
+        // Legacy schema fallback (tasks.assigned_to instead of tasks.employee_name)
+        if (error && /employee_name/i.test(error.message || '')) {
+            const fallback = { ...payload };
+            delete fallback.employee_name;
+            const retry = await window.supabaseClient.from('tasks').insert(fallback).select().single();
+            data = retry.data;
+            error = retry.error;
+        }
         if (!error && data) {
             t.supabase_id = data.id;
+        } else if (error) {
+            console.warn('[Supabase] Could not sync local task to DB:', error.message);
         }
     }
     if (toSync.length > 0) {
@@ -3056,14 +3737,26 @@ window.addEventListener('supabase-ready', async function () {
         .neq('status', 'completed');
 
     if (error) { console.warn('[Supabase] Task load failed:', error.message); return; }
-    if (!tasks?.length) return;
+    if (!tasks?.length) {
+        if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
+        return;
+    }
 
     let added = 0;
     tasks.forEach(task => {
         const local = window.kitchenTasks.find(t =>
             t.description === task.text && t.supabase_id === task.id
         );
-        const mappedName = (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null) || 'Unassigned';
+        const nameKey =
+            (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
+            || task.employee_name
+            || task.assigned_to
+            || null;
+        const mappedName = nameKey
+            ? ((typeof window.getEmployeeDisplayName === 'function'
+                ? window.getEmployeeDisplayName(nameKey)
+                : null) || nameKey)
+            : 'Unassigned';
         if (!local) {
             window.kitchenTasks.push({
                 assignee: mappedName,
@@ -3082,6 +3775,6 @@ window.addEventListener('supabase-ready', async function () {
     if (added > 0) {
         localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
         if (typeof loadStoredTasks === 'function') loadStoredTasks();
-        if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
     }
+    if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
 });

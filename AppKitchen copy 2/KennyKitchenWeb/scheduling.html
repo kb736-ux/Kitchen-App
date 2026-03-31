@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kenny Kitchen - Schedular</title>
+    <title>Sheek - Scheduling</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="scheduling.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
         <nav class="top-nav">
             <div class="nav-brand">
                 <i class="fas fa-utensils"></i>
-                <span>Kenny Kitchen</span>
+                <span>Sheek</span>
             </div>
             <div class="nav-tabs">
                 <button class="nav-tab" data-tab="home" onclick="window.location.href='index.html'">
@@ -49,7 +49,7 @@
                     <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
                 </div>
                 <div class="user-profile">
-                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="User" class="user-avatar">
                     <span>Admin</span>
                 </div>
             </div>
@@ -58,7 +58,7 @@
         <!-- Main Scheduling Content -->
         <main class="dashboard-main">
             <div class="scheduling-header">
-                <h1>Schedular</h1>
+                <h1>Scheduling</h1>
                 <div class="header-actions">
                     <button class="btn-secondary" id="calendar-history-btn" type="button">
                         <i class="fas fa-history"></i>
@@ -266,7 +266,7 @@
             <div class="modal-footer">
                 <p id="assign-shift-past-day-msg" class="assign-shift-past-day-msg" style="display: none;">This day is in the past. Shifts cannot be assigned to past days.</p>
                 <button class="btn-secondary" onclick="closeModal('assign-shift-modal')">Cancel</button>
-                <button class="btn-primary" id="assign-shift-confirm-btn" onclick="assignShift()">Assign Shift</button>
+                <button class="btn-primary" id="assign-shift-confirm-btn" onclick="void assignShift()">Assign Shift</button>
             </div>
         </div>
     </div>
@@ -392,7 +392,7 @@
                 </button>
                 <div style="display:flex;gap:0.5rem;">
                     <button class="btn-secondary" onclick="closeModal('shift-details-modal')">Cancel</button>
-                    <button class="btn-primary" id="shift-details-save-btn">
+                    <button type="button" class="btn-primary" id="shift-details-save-btn">
                         <i class="fas fa-check"></i> Save & Assign
                     </button>
                 </div>
@@ -497,11 +497,12 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="auth.js"></script>
+    <script src="subscriptionPlans.js?v=1"></script>
+    <script src="auth.js?v=20250308"></script>
     <script src="adminSettings.js"></script>
     <script src="employees.js"></script>
     <script src="script.js"></script>
     <script src="recipes.js"></script>
-    <script src="scheduling.js"></script>
+    <script src="scheduling.js?v=20250323d"></script>
 </body>
 </html>

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Image, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Image, TextInput, Alert, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
+import { shiftRowMatchesEmployee } from '../utils/shiftMatching';
+import { APP_BRAND_NAME } from '../constants/branding';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 
@@ -13,12 +15,29 @@ const DAYS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 const SHORT_MONTHS_HP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift, nextShift, taskStats = { total: 0, completed: 0 }, onProfilePress, profileData, onTasksPress, addUrgentTask, takeUrgentTask, onUrgentTaskPress }) => {
-  const { employeeName, displayName } = useEmployee();
-  const restaurantName = (restaurantNameProp || '').trim() || 'My Kitchen';
+const HomePage = ({
+  orgId,
+  currentOrgName = '',
+  canSwitchOrg = false,
+  onOpenOrgPicker,
+  tasks,
+  urgentTasks: urgentTasksProp = [],
+  todayShift,
+  nextShift,
+  taskStats = { total: 0, completed: 0 },
+  onProfilePress,
+  profileData,
+  onTasksPress,
+  onSchedulePress,
+  addUrgentTask,
+  takeUrgentTask,
+  onUrgentTaskPress,
+}) => {
+  const { employeeName, displayName, employeeId, authUserId, email, firstName, lastName, defaultEmployeeName, authLoading } = useEmployee();
   const welcomeName = (profileData?.displayName || displayName || employeeName || '').trim() || employeeName;
   const [shiftDates, setShiftDates] = useState(new Set());
   const [announcements, setAnnouncements] = useState([]);
+  const [newShiftNotifCount, setNewShiftNotifCount] = useState(0);
 
   // Day roster modal
   const [showRoster, setShowRoster] = useState(false);
@@ -27,12 +46,76 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
   const [loadingRoster, setLoadingRoster] = useState(false);
 
   const [urgentInput, setUrgentInput] = useState('');
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   useEffect(() => {
-    if (!orgId) return;
+    if (!orgId || authLoading) return;
     fetchWeekShifts();
     fetchAnnouncements();
+    fetchNewShiftNotifCount();
+  }, [
+    orgId,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    email,
+    firstName,
+    lastName,
+    defaultEmployeeName,
+    profileData?.displayName,
+    profileData?.employeeNameFromProfile,
+  ]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && orgId) fetchNewShiftNotifCount();
+    });
+    return () => sub?.remove();
   }, [orgId]);
+
+  async function fetchNewShiftNotifCount() {
+    if (!orgId) return;
+    let query = supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('type', 'shift_assigned')
+      .eq('read', false);
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId);
+    } else {
+      query = query.eq('employee_name', employeeName);
+    }
+    const { count } = await query;
+    setNewShiftNotifCount(count || 0);
+  }
+
+  async function markShiftNotifsReadAndNavigate() {
+    if (!orgId) return;
+    let query = supabase
+      .from('notifications')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('type', 'shift_assigned')
+      .eq('read', false);
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId);
+    } else {
+      query = query.eq('employee_name', employeeName);
+    }
+    const { data } = await query;
+    if (data?.length) {
+      await supabase.from('notifications').update({ read: true }).in('id', data.map(n => n.id));
+      setNewShiftNotifCount(0);
+    }
+    onSchedulePress?.();
+  }
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [profileData?.avatarUrl]);
 
   async function fetchWeekShifts() {
     const today = new Date();
@@ -44,12 +127,34 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
 
     const { data } = await supabase
       .from('shifts')
-      .select('shift_date')
+      .select('shift_date, employee_name, employee_id')
       .eq('org_id', orgId)
       .gte('shift_date', fmt(monday))
       .lte('shift_date', fmt(sunday));
 
-    if (data) setShiftDates(new Set(data.map(s => s.shift_date)));
+    const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const candidates = Array.from(
+      new Set(
+        [
+          employeeName,
+          displayName,
+          defaultEmployeeName,
+          combined,
+          firstName,
+          lastName,
+          (email || '').split('@')[0],
+          profileData?.displayName,
+          profileData?.employeeNameFromProfile,
+        ]
+          .map((n) => (n || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const dates = new Set();
+    (data || []).forEach((row) => {
+      if (shiftRowMatchesEmployee(row, employeeId, candidates, authUserId)) dates.add(row.shift_date);
+    });
+    setShiftDates(dates);
   }
 
   async function fetchAnnouncements() {
@@ -117,7 +222,9 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const isShiftDay = !!todayShift;
-  const urgentTasks = isShiftDay ? (tasks || []).filter(t => t.is_urgent && !t.completed) : [];
+  /** Task progress / urgent only on scheduled shift days (tasks are hidden when off shift). */
+  const showWorkMode = isShiftDay;
+  const urgentTasks = showWorkMode ? (urgentTasksProp || []).filter(t => t.is_urgent && !t.completed) : [];
   const progressPct = taskStats.total > 0
     ? Math.round((taskStats.completed / taskStats.total) * 100)
     : 0;
@@ -127,11 +234,29 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
       <View style={styles.header}>
         <View style={styles.headerBrand}>
           <Ionicons name="restaurant" size={18} color="#4CAF50" style={{ marginRight: 6 }} />
-          <Text style={styles.brandName}>{restaurantName}</Text>
+          <View>
+            <Text style={styles.brandName}>{APP_BRAND_NAME}</Text>
+            {canSwitchOrg && currentOrgName ? (
+              <TouchableOpacity
+                onPress={onOpenOrgPicker}
+                activeOpacity={0.7}
+                style={styles.orgSubrow}
+              >
+                <Text style={styles.orgSubtitle} numberOfLines={1}>
+                  {currentOrgName}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color="#64748b" style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
         <TouchableOpacity style={styles.profileBtn} onPress={onProfilePress} activeOpacity={0.8}>
-          {profileData?.avatarUrl ? (
-            <Image source={{ uri: profileData.avatarUrl }} style={styles.profileAvatar} />
+          {profileData?.avatarUrl && !avatarLoadFailed ? (
+            <Image
+              source={{ uri: profileData.avatarUrl }}
+              style={styles.profileAvatar}
+              onError={() => setAvatarLoadFailed(true)}
+            />
           ) : (
             <View style={[styles.profileAvatar, { backgroundColor: profileData?.avatarColor || '#4CAF50' }]}>
               <Text style={styles.profileAvatarText}>
@@ -172,6 +297,24 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.welcomeText}>Welcome</Text>
         <Text style={styles.nameText}>{welcomeName}</Text>
+
+        {/* New shifts assigned notification */}
+        {newShiftNotifCount > 0 && (
+          <TouchableOpacity
+            style={styles.newShiftBanner}
+            onPress={markShiftNotifsReadAndNavigate}
+            activeOpacity={0.85}
+          >
+            <View style={styles.newShiftBannerContent}>
+              <Ionicons name="calendar" size={22} color="#fff" style={styles.newShiftBannerIcon} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.newShiftBannerTitle}>Hey, you were assigned new shifts!</Text>
+                <Text style={styles.newShiftBannerSub}>Tap to view your schedule</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Shift Card */}
         {isShiftDay ? (
@@ -229,8 +372,8 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
           </View>
         )}
 
-        {/* Task Progress Bar — only on shift days */}
-        {isShiftDay && (
+        {/* Task Progress — shift day or any assigned tasks */}
+        {showWorkMode && (
           <TouchableOpacity
             style={styles.progressCard}
             onPress={onTasksPress}
@@ -278,7 +421,7 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
         )}
 
         {/* ── Urgent Tasks / Off Day ─────────────────────────────────────── */}
-        {isShiftDay ? (
+        {showWorkMode ? (
           <View style={styles.urgentCard}>
             <Text style={styles.urgentTitle}>Urgent Tasks</Text>
             {urgentTasks.length === 0 ? (
@@ -333,8 +476,8 @@ const HomePage = ({ orgId, restaurantName: restaurantNameProp, tasks, todayShift
           </View>
         )}
 
-        {/* Add urgent task from home — only when on shift */}
-        {addUrgentTask && isShiftDay && (
+        {/* Add urgent task from home — when on shift or you have tasks */}
+        {addUrgentTask && showWorkMode && (
           <View style={styles.urgentAddRow}>
             <View style={styles.urgentAddIcon}>
               <Ionicons name="flame" size={18} color="#e53e3e" />
@@ -460,6 +603,8 @@ const styles = StyleSheet.create({
   headerLeft: { flex: 1 },
   headerBrand: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   brandName: { fontSize: 18, fontWeight: '800', color: '#2d3748', letterSpacing: 0.3 },
+  orgSubrow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, maxWidth: '92%' },
+  orgSubtitle: { fontSize: 13, fontWeight: '600', color: '#64748b' },
   profileBtn: { padding: 2 },
   profileAvatar: {
     width: 36, height: 36, borderRadius: 18,
@@ -499,6 +644,22 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 20, paddingTop: 24 },
   welcomeText: { fontSize: 28, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 2 },
   nameText: { fontSize: 28, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 20 },
+
+  newShiftBanner: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  newShiftBannerContent: { flexDirection: 'row', alignItems: 'center' },
+  newShiftBannerIcon: { marginRight: 12 },
+  newShiftBannerTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  newShiftBannerSub: { fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 },
 
   // Shift card
   shiftCard: {

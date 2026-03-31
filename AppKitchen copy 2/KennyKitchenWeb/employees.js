@@ -18,46 +18,111 @@ const positionResponsibilities = {
 
 async function loadEmployeePositionsFromSupabase() {
     if (!window.supabaseClient || !window.ORG_ID) return null;
-    const { data, error } = await window.supabaseClient
-        .from('employee_positions')
-        .select('id, employee_name, positions')
-        .eq('org_id', window.ORG_ID);
+    const [{ data, error }, { data: profilesData, error: profilesError }, { data: membersData, error: membersError }] = await Promise.all([
+        window.supabaseClient
+            .from('employee_positions')
+            .select('id, employee_name, positions')
+            .eq('org_id', window.ORG_ID),
+        window.supabaseClient
+            .from('profiles')
+            .select('id, employee_name, display_name, full_name, email')
+            .eq('org_id', window.ORG_ID),
+        window.supabaseClient
+            .from('org_members')
+            .select('user_id, role')
+            .eq('org_id', window.ORG_ID),
+    ]);
     if (error) {
         console.warn('[Supabase] Employee positions load failed:', error.message);
         return null;
     }
+    if (profilesError) {
+        console.warn('[Supabase] Profiles load failed:', profilesError.message);
+    }
+    if (membersError) {
+        console.warn('[Supabase] Org members load failed:', membersError.message);
+    }
+
+    const allowedRoles = new Set(['employee', 'manager', 'owner', 'admin']);
+    const allowedMemberIds = new Set(
+        (membersData || [])
+            .filter(m => !!m.user_id && allowedRoles.has((m.role || '').toLowerCase()))
+            .map(m => m.user_id)
+    );
     const map = {};
     window._employeeNameToId = {};
+    window._profileNameToId = {};
+    window._displayNameToCanonicalEmployeeName = {};
+    _employeeDisplayByName = {};
     (data || []).forEach(r => {
         window._employeeNameToId[r.employee_name] = r.id;
         map[r.employee_name] = r.positions || [];
+        _employeeDisplayByName[r.employee_name] = prettifyEmployeeKey(r.employee_name) || r.employee_name;
     });
-    
-    // Also load from profiles so mobile identities (like 'klb10012004', 'Dudu') match properly
-    try {
-        const { data: profilesData } = await window.supabaseClient
-            .from('profiles')
-            .select('id, employee_name, display_name')
-            .eq('org_id', window.ORG_ID);
-        if (profilesData) {
-            profilesData.forEach(p => {
-                if (p.employee_name) window._employeeNameToId[p.employee_name] = p.id;
-                if (p.display_name) window._employeeNameToId[p.display_name] = p.id;
-            });
-        }
-    } catch (e) {
-        console.warn('[Supabase] Could not merge profiles into name mapping:', e);
-    }
-    
-    return Object.keys(map).length ? map : null;
+
+    // Build robust name->UUID lookup from all profiles first.
+    // We use this for task/chat assignment even if org_members is incomplete.
+    (profilesData || [])
+        .filter(p => !!p.id && ((p.employee_name || '').trim() || (p.display_name || '').trim()))
+        .forEach(p => {
+            const name = p.employee_name.trim();
+            const display = (p.display_name || '').trim();
+            if (name) {
+                window._profileNameToId[name] = p.id;
+                window._employeeNameToId[name] = p.id;
+            }
+            if (display) {
+                window._profileNameToId[display] = p.id;
+                window._employeeNameToId[display] = p.id;
+            }
+            if (name) {
+                window._displayNameToCanonicalEmployeeName[name] = name;
+                if (display) window._displayNameToCanonicalEmployeeName[display] = name;
+            }
+        });
+
+    // Only Supabase-backed profiles should appear in employees list.
+    (profilesData || [])
+        .filter(p => !!p.id && (p.employee_name || '').trim() && (allowedMemberIds.size === 0 || allowedMemberIds.has(p.id)))
+        .forEach(p => {
+            const name = p.employee_name.trim();
+            if (!Object.prototype.hasOwnProperty.call(map, name)) {
+                map[name] = [];
+            }
+            _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
+        });
+
+    return map;
 }
 
+// Resolve display name (e.g. "Kenny") to profile's canonical employee_name (e.g. "klb10012004")
+// so mobile app (which uses profile.employee_name) can match tasks.
+window.getCanonicalEmployeeName = function(displayOrAssignedName) {
+    if (!displayOrAssignedName || !window._displayNameToCanonicalEmployeeName) return displayOrAssignedName;
+    const key = (displayOrAssignedName || '').trim();
+    if (!key) return displayOrAssignedName;
+    const canonical = window._displayNameToCanonicalEmployeeName[key];
+    if (canonical) return canonical;
+    const lowerKey = key.toLowerCase();
+    for (const [k, v] of Object.entries(window._displayNameToCanonicalEmployeeName)) {
+        if ((k || '').toLowerCase() === lowerKey) return v;
+    }
+    return displayOrAssignedName;
+};
+
 window.getEmployeeIdFromName = function(name) {
-    if (!name || !window._employeeNameToId) return null;
+    if (!name) return null;
+    if (window._profileNameToId && window._profileNameToId[name]) return window._profileNameToId[name];
+    if (!window._employeeNameToId) return null;
     // exact match
     if (window._employeeNameToId[name]) return window._employeeNameToId[name];
     // case-insensitive match
     const lowerName = name.toLowerCase();
+    if (window._profileNameToId) {
+        for (const [key, id] of Object.entries(window._profileNameToId)) {
+            if (key.toLowerCase() === lowerName) return id;
+        }
+    }
     for (const [key, id] of Object.entries(window._employeeNameToId)) {
         if (key.toLowerCase() === lowerName) return id;
     }
@@ -85,6 +150,46 @@ async function saveEmployeePositionsToSupabase(data) {
 let _employeePositionsCache = null;
 let _managerFlagsByName = {};
 let _employeeSortOrder = 'asc'; // 'asc' = least to greatest, 'desc' = greatest to least
+let _employeeDisplayByName = {};
+
+function isEmailLike(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
+}
+
+function prettifyEmployeeKey(value) {
+    const raw = (value || '').trim();
+    if (!raw) return '';
+    const local = isEmailLike(raw) ? raw.split('@')[0] : raw;
+    const parts = local
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(' ')
+        .filter(Boolean);
+    return parts
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function deriveEmployeeLabel(profile, fallbackName) {
+    const display = (profile?.display_name || '').trim();
+    const full = (profile?.full_name || '').trim();
+    const employee = (profile?.employee_name || fallbackName || '').trim();
+    const email = (profile?.email || '').trim();
+
+    if (display && !isEmailLike(display)) return display;
+    if (full && !isEmailLike(full)) return full;
+    if (display && isEmailLike(display)) return prettifyEmployeeKey(display);
+    if (employee && isEmailLike(employee)) return prettifyEmployeeKey(employee);
+    if (email) return prettifyEmployeeKey(email);
+    return display || full || prettifyEmployeeKey(employee) || employee || fallbackName;
+}
+
+function getEmployeeDisplayName(employeeName) {
+    return _employeeDisplayByName[employeeName] || prettifyEmployeeKey(employeeName) || employeeName;
+}
+
+window.getEmployeeDisplayName = getEmployeeDisplayName;
 
 function loadEmployeePositions() {
     return _employeePositionsCache;
@@ -202,9 +307,13 @@ async function renderEmployeesWithHours() {
     const posData = getEmployeePositions();
     const employeeNames = Object.keys(posData || {});
 
-    // If we have no employees yet, keep whatever is in HTML
+    // If there are no Supabase-backed employees, show an explicit empty state.
     if (!employeeNames.length) {
-        injectEditPositionButtons();
+        list.innerHTML = `
+            <div style="padding:14px;color:#718096;font-size:0.95rem;">
+                No employees found in Supabase for this restaurant.
+            </div>
+        `;
         return;
     }
 
@@ -236,7 +345,8 @@ async function renderEmployeesWithHours() {
     });
 
     list.innerHTML = rows.map(r => {
-        const avatarLetter = r.name.charAt(0).toUpperCase();
+        const displayName = getEmployeeDisplayName(r.name);
+        const avatarLetter = displayName.charAt(0).toUpperCase();
         const hrs = (Math.round((r.hours || 0) * 10) / 10).toFixed(1);
         const statusClass = r.onShift ? 'online' : 'offline';
         const statusText = r.onShift ? 'On shift' : 'Off';
@@ -245,7 +355,7 @@ async function renderEmployeesWithHours() {
                 <div class="employee-info">
                     <div class="employee-avatar">${avatarLetter}</div>
                     <div class="employee-details">
-                        <span class="employee-name">${escapeEmployeesHtml(r.name)}</span>
+                        <span class="employee-name">${escapeEmployeesHtml(displayName)}</span>
                         <span class="employee-hours">${hrs} hrs</span>
                         <span class="employee-role" style="display:none;"></span>
                     </div>
@@ -264,34 +374,17 @@ async function renderEmployeesWithHours() {
 }
 
 function getEmployeePositions() {
-    if (_employeePositionsCache) return _employeePositionsCache;
-    const posMap = {};
-    document.querySelectorAll('.employees-card .shift-item').forEach(item => {
-        const name = item.querySelector('.employee-name')?.textContent.trim();
-        const role = item.querySelector('.employee-role')?.textContent.trim();
-        if (name && role && role !== 'New Employee') {
-            posMap[name] = [role];
-        }
-    });
-    if (Object.keys(posMap).length) {
-        saveEmployeePositions(posMap);
-    }
-    return posMap;
+    return _employeePositionsCache || {};
 }
 
 window.addEventListener('supabase-ready', async function () {
     if (!window.supabaseClient || !window.ORG_ID) return;
 
-    // 1) Try to load positions from Supabase
+    // Only load employee roster from Supabase-backed data.
     const fromDb = await loadEmployeePositionsFromSupabase();
-    if (fromDb) {
-        _employeePositionsCache = fromDb;
-    } else {
-        // 2) Fall back to whatever is in the HTML, then save to Supabase
-        _employeePositionsCache = getEmployeePositions();
-    }
+    _employeePositionsCache = fromDb || {};
 
-    // 3) Update tags + render dynamic hours / on-shift state
+    // Update tags + render dynamic hours / on-shift state
     updatePositionsFromEmployees();
     renderEmployeesWithHours();
 });
@@ -308,8 +401,15 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEmployeeModals();
     setupEditPositionsModal();
     setupPositionClicks();
-    injectEditPositionButtons();
-    updatePositionsFromEmployees();
+    const list = document.querySelector('.employees-card .shift-list');
+    if (list) {
+        // Hide hardcoded demo rows immediately; render once Supabase is ready.
+        list.innerHTML = `
+            <div style="padding:14px;color:#a0aec0;font-size:0.9rem;">
+                Loading employees from Supabase...
+            </div>
+        `;
+    }
     const sortSelect = document.getElementById('employee-sort-select');
     if (sortSelect) {
         sortSelect.addEventListener('change', function () {
@@ -545,7 +645,7 @@ function closeEmployeesModal(modal) {
     // Position detail modal doesn't need reset - it's populated dynamically
 }
 
-function handleCreateEmployeeSubmit() {
+async function handleCreateEmployeeSubmit() {
     const nameInput = document.getElementById('employee-full-name');
     const emailInput = document.getElementById('employee-email');
     const phoneInput = document.getElementById('employee-phone');
@@ -564,6 +664,34 @@ function handleCreateEmployeeSubmit() {
         showEmployeeToast('Please enter at least an email or phone number.', 'error');
         (emailInput || phoneInput)?.focus();
         return;
+    }
+
+    if (typeof window.kkCanAddEmployee === 'function' && window.supabaseClient && window.ORG_ID) {
+        try {
+            const [{ count }, { data: orgRow }] = await Promise.all([
+                window.supabaseClient
+                    .from('profiles')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('org_id', window.ORG_ID),
+                window.supabaseClient
+                    .from('orgs')
+                    .select('subscription_plan')
+                    .eq('id', window.ORG_ID)
+                    .maybeSingle(),
+            ]);
+            const plan = String(orgRow?.subscription_plan || 'starter').toLowerCase();
+            const safePlan = ['starter', 'growth', 'scale'].includes(plan) ? plan : 'starter';
+            if (!window.kkCanAddEmployee(count ?? 0, safePlan)) {
+                const lim = window.kkGetEmployeeLimit(safePlan);
+                showEmployeeToast(
+                    `Your subscription plan allows up to ${lim} employees. Upgrade under Admin Settings → Subscription (Scale = 41+).`,
+                    'error'
+                );
+                return;
+            }
+        } catch (e) {
+            console.warn('[Employees] Plan check failed:', e?.message);
+        }
     }
 
     const list = document.querySelector('.employees-card .shift-list');
@@ -676,9 +804,10 @@ function updatePositionsFromEmployees() {
         if (countEl) {
             countEl.textContent = employees.length === 1 ? '1 employee capable' : `${employees.length} employees capable`;
         }
-        namesEl.textContent = employees.length > 0 ? employees.join(', ') : '';
+        const employeeLabels = employees.map(getEmployeeDisplayName);
+        namesEl.textContent = employeeLabels.length > 0 ? employeeLabels.join(', ') : '';
         namesEl.style.display = employees.length > 0 ? '' : 'none';
-        positionItem.dataset.employees = JSON.stringify(employees);
+        positionItem.dataset.employees = JSON.stringify(employeeLabels);
     });
 
     const badge = document.querySelector('.positions-card .card-badge');
@@ -686,7 +815,7 @@ function updatePositionsFromEmployees() {
 
     // Update role display on every employee row
     document.querySelectorAll('.employees-card .shift-item').forEach(item => {
-        const name = item.querySelector('.employee-name')?.textContent.trim();
+        const name = (item.dataset.employeeName || item.querySelector('.employee-name')?.textContent || '').trim();
         if (!name) return;
         const positions = posData[name] || [];
         renderEmployeeRoleTags(item, positions);
@@ -724,7 +853,7 @@ function renderEmployeeRoleTags(shiftItem, positions) {
 function injectEditPositionButtons() {
     document.querySelectorAll('.employees-card .shift-item').forEach(item => {
         if (item.querySelector('.btn-edit-positions')) return; // already added
-        const name = item.querySelector('.employee-name')?.textContent.trim();
+        const name = (item.dataset.employeeName || item.querySelector('.employee-name')?.textContent || '').trim();
         if (!name) return;
         const btn = document.createElement('button');
         btn.className = 'btn-edit-positions';
@@ -764,6 +893,7 @@ function setupEditPositionsModal() {
     document.getElementById('close-edit-positions')?.addEventListener('click', closeEditPositionsModal);
     document.getElementById('cancel-edit-positions')?.addEventListener('click', closeEditPositionsModal);
     document.getElementById('submit-edit-positions')?.addEventListener('click', saveEditPositions);
+    document.getElementById('delete-edit-employee')?.addEventListener('click', deleteEmployeeFromEditModal);
 
     modal.addEventListener('click', e => { if (e.target === modal) closeEditPositionsModal(); });
     document.addEventListener('keydown', e => {
@@ -776,7 +906,7 @@ function openEditPositionsModal(employeeName) {
     const posData = getEmployeePositions();
     const current = posData[employeeName] || [];
 
-    document.getElementById('edit-positions-employee-name').textContent = employeeName;
+    document.getElementById('edit-positions-employee-name').textContent = getEmployeeDisplayName(employeeName);
     buildPositionCheckboxes('edit-position-checkboxes', current);
 
     const managerCbx = document.getElementById('edit-employee-is-manager');
@@ -812,7 +942,95 @@ function saveEditPositions() {
 
     closeEditPositionsModal();
     updatePositionsFromEmployees();
-    showEmployeeToast(`Positions updated for ${escapeEmployeesHtml(editPositionsTarget)}.`, 'success');
+    showEmployeeToast(`Positions updated for ${escapeEmployeesHtml(getEmployeeDisplayName(editPositionsTarget))}.`, 'success');
+}
+
+async function deleteEmployeeFromEditModal() {
+    if (!editPositionsTarget) return;
+    const employeeName = editPositionsTarget;
+    const employeeLabel = getEmployeeDisplayName(employeeName);
+    const confirmed = window.confirm(`Delete employee "${employeeLabel}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const deleteBtn = document.getElementById('delete-edit-employee');
+    if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.style.opacity = '0.7';
+    }
+
+    try {
+        const posData = getEmployeePositions();
+        if (posData && Object.prototype.hasOwnProperty.call(posData, employeeName)) {
+            delete posData[employeeName];
+            saveEmployeePositions(posData);
+        }
+
+        if (window.employeeData && Object.prototype.hasOwnProperty.call(window.employeeData, employeeName)) {
+            delete window.employeeData[employeeName];
+        }
+        if (_managerFlagsByName && Object.prototype.hasOwnProperty.call(_managerFlagsByName, employeeName)) {
+            delete _managerFlagsByName[employeeName];
+        }
+        if (window.EMPLOYEE_IDS && Object.prototype.hasOwnProperty.call(window.EMPLOYEE_IDS, employeeName)) {
+            delete window.EMPLOYEE_IDS[employeeName];
+        }
+
+        // Remove row immediately in UI.
+        const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(employeeName) : employeeName.replace(/"/g, '\\"');
+        document.querySelector(`.employees-card .shift-item[data-employee-name="${escaped}"]`)?.remove();
+
+        // Best-effort DB cleanup.
+        if (window.supabaseClient && window.ORG_ID) {
+            const normalized = employeeName.trim().toLowerCase();
+            const userIdFromMap = window.getEmployeeIdFromName?.(employeeName) || null;
+
+            const { data: profileRows } = await window.supabaseClient
+                .from('profiles')
+                .select('id, employee_name')
+                .eq('org_id', window.ORG_ID);
+            const matchedProfile = (profileRows || []).find((p) => (p.employee_name || '').trim().toLowerCase() === normalized);
+            const profileId = matchedProfile?.id || userIdFromMap || null;
+
+            await Promise.all([
+                window.supabaseClient
+                    .from('employee_positions')
+                    .delete()
+                    .eq('org_id', window.ORG_ID)
+                    .ilike('employee_name', employeeName),
+                window.supabaseClient
+                    .from('profiles')
+                    .delete()
+                    .eq('org_id', window.ORG_ID)
+                    .ilike('employee_name', employeeName),
+                profileId
+                    ? window.supabaseClient
+                        .from('org_members')
+                        .delete()
+                        .eq('org_id', window.ORG_ID)
+                        .eq('user_id', profileId)
+                    : Promise.resolve(),
+                profileId
+                    ? window.supabaseClient
+                        .from('admin_users')
+                        .delete()
+                        .eq('user_id', profileId)
+                    : Promise.resolve(),
+            ]);
+        }
+
+        closeEditPositionsModal();
+        updatePositionsFromEmployees();
+        await renderEmployeesWithHours();
+        showEmployeeToast(`Deleted employee "${escapeEmployeesHtml(employeeLabel)}".`, 'success');
+    } catch (e) {
+        console.warn('[Employees] delete employee failed:', e.message);
+        showEmployeeToast(e?.message || 'Could not delete employee. Please try again.', 'error');
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteBtn.style.opacity = '1';
+        }
+    }
 }
 
 function handleCreatePositionSubmit() {

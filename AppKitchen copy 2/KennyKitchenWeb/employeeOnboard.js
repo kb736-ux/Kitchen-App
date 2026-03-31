@@ -69,7 +69,7 @@
       const niceName = employeeName || user.email || 'your account';
       setStatus(
         'You’re all set!',
-        `We linked ${niceName} to the restaurant. You can now use this email to sign in on the Kenny Kitchen web app, and the mobile app will recognize you as part of this restaurant.`,
+        `We linked ${niceName} to the restaurant. You can now use this email to sign in on the Sheek web app, and the mobile app will recognize you as part of this restaurant.`,
         false
       );
     } catch (e) {

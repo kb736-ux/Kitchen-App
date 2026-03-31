@@ -1,16 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, ORG_ID } from '../utils/supabase';
+import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
+import { shiftRowMatchesEmployee, formatLocalDateYMD } from '../utils/shiftMatching';
 
 const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
-  const { employeeName } = useEmployee();
+const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
+  const {
+    employeeName,
+    displayName,
+    employeeId,
+    authUserId,
+    email,
+    firstName,
+    lastName,
+    defaultEmployeeName,
+    authLoading,
+  } = useEmployee();
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,13 +71,13 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
     } else {
       setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, employeeId, employeeName, displayName, firstName, lastName, defaultEmployeeName]);
 
   async function fetchNotifications() {
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('org_id', ORG_ID)
+      .eq('org_id', orgId)
       .eq('employee_name', employeeName)
       .order('created_at', { ascending: false })
       .limit(30);
@@ -84,34 +95,81 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
-    // Fetch 90 days back and 60 days forward so past shifts are visible
-    const now = new Date();
-    const past = new Date(now);
-    past.setDate(past.getDate() - 90);
-    const future = new Date(now);
-    future.setDate(future.getDate() + 60);
-    const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      const now = new Date();
+      const past = new Date(now);
+      past.setDate(past.getDate() - 90);
+      const future = new Date(now);
+      future.setDate(future.getDate() + 60);
+      const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-    const { data, error } = await supabase
-      .from('shifts')
-      .select('*')
-      .eq('org_id', orgId)
-      .gte('shift_date', fmt(past))
-      .lte('shift_date', fmt(future))
-      .order('shift_date', { ascending: true });
+      const { data, error } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('org_id', orgId)
+        .gte('shift_date', fmt(past))
+        .lte('shift_date', fmt(future))
+        .order('shift_date', { ascending: true });
 
-    if (error) {
-      console.warn('[Supabase] fetchShifts failed:', error.message);
-    } else {
-      setShifts(data || []);
+      if (error) {
+        console.warn('[Schedule] fetchShifts RLS/query error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }), 'orgId:', orgId);
+      } else {
+        const rows = data || [];
+        if (__DEV__) {
+          console.log('[Schedule] fetchShifts returned', rows.length, 'rows for org', orgId);
+          if (rows.length > 0) {
+            console.log('[Schedule] sample shift:', JSON.stringify({ id: rows[0].id, employee_name: rows[0].employee_name, employee_id: rows[0].employee_id, shift_date: rows[0].shift_date, position: rows[0].position }));
+          }
+        }
+        setShifts(rows);
+      }
+    } catch (e) {
+      console.warn('[Schedule] fetchShifts exception:', e?.message || e);
+    } finally {
+      if (isRefresh) setRefreshing(false);
+      else setLoading(false);
     }
-    if (isRefresh) setRefreshing(false);
-    else setLoading(false);
   }
 
   const onRefresh = () => { fetchShifts(true); fetchNotifications(); };
 
-  const shiftDateSet = new Set(shifts.map(s => s.shift_date));
+  const shiftNameCandidates = useMemo(() => {
+    const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const pCombined = [profileData?.firstName, profileData?.lastName].filter(Boolean).join(' ').trim();
+    return Array.from(
+      new Set(
+        [
+          employeeName,
+          displayName,
+          defaultEmployeeName,
+          combined,
+          firstName,
+          lastName,
+          (email || '').split('@')[0],
+          profileData?.displayName,
+          profileData?.employeeNameFromProfile,
+          pCombined,
+          profileData?.firstName,
+          profileData?.lastName,
+        ]
+          .map((n) => (n || '').trim())
+          .filter(Boolean)
+      )
+    );
+  }, [employeeName, displayName, defaultEmployeeName, firstName, lastName, email, profileData]);
+
+  const myShifts = useMemo(() => {
+    if (authLoading) return [];
+    const matched = shifts.filter((s) => shiftRowMatchesEmployee(s, employeeId, shiftNameCandidates, authUserId));
+    if (__DEV__) {
+      console.log('[Schedule] myShifts filter:', matched.length, '/', shifts.length, 'matched | employeeId:', employeeId, '| authUserId:', authUserId, '| candidates:', JSON.stringify(shiftNameCandidates));
+    }
+    return matched;
+  }, [shifts, employeeId, shiftNameCandidates, authLoading, authUserId]);
+
+  const scheduleUiLoading = loading || (!!orgId && authLoading);
+
+  const shiftDateSet = new Set(myShifts.map((s) => s.shift_date));
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
@@ -150,8 +208,8 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
     return days;
   };
 
-  const toDateStr = (d) => d.toISOString().split('T')[0];
-  const todayStr = toDateStr(new Date());
+  const toDateStr = (d) => formatLocalDateYMD(d);
+  const todayStr = formatLocalDateYMD(new Date());
 
   const navigateMonth = (dir) => {
     const next = new Date(currentMonth);
@@ -160,7 +218,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
   };
 
   const calendarDays = getCalendarDays();
-  const scheduleShifts = shifts.filter(s => s.shift_date >= todayStr);
+  const scheduleShifts = myShifts.filter((s) => s.shift_date >= todayStr);
 
   // ── Time-off modal helpers ─────────────────────────────────────────────────
   const getModalCalendarDays = () => {
@@ -219,25 +277,50 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
     setRangeEnd(null);
 
     try {
-      const { error } = await supabase.from('shift_requests').insert({
-        org_id: ORG_ID,
+      const startDate = rangeStart;
+      const endDate = rangeEnd || rangeStart;
+      const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      const startISO = fmt(startDate);
+      const endISO = fmt(endDate);
+
+      // One row per time-off period so the manager approves once and the web app can block
+      // scheduling for the whole range (time_off_start_date / time_off_end_date).
+      const payload = {
+        org_id: orgId,
         shift_id: null,
         employee_name: employeeName,
         request_type: 'time_off',
         note,
         target_employee: null,
         status: 'pending',
-      });
-      if (error) throw error;
-      await supabase.from('notifications').insert({
-        org_id: ORG_ID,
+        time_off_start_date: startISO,
+        time_off_end_date: endISO,
+      };
+      console.log('[TimeOff] orgId:', orgId, '| employeeName:', employeeName, '| range:', startISO, '-', endISO);
+      console.log('[TimeOff] inserting single shift_request:', JSON.stringify(payload));
+      const { data: inserted, error } = await supabase.from('shift_requests').insert(payload).select();
+      if (error) {
+        console.warn('[TimeOff] insert FAILED:', error.message, error.hint || '', error.code || '');
+        throw error;
+      }
+      console.log('[TimeOff] insert OK, row:', JSON.stringify(inserted));
+      const insertedCount = 1;
+
+      const { error: notifErr } = await supabase.from('notifications').insert({
+        org_id: orgId,
         employee_name: 'Manager',
         type: 'shift_request',
         title: 'New Time Off Request',
-        body: `${employeeName} requested time off from ${from} to ${to}`,
+        body: `${employeeName} requested time off ${note}`,
         read: false,
       });
-      Alert.alert('Request Submitted', `Time off requested from ${from} to ${to}. Your manager will be notified.`);
+      if (notifErr) console.warn('[TimeOff] notification insert failed:', notifErr.message);
+
+      Alert.alert(
+        'Request Submitted',
+        `Your Time Off request for ${note} has been sent to your manager. (${insertedCount} shift request(s) created)`
+      );
     } catch (e) {
       const msg = e?.message || 'Unknown error';
       Alert.alert('Error', `Could not submit request: ${msg}`);
@@ -272,7 +355,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
       const { data, error } = await supabase
         .from('shifts')
         .select('employee_name, position, start_time, end_time')
-        .eq('org_id', ORG_ID)
+        .eq('org_id', orgId)
         .eq('shift_date', dateStr)
         .order('start_time', { ascending: true });
       if (!error) setRosterShifts(data || []);
@@ -292,7 +375,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
       const { data: dayShifts } = await supabase
         .from('shifts')
         .select('employee_name')
-        .eq('org_id', ORG_ID)
+        .eq('org_id', orgId)
         .eq('shift_date', shift.shift_date);
 
       const scheduledOnDay = new Set(
@@ -303,7 +386,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
       const { data: positionShifts } = await supabase
         .from('shifts')
         .select('employee_name')
-        .eq('org_id', ORG_ID)
+        .eq('org_id', orgId)
         .eq('position', shift.position);
 
       const allWithPosition = [
@@ -330,20 +413,26 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
     if (!selectedShift) return;
     setSubmitting(true);
     try {
-      const { error } = await supabase.from('shift_requests').insert({
-        org_id: ORG_ID,
+      const payload = {
+        org_id: orgId,
         shift_id: selectedShift.id,
         employee_name: employeeName,
         request_type: type,
         note: shiftNote.trim() || null,
         target_employee: targetEmployee,
         status: 'pending',
-      });
-      if (error) throw error;
+      };
+      console.log('[ShiftRequest] inserting:', JSON.stringify(payload));
+      const { data: inserted, error } = await supabase.from('shift_requests').insert(payload).select();
+      if (error) {
+        console.warn('[ShiftRequest] insert FAILED:', error.message, error.hint || '', error.code || '');
+        throw error;
+      }
+      console.log('[ShiftRequest] insert OK:', JSON.stringify(inserted));
       const label = type === 'time_off' ? 'Time Off' : targetEmployee ? `Transfer to ${targetEmployee}` : 'Transfer';
       const notePart = shiftNote.trim() ? ` — Note: ${shiftNote.trim()}` : '';
-      await supabase.from('notifications').insert({
-        org_id: ORG_ID,
+      const { error: notifErr } = await supabase.from('notifications').insert({
+        org_id: orgId,
         employee_name: 'Manager',
         type: 'shift_request',
         title: 'New Shift Request',
@@ -351,6 +440,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
         read: false,
         shift_id: selectedShift.id,
       });
+      if (notifErr) console.warn('[ShiftRequest] notification insert failed:', notifErr.message);
       closeShiftModal();
       Alert.alert(
         'Request Submitted',
@@ -358,7 +448,10 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
       );
     } catch (e) {
       const msg = e?.message || 'Unknown error';
-      Alert.alert('Error', `Could not submit request: ${msg}`);
+      const hint = /stack depth/i.test(msg)
+        ? '\n\nFix: Supabase → SQL Editor → run rls-fix-org-members-shifts.sql in Supabase SQL Editor.'
+        : '';
+      Alert.alert('Error', `Could not submit request: ${msg}${hint}`);
       console.warn('[Supabase] shift_request failed:', msg);
     } finally {
       setSubmitting(false);
@@ -387,6 +480,10 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
       >
         <Text style={styles.dateText}>{getCurrentDate()}</Text>
 
+        {scheduleUiLoading ? (
+          <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 40, marginBottom: 24 }} />
+        ) : (
+        <>
         {/* Inline Calendar */}
         <View style={styles.calendarCard}>
           <View style={styles.monthNav}>
@@ -470,10 +567,8 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
         {/* Shifts List (today onwards) */}
         <Text style={styles.sectionTitle}>Shifts</Text>
 
-        {loading ? (
-          <ActivityIndicator size="small" color="#4CAF50" style={{ marginTop: 20 }} />
-        ) : scheduleShifts.length === 0 ? (
-          <Text style={styles.emptyText}>No shifts scheduled from today onwards.</Text>
+        {scheduleShifts.length === 0 ? (
+          <Text style={styles.emptyText}>No upcoming shifts scheduled.</Text>
         ) : (
           <View style={styles.scheduleList}>
             {scheduleShifts.map((shift) => (
@@ -499,6 +594,9 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        </>
         )}
 
         {/* Bottom Buttons */}
@@ -563,7 +661,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId }) => {
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 340 }}>
                 {rosterShifts.map((s, i) => {
                   const isMe = (s.employee_name || '').toLowerCase() === employeeName.toLowerCase();
-                  const myShiftOnDay = isMe ? shifts.find(sh => sh.shift_date === rosterDate) : null;
+                  const myShiftOnDay = isMe ? myShifts.find((sh) => sh.shift_date === rosterDate) : null;
                   return (
                     <View key={i} style={[styles.rosterRow, isMe && styles.rosterRowMe]}>
                       <View style={[styles.rosterAvatar, isMe && styles.rosterAvatarMe]}>

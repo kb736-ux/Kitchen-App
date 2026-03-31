@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kenny Kitchen - Recipes</title>
+    <title>Sheek - Recipes</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="recipes.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
         <nav class="top-nav">
             <div class="nav-brand">
                 <i class="fas fa-utensils"></i>
-                <span>Kenny Kitchen</span>
+                <span>Sheek</span>
             </div>
             <div class="nav-tabs">
                 <button class="nav-tab" onclick="window.location.href='index.html'"><i class="fas fa-home"></i> Home</button>
@@ -26,7 +26,7 @@
             </div>
             <div class="nav-user">
                 <div class="user-profile">
-                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="User" class="user-avatar">
                     <span>Admin</span>
                 </div>
             </div>
@@ -40,7 +40,7 @@
 
             <div class="recipes-search-wrap">
                 <i class="fas fa-search recipes-search-icon"></i>
-                <input type="search" id="recipe-search" class="recipe-search-input" placeholder="Search dishes by name or description...">
+                <input type="search" id="recipe-search" class="recipe-search-input" placeholder="Search recipes & dishes (name, ingredients… — not email)">
             </div>
 
             <div class="recipes-three-col">
@@ -100,12 +100,23 @@
                     <input type="text" id="recipe-name" class="form-control" placeholder="e.g. Vanilla Ice Cream">
                 </div>
                 <div class="form-group">
-                    <label for="recipe-desc"><i class="fas fa-align-left"></i> Description</label>
-                    <textarea id="recipe-desc" class="form-control" rows="3" placeholder="Brief description of the recipe..."></textarea>
+                    <label for="recipe-ingredients"><i class="fas fa-carrot"></i> Ingredients</label>
+                    <textarea id="recipe-ingredients" class="form-control" rows="5" placeholder="- 2 cups flour&#10;- 1 cup sugar&#10;- 1 tsp vanilla"></textarea>
+                    <small class="form-help-text">One ingredient per line. Bullets are optional.</small>
+                </div>
+                <div class="form-group">
+                    <label for="recipe-steps"><i class="fas fa-list-ol"></i> Steps</label>
+                    <textarea id="recipe-steps" class="form-control" rows="6" placeholder="- Mix dry ingredients&#10;- Add wet ingredients&#10;- Bake at 350F for 30 minutes"></textarea>
+                    <small class="form-help-text">One step per line. Bullets are optional.</small>
                 </div>
                 <div class="form-group">
                     <label for="recipe-yield"><i class="fas fa-weight-hanging"></i> Yield</label>
                     <input type="text" id="recipe-yield" class="form-control" placeholder="e.g. 4 qts">
+                </div>
+                <div class="form-group">
+                    <label for="recipe-allergens"><i class="fas fa-triangle-exclamation"></i> Allergens</label>
+                    <input type="text" id="recipe-allergens" class="form-control" placeholder="e.g. Dairy, Nuts, Gluten">
+                    <small class="form-help-text">Separate allergens with commas.</small>
                 </div>
             </div>
             <div class="modal-footer">
@@ -128,6 +139,23 @@
                     <input type="text" id="dish-name" class="form-control" placeholder="e.g. Blueberry Pie">
                 </div>
                 <div class="form-group">
+                    <label for="dish-image-url"><i class="fas fa-image"></i> Dish Image URL</label>
+                    <input type="text" id="dish-image-url" class="form-control" placeholder="https://...">
+                </div>
+                <div class="form-group">
+                    <label for="dish-image-file"><i class="fas fa-upload"></i> Upload Dish Image</label>
+                    <input type="file" id="dish-image-file" class="form-control" accept="image/*">
+                    <small class="form-help-text">Choose an image file or use URL above.</small>
+                    <div class="dish-image-preview-wrap" id="dish-image-preview-wrap" style="display:none;">
+                        <img id="dish-image-preview" alt="Dish preview" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="dish-allergens"><i class="fas fa-triangle-exclamation"></i> Dish Allergens</label>
+                    <input type="text" id="dish-allergens" class="form-control" placeholder="e.g. Dairy, Eggs">
+                    <small class="form-help-text">Separate allergens with commas.</small>
+                </div>
+                <div class="form-group">
                     <label><i class="fas fa-list-check"></i> Required Recipes</label>
                     <div class="dish-recipes-search">
                         <i class="fas fa-search"></i>
@@ -145,9 +173,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="auth.js"></script>
+    <script src="subscriptionPlans.js?v=1"></script>
+    <script src="auth.js?v=20250308"></script>
     <script src="adminSettings.js"></script>
     <script src="script.js"></script>
-    <script src="recipes.js"></script>
+    <script src="recipes.js?v=20250307"></script>
 </body>
 </html>

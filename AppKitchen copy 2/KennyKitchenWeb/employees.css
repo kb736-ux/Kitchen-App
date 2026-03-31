@@ -423,6 +423,27 @@
     border-color: #cbd5e0;
 }
 
+.modal-employee .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.1rem;
+    background: #fff5f5;
+    color: #c53030;
+    border-radius: 10px;
+    border: 2px solid #fed7d7;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-right: auto;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.modal-employee .btn-danger:hover {
+    background: #fed7d7;
+    border-color: #feb2b2;
+}
+
 /* Position checkboxes in modals */
 .position-checkboxes {
     display: flex;

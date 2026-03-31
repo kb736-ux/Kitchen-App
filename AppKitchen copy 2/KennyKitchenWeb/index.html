@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kenny Kitchen - Admin Dashboard</title>
+    <title>Sheek - Admin Dashboard</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -14,7 +14,7 @@
         <nav class="top-nav">
             <div class="nav-brand">
                 <i class="fas fa-utensils"></i>
-                <span>Kenny Kitchen</span>
+                <span>Sheek</span>
             </div>
             <div class="nav-tabs">
                 <button class="nav-tab active" data-tab="home">
@@ -48,7 +48,7 @@
                     <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
                 </div>
                 <div class="user-profile">
-                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="Admin" class="user-avatar">
+                    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="User" class="user-avatar">
                     <span>Admin</span>
                 </div>
             </div>
@@ -57,7 +57,7 @@
         <!-- Main Dashboard Content -->
         <main class="dashboard-main">
             <div class="dashboard-header">
-                <h1>Kenny Kitchen Overview</h1>
+                <h1>Sheek Overview</h1>
                 <div class="header-center">
                     <h2 class="current-date-header" id="current-date-header"></h2>
                 </div>
@@ -81,12 +81,12 @@
                 <!-- On Shift Section -->
                 <section class="dashboard-card shift-card">
                     <div class="card-header">
-                        <h2><i class="fas fa-clock"></i> Currently On Shift</h2>
-                        <span class="card-badge" id="shift-count-badge">0 Active</span>
+                        <h2><i class="fas fa-users"></i> Team overview</h2>
+                        <span class="card-badge" id="shift-count-badge">0 team</span>
                     </div>
                     <div class="card-content">
                         <div class="shift-list" id="shift-list">
-                            <p class="no-tasks-message" id="shift-list-empty-msg" style="display:none;color:#718096;padding:1rem;">No one on shift today.</p>
+                            <p class="no-tasks-message" id="shift-list-empty-msg" style="display:none;color:#718096;padding:1rem;">No employees in roster yet. Add roles under Employees.</p>
                         </div>
                     </div>
                 </section>
@@ -109,7 +109,7 @@
                             <h3 class="section-title">In Progress</h3>
                             <div class="progress-list" id="progress-list">
                                 <!-- Only employees with assigned tasks appear here; populated from stored tasks -->
-                                <p id="progress-list-empty-msg" class="no-tasks-message" style="display: none;">No tasks in progress. Assign tasks on the Scheduling page.</p>
+                                <p id="progress-list-empty-msg" class="no-tasks-message" style="display: none;">No open tasks. Assign tasks on the Scheduling page or wait for sync.</p>
                             </div>
                         </div>
                     </div>
@@ -178,7 +178,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="auth.js"></script>
+    <script src="subscriptionPlans.js?v=1"></script>
+    <script src="auth.js?v=20250308"></script>
     <script src="adminSettings.js"></script>
     <script src="employees.js"></script>
     <script src="script.js"></script>
