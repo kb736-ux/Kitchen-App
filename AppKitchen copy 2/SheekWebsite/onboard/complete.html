@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finish signup — Sheek</title>
+  <meta name="description" content="Set your manager password after Stripe checkout to access your new restaurant dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="onboard-wizard-body">
+  <header class="site-header onboard-wizard-header">
+    <div class="wrap header-inner">
+      <a href="../index.html" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="../index.html#features">Features</a>
+        <a href="../index.html#pricing">Pricing</a>
+        <a href="index.html">Onboard</a>
+        <a href="../onboarding-guide.html">Setup guide</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="onboard-wizard-main">
+    <div class="wrap onboard-wizard-inner">
+      <p class="onboard-step-pill">After checkout</p>
+      <h1 class="onboard-wizard-title">Create your login</h1>
+      <p class="onboard-wizard-lead">
+        Payment succeeded. Choose a password for <strong>your</strong> manager account. This is only for you—other managers use their own emails and passwords.
+      </p>
+
+      <div class="onboarding-lead-card onboard-wizard-card onboard-wizard-card-wide">
+        <p class="onboard-pay-summary" id="ob-email-hint" aria-live="polite"></p>
+        <form id="ob-complete-form" class="onboarding-lead-form">
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-password">Your account password</label>
+            <input id="ob-password" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required />
+          </div>
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-password2">Confirm your password</label>
+            <input id="ob-password2" type="password" autocomplete="new-password" minlength="6" placeholder="Repeat password" required />
+          </div>
+          <p id="ob-complete-err" class="onboarding-lead-error" role="alert" hidden></p>
+          <button type="submit" class="btn btn-primary onboarding-lead-submit" id="ob-complete-submit">
+            Finish and open dashboard
+          </button>
+        </form>
+      </div>
+      <p class="onboard-wizard-note">
+        <i class="fas fa-info-circle" aria-hidden="true"></i>
+        If this page won’t load after payment, keep your Stripe receipt and contact support—your subscription may still be active.
+      </p>
+    </div>
+  </main>
+
+  <script src="../onboard-config.js"></script>
+  <script src="../site-config.js"></script>
+  <script>
+    (function () {
+      document.addEventListener("DOMContentLoaded", function () {
+        var params = new URLSearchParams(window.location.search || "");
+        var sessionId = String(params.get("session_id") || "").trim();
+        var hintEl = document.getElementById("ob-email-hint");
+        var errEl = document.getElementById("ob-complete-err");
+        var form = document.getElementById("ob-complete-form");
+        var submitBtn = document.getElementById("ob-complete-submit");
+
+        try {
+          var em = sessionStorage.getItem("kk_onboard_email_pending") || "";
+          hintEl.textContent = "";
+          var p = document.createElement("p");
+          if (em) {
+            var strong = document.createElement("strong");
+            strong.textContent = "Signing up as: ";
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(em));
+          } else {
+            var s2 = document.createElement("strong");
+            s2.textContent = "same email";
+            p.appendChild(document.createTextNode("Use the "));
+            p.appendChild(s2);
+            p.appendChild(document.createTextNode(" you entered in step 1 when you sign in."));
+          }
+          hintEl.appendChild(p);
+        } catch (_) {
+          hintEl.textContent = "";
+        }
+
+        if (!sessionId) {
+          errEl.textContent =
+            "Missing checkout session. Return from Stripe after a successful payment, or start again from the onboard flow.";
+          errEl.removeAttribute("hidden");
+          submitBtn.disabled = true;
+          return;
+        }
+
+        function showErr(msg) {
+          if (!msg) {
+            errEl.textContent = "";
+            errEl.setAttribute("hidden", "");
+            return;
+          }
+          errEl.textContent = msg;
+          errEl.removeAttribute("hidden");
+        }
+
+        form.addEventListener("submit", async function (e) {
+          e.preventDefault();
+          showErr("");
+          var p1 = String(document.getElementById("ob-password").value || "");
+          var p2 = String(document.getElementById("ob-password2").value || "");
+          if (p1.length < 6) {
+            showErr("Use a password with at least 6 characters.");
+            return;
+          }
+          if (p1 !== p2) {
+            showErr("Passwords do not match.");
+            return;
+          }
+
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Creating your account…";
+
+          try {
+            var fnUrl = window.sheekOnboardFunctionUrl("onboard-complete-signup");
+            var res = await fetch(fnUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: window.SHEEK_SUPABASE_ANON_KEY,
+                Authorization: "Bearer " + window.SHEEK_SUPABASE_ANON_KEY,
+              },
+              body: JSON.stringify({ session_id: sessionId, password: p1 }),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+            if (!res.ok) {
+              showErr(data.error || "Could not finish signup. Try again or log in if you already have an account.");
+              submitBtn.disabled = false;
+              submitBtn.textContent = "Finish and open dashboard";
+              return;
+            }
+            try {
+              var pending = sessionStorage.getItem("kk_onboard_email_pending") || "";
+              if (pending) {
+                localStorage.setItem("kk_onboard_email", pending);
+                localStorage.setItem("kk_admin_email", pending);
+              }
+              sessionStorage.removeItem("kk_onboard_email_pending");
+            } catch (_) {}
+
+            var dash = window.sheekDashboardIndexUrl();
+            var sep = dash.indexOf("?") >= 0 ? "&" : "?";
+            window.location.href = dash + sep + "onboard_paid=1&login=1";
+          } catch (err) {
+            showErr("Network error. Check your connection and try again.");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Finish and open dashboard";
+          }
+        });
+      });
+    })();
+  </script>
+  <script src="../main.js"></script>
+</body>
+</html>

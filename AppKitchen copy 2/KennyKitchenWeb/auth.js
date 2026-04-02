@@ -756,7 +756,7 @@
       const p2 = new URLSearchParams(window.location.search || '');
       if (p2.get('onboard_paid') === '1') {
         showInfo(
-          'Sign in with the email and password you used on the payment step. If checkout just finished, your restaurant may take a few seconds to activate.'
+          'Sign in with your manager email and the password you created on the “Finish signup” page after Stripe. If you just finished, your restaurant may take a few seconds to activate.'
         );
       }
     } catch (_) {}

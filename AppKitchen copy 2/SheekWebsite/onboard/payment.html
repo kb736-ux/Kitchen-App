@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Payment — Sheek</title>
-  <meta name="description" content="Set your manager password and subscribe with Stripe to finish creating your restaurant." />
+  <meta name="description" content="Subscribe with Stripe to create your restaurant. You will set your manager password on the next page after payment succeeds." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -33,23 +33,14 @@
   <main class="onboard-wizard-main">
     <div class="wrap onboard-wizard-inner">
       <p class="onboard-step-pill">Step 3 of 3</p>
-      <h1 class="onboard-wizard-title">Password &amp; payment</h1>
+      <h1 class="onboard-wizard-title">Subscription payment</h1>
       <p class="onboard-wizard-lead">
-        Create the password you’ll use for the manager dashboard, then continue to Stripe to enter your payment method.
-        Your restaurant is created in Sheek <strong>after</strong> checkout completes successfully.
+        Your manager login is <strong>not</strong> created until <strong>after</strong> Stripe confirms payment. On the next screen you’ll choose the password for <strong>your personal account</strong> (the email below). Other managers each have their own logins.
       </p>
 
       <div class="onboarding-lead-card onboard-wizard-card onboard-wizard-card-wide">
         <div class="onboard-pay-summary" id="ob-summary" aria-live="polite"></div>
         <form id="onboard-pay-form" class="onboarding-lead-form">
-          <div class="onboarding-field onboarding-field-full">
-            <label for="ob-password">Dashboard password</label>
-            <input id="ob-password" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required />
-          </div>
-          <div class="onboarding-field onboarding-field-full">
-            <label for="ob-password2">Confirm password</label>
-            <input id="ob-password2" type="password" autocomplete="new-password" minlength="6" placeholder="Repeat password" required />
-          </div>
           <p id="ob-pay-err" class="onboarding-lead-error" role="alert" hidden></p>
           <div class="onboard-wizard-actions onboard-wizard-actions-stretch">
             <a class="btn btn-outline" href="restaurant.html">Back</a>
@@ -59,7 +50,7 @@
       </div>
       <p class="onboard-wizard-note">
         <i class="fas fa-lock" aria-hidden="true"></i>
-        Card details are entered on Stripe’s secure page. After payment, sign in on the dashboard with this email and password.
+        Card details are entered on Stripe’s secure page. After payment succeeds, you’ll return here to set your password, then open the manager dashboard.
       </p>
     </div>
   </main>
@@ -111,28 +102,16 @@
         form.addEventListener("submit", async function (e) {
           e.preventDefault();
           showErr("");
-          var p1 = String(document.getElementById("ob-password").value || "");
-          var p2 = String(document.getElementById("ob-password2").value || "");
-          if (p1.length < 6) {
-            showErr("Use a password with at least 6 characters.");
-            return;
-          }
-          if (p1 !== p2) {
-            showErr("Passwords do not match.");
-            return;
-          }
 
-          var base = window.sheekDashboardIndexUrl();
-          var sep = base.indexOf("?") >= 0 ? "&" : "?";
-          var successUrl = base + sep + "onboard_paid=1&session_id={CHECKOUT_SESSION_ID}";
+          var completeBase = new URL("complete.html", window.location.href).href.split("#")[0];
+          var successUrl = completeBase + (completeBase.indexOf("?") >= 0 ? "&" : "?") + "session_id={CHECKOUT_SESSION_ID}";
           var cancelUrl = new URL("payment.html", window.location.href).href;
 
           submitBtn.disabled = true;
           submitBtn.textContent = "Starting checkout…";
 
           try {
-            localStorage.setItem("kk_onboard_email", String(o.email || "").trim());
-            localStorage.setItem("kk_admin_email", String(o.email || "").trim());
+            sessionStorage.setItem("kk_onboard_email_pending", String(o.email || "").trim());
           } catch (_) {}
 
           try {
@@ -146,7 +125,6 @@
               },
               body: JSON.stringify({
                 email: o.email,
-                password: p1,
                 first_name: o.first_name,
                 last_name: o.last_name,
                 restaurant_name: o.restaurant_name,

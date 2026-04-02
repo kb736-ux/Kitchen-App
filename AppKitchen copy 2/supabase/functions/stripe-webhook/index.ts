@@ -82,6 +82,9 @@ async function completeOnboardingFromCheckout(
   if (String(intentRow.status) === "completed" && intentRow.org_id) {
     return true;
   }
+  if (String(intentRow.status) === "awaiting_signup" && intentRow.org_id) {
+    return true;
+  }
 
   const { data: locked, error: lockErr } = await admin
     .from("onboarding_intents")
@@ -116,14 +119,9 @@ async function completeOnboardingFromCheckout(
   }
 
   const restaurantName = String(intent.restaurant_name || "").trim();
-  const userId = String(intent.auth_user_id || "").trim();
-  const email = String(intent.email || "").trim();
-  const firstName = String(intent.first_name || "").trim();
-  const lastName = String(intent.last_name || "").trim();
-  const displayName = `${firstName} ${lastName}`.trim();
 
-  if (!restaurantName || !userId) {
-    console.warn("[stripe-webhook] onboarding: missing restaurant or user on intent");
+  if (!restaurantName) {
+    console.warn("[stripe-webhook] onboarding: missing restaurant name on intent");
     await admin.from("onboarding_intents").update({ status: "failed" }).eq("id", intentId);
     return true;
   }
@@ -149,41 +147,13 @@ async function completeOnboardingFromCheckout(
 
   await syncOrgFromSubscription(admin, orgId, sub);
 
-  const { error: omErr } = await admin.from("org_members").insert({
-    org_id: orgId,
-    user_id: userId,
-    role: "manager",
-    position: null,
-  });
-  if (omErr) {
-    console.error("[stripe-webhook] onboarding: org_members insert", omErr);
-  }
-
-  const { error: profErr } = await admin.from("profiles").insert({
-    org_id: orgId,
-    user_id: userId,
-    email: email || null,
-    display_name: displayName || email.split("@")[0] || "Manager",
-    employee_name: displayName || email.split("@")[0] || "Manager",
-    first_name: firstName || null,
-    last_name: lastName || null,
-  });
-  if (profErr) {
-    console.error("[stripe-webhook] onboarding: profiles insert", profErr);
-  }
-
-  try {
-    await admin.from("admin_users").upsert({ user_id: userId, is_admin: true }, { onConflict: "user_id" });
-  } catch (e) {
-    console.warn("[stripe-webhook] onboarding: admin_users upsert", e);
-  }
-
+  // Auth user + org_members + profiles are created only after payment, via onboard-complete-signup
+  // (password set on marketing /onboard/complete.html).
   await admin
     .from("onboarding_intents")
     .update({
-      status: "completed",
+      status: "awaiting_signup",
       org_id: orgId,
-      completed_at: new Date().toISOString(),
     })
     .eq("id", intentId);
 

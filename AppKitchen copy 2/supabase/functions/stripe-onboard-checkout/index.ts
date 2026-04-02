@@ -11,11 +11,11 @@ function normalizePlan(p: string): string | null {
   return ["starter", "growth", "scale"].includes(v) ? v : null;
 }
 
-/** Allow redirects back to the manager app after Checkout (comma-separated URL prefixes). */
+/** Allow redirects back to the manager app or marketing onboard complete page. */
 function isAllowedRedirectUrl(url: string): boolean {
   const raw = (Deno.env.get("ONBOARD_ALLOWED_URL_PREFIXES") || "").trim();
   const defaults =
-    "https://app.sheekapp.com,http://localhost,http://127.0.0.1,file:";
+    "https://sheekapp.com,https://www.sheekapp.com,https://app.sheekapp.com,http://localhost,http://127.0.0.1,file:";
   const prefixes = (raw || defaults).split(",").map((s) => s.trim()).filter(Boolean);
   const u = String(url || "").trim();
   if (!u) return false;
@@ -41,7 +41,6 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const email = String(body.email || "").trim().toLowerCase();
-    const password = String(body.password || "");
     const firstName = String(body.first_name || "").trim();
     const lastName = String(body.last_name || "").trim();
     const restaurantName = String(body.restaurant_name || "").trim();
@@ -51,12 +50,6 @@ Deno.serve(async (req) => {
 
     if (!email || !firstName || !lastName || !restaurantName || !plan) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!password || password.length < 6) {
-      return new Response(JSON.stringify({ error: "Password must be at least 6 characters" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -85,36 +78,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const displayName = `${firstName} ${lastName}`.trim();
-    const { data: created, error: createErr } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: displayName,
-        kk_manager_first: firstName,
-        kk_manager_last: lastName,
-      },
-    });
-
-    if (createErr || !created?.user?.id) {
-      const msg = createErr?.message || "Could not create account";
-      const dup = /already|registered|exists/i.test(msg);
-      return new Response(
-        JSON.stringify({
-          error: dup
-            ? "That email is already registered. Log in to the dashboard instead."
-            : msg,
-        }),
-        {
-          status: dup ? 409 : 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    const userId = created.user.id;
-
     const { data: intentRow, error: insErr } = await admin
       .from("onboarding_intents")
       .insert({
@@ -123,16 +86,13 @@ Deno.serve(async (req) => {
         last_name: lastName,
         restaurant_name: restaurantName,
         plan,
-        auth_user_id: userId,
+        auth_user_id: null,
         status: "pending",
       })
       .select("id")
       .single();
 
     if (insErr || !intentRow?.id) {
-      try {
-        await admin.auth.admin.deleteUser(userId);
-      } catch (_) {}
       return new Response(
         JSON.stringify({ error: insErr?.message || "Could not start checkout" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -151,13 +111,11 @@ Deno.serve(async (req) => {
       metadata: {
         onboarding_intent_id: intentId,
         plan,
-        auth_user_id: userId,
       },
       subscription_data: {
         metadata: {
           onboarding_intent_id: intentId,
           plan,
-          auth_user_id: userId,
         },
       },
       allow_promotion_codes: true,
@@ -166,9 +124,6 @@ Deno.serve(async (req) => {
     if (!session?.id || !session.url) {
       try {
         await admin.from("onboarding_intents").delete().eq("id", intentId);
-      } catch (_) {}
-      try {
-        await admin.auth.admin.deleteUser(userId);
       } catch (_) {}
       return new Response(JSON.stringify({ error: "Stripe session could not be created" }), {
         status: 500,
