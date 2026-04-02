@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sheek — Subscribe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://js.stripe.com/v3/"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, sans-serif;
+      background: linear-gradient(160deg, #f0fdf4 0%, #ecfdf5 40%, #f8fafc 100%);
+      color: #0f172a;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 440px; margin: 0 auto; }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+      border: 1px solid #e2e8f0;
+    }
+    h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 6px; }
+    .sub { font-size: 0.875rem; color: #64748b; margin-bottom: 22px; line-height: 1.45; }
+    #payment-element { margin-bottom: 20px; min-height: 24px; }
+    #submit {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      background: #16a34a;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    #submit:hover:not(:disabled) { background: #15803d; }
+    #submit:disabled { opacity: 0.55; cursor: not-allowed; }
+    #message { margin-top: 14px; font-size: 0.8125rem; min-height: 1.25em; }
+    #message.error { color: #b91c1c; }
+    #message.ok { color: #166534; }
+    .back {
+      display: inline-block;
+      margin-top: 20px;
+      font-size: 0.875rem;
+      color: #16a34a;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .back:hover { text-decoration: underline; }
+    .plan-pill {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #166534;
+      background: #dcfce7;
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="plan-pill" id="plan-label">Plan</div>
+      <h1>Card details</h1>
+      <p class="sub">Pay securely with Stripe. Your card is processed on Stripe’s systems; Sheek does not store full card numbers.</p>
+      <form id="payment-form">
+        <div id="payment-element"></div>
+        <button type="submit" id="submit">Subscribe</button>
+        <div id="message" role="alert"></div>
+      </form>
+    </div>
+    <a class="back" href="index.html">← Back to dashboard</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const plan = (params.get('plan') || 'starter').toLowerCase();
+  const orgId = (params.get('org_id') || '').trim();
+  const planLabel = document.getElementById('plan-label');
+  const msg = document.getElementById('message');
+  const form = document.getElementById('payment-form');
+  const submitBtn = document.getElementById('submit');
+
+  const planNames = { starter: 'Starter', growth: 'Growth', scale: 'Scale' };
+  if (planLabel) planLabel.textContent = planNames[plan] || plan;
+
+  function setMsg(text, cls) {
+    if (!msg) return;
+    msg.textContent = text || '';
+    msg.className = cls || '';
+  }
+
+  async function boot() {
+    const supa = window.supabaseClient;
+    if (!supa) {
+      setMsg('Supabase is not configured.', 'error');
+      return;
+    }
+    const { data: { session } } = await supa.auth.getSession();
+    if (!session) {
+      setMsg('Please sign in from the dashboard first.', 'error');
+      if (submitBtn) submitBtn.disabled = true;
+      return;
+    }
+    if (!orgId) {
+      setMsg('Missing org_id. Open this page from Admin → Pay on this site.', 'error');
+      if (submitBtn) submitBtn.disabled = true;
+      return;
+    }
+
+    const returnUrl = window.location.href.split('?')[0] +
+      '?plan=' + encodeURIComponent(plan) +
+      '&org_id=' + encodeURIComponent(orgId) +
+      '&payment_return=1';
+
+    const paymentIntentClientSecret = params.get('payment_intent_client_secret');
+    if (params.get('payment_return') === '1' && paymentIntentClientSecret) {
+      const pk = sessionStorage.getItem('kk_stripe_pk');
+      if (!pk) {
+        setMsg('Session expired. Please start checkout again from Admin Settings.', 'error');
+        if (submitBtn) submitBtn.disabled = true;
+        return;
+      }
+      const stripeRet = Stripe(pk);
+      const { error, paymentIntent } = await stripeRet.retrievePaymentIntent(paymentIntentClientSecret);
+      if (error) {
+        setMsg(error.message || 'Could not verify payment.', 'error');
+        return;
+      }
+      if (paymentIntent && paymentIntent.status === 'succeeded') {
+        sessionStorage.removeItem('kk_stripe_pk');
+        setMsg('Success! Your subscription is processing — redirecting…', 'ok');
+        setTimeout(() => {
+          window.location.href = 'index.html?billing=success';
+        }, 1200);
+        return;
+      }
+      setMsg('Payment status: ' + (paymentIntent?.status || 'unknown') + '. Check Admin Settings or the billing portal.', 'error');
+      return;
+    }
+
+    let stripe;
+    let elements;
+
+    try {
+      const { data, error } = await supa.functions.invoke('stripe-subscribe-elements', {
+        body: { plan, org_id: orgId },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      if (!data?.clientSecret || !data?.publishableKey) {
+        throw new Error('Invalid response from server.');
+      }
+
+      try {
+        sessionStorage.setItem('kk_stripe_pk', data.publishableKey);
+      } catch (_) {}
+
+      stripe = Stripe(data.publishableKey);
+      elements = stripe.elements({
+        clientSecret: data.clientSecret,
+        appearance: {
+          theme: 'stripe',
+          variables: { colorPrimary: '#16a34a', borderRadius: '10px' },
+        },
+      });
+      const paymentElement = elements.create('payment');
+      paymentElement.mount('#payment-element');
+    } catch (e) {
+      setMsg(e.message || 'Could not start checkout.', 'error');
+      if (submitBtn) submitBtn.disabled = true;
+      return;
+    }
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!stripe || !elements) return;
+      setMsg('');
+      submitBtn.disabled = true;
+      const { error } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: returnUrl,
+        },
+      });
+      if (error) {
+        setMsg(error.message || 'Payment failed.', 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  boot();
+})();
+  </script>
+</body>
+</html>

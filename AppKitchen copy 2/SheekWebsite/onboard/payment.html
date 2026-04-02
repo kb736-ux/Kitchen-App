@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment — Sheek</title>
+  <meta name="description" content="Set your manager password and subscribe with Stripe to finish creating your restaurant." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="onboard-wizard-body">
+  <header class="site-header onboard-wizard-header">
+    <div class="wrap header-inner">
+      <a href="../index.html" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="../index.html#features">Features</a>
+        <a href="../index.html#pricing">Pricing</a>
+        <a href="index.html">Onboard</a>
+        <a href="../onboarding-guide.html">Setup guide</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="onboard-wizard-main">
+    <div class="wrap onboard-wizard-inner">
+      <p class="onboard-step-pill">Step 3 of 3</p>
+      <h1 class="onboard-wizard-title">Password &amp; payment</h1>
+      <p class="onboard-wizard-lead">
+        Create the password you’ll use for the manager dashboard, then continue to Stripe to enter your payment method.
+        Your restaurant is created in Sheek <strong>after</strong> checkout completes successfully.
+      </p>
+
+      <div class="onboarding-lead-card onboard-wizard-card onboard-wizard-card-wide">
+        <div class="onboard-pay-summary" id="ob-summary" aria-live="polite"></div>
+        <form id="onboard-pay-form" class="onboarding-lead-form">
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-password">Dashboard password</label>
+            <input id="ob-password" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required />
+          </div>
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-password2">Confirm password</label>
+            <input id="ob-password2" type="password" autocomplete="new-password" minlength="6" placeholder="Repeat password" required />
+          </div>
+          <p id="ob-pay-err" class="onboarding-lead-error" role="alert" hidden></p>
+          <div class="onboard-wizard-actions onboard-wizard-actions-stretch">
+            <a class="btn btn-outline" href="restaurant.html">Back</a>
+            <button type="submit" class="btn btn-primary" id="ob-pay-submit">Continue to secure checkout</button>
+          </div>
+        </form>
+      </div>
+      <p class="onboard-wizard-note">
+        <i class="fas fa-lock" aria-hidden="true"></i>
+        Card details are entered on Stripe’s secure page. After payment, sign in on the dashboard with this email and password.
+      </p>
+    </div>
+  </main>
+
+  <script src="../onboard-config.js"></script>
+  <script src="../site-config.js"></script>
+  <script src="onboard.js"></script>
+  <script>
+    (function () {
+      document.addEventListener("DOMContentLoaded", function () {
+        var o = window.sheekOnboard.require(
+          ["first_name", "last_name", "email", "restaurant_name", "plan"],
+          "index.html"
+        );
+        if (!o) return;
+
+        var planLabel = { starter: "Starter", growth: "Growth", scale: "Scale" };
+        document.getElementById("ob-summary").innerHTML =
+          "<p><strong>Restaurant:</strong> " +
+          escapeHtml(o.restaurant_name) +
+          "</p><p><strong>Plan:</strong> " +
+          (planLabel[o.plan] || o.plan) +
+          "</p><p><strong>Manager:</strong> " +
+          escapeHtml(o.first_name + " " + o.last_name) +
+          " · " +
+          escapeHtml(o.email) +
+          "</p>";
+
+        function escapeHtml(s) {
+          var d = document.createElement("div");
+          d.textContent = s;
+          return d.innerHTML;
+        }
+
+        var form = document.getElementById("onboard-pay-form");
+        var errEl = document.getElementById("ob-pay-err");
+        var submitBtn = document.getElementById("ob-pay-submit");
+
+        function showErr(msg) {
+          if (!msg) {
+            errEl.textContent = "";
+            errEl.setAttribute("hidden", "");
+            return;
+          }
+          errEl.textContent = msg;
+          errEl.removeAttribute("hidden");
+        }
+
+        form.addEventListener("submit", async function (e) {
+          e.preventDefault();
+          showErr("");
+          var p1 = String(document.getElementById("ob-password").value || "");
+          var p2 = String(document.getElementById("ob-password2").value || "");
+          if (p1.length < 6) {
+            showErr("Use a password with at least 6 characters.");
+            return;
+          }
+          if (p1 !== p2) {
+            showErr("Passwords do not match.");
+            return;
+          }
+
+          var base = window.sheekDashboardIndexUrl();
+          var sep = base.indexOf("?") >= 0 ? "&" : "?";
+          var successUrl = base + sep + "onboard_paid=1&session_id={CHECKOUT_SESSION_ID}";
+          var cancelUrl = new URL("payment.html", window.location.href).href;
+
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Starting checkout…";
+
+          try {
+            localStorage.setItem("kk_onboard_email", String(o.email || "").trim());
+            localStorage.setItem("kk_admin_email", String(o.email || "").trim());
+          } catch (_) {}
+
+          try {
+            var url = window.sheekOnboardFunctionUrl("stripe-onboard-checkout");
+            var res = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: window.SHEEK_SUPABASE_ANON_KEY,
+                Authorization: "Bearer " + window.SHEEK_SUPABASE_ANON_KEY,
+              },
+              body: JSON.stringify({
+                email: o.email,
+                password: p1,
+                first_name: o.first_name,
+                last_name: o.last_name,
+                restaurant_name: o.restaurant_name,
+                plan: o.plan,
+                success_url: successUrl,
+                cancel_url: cancelUrl,
+              }),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+            if (!res.ok) {
+              showErr(data.error || "Could not start checkout. Try again.");
+              submitBtn.disabled = false;
+              submitBtn.textContent = "Continue to secure checkout";
+              return;
+            }
+            if (!data.url) {
+              showErr("No checkout URL returned.");
+              submitBtn.disabled = false;
+              submitBtn.textContent = "Continue to secure checkout";
+              return;
+            }
+            try {
+              sessionStorage.removeItem(window.sheekOnboard.KEY);
+            } catch (_) {}
+            window.location.href = data.url;
+          } catch (err) {
+            showErr("Network error. Check your connection and try again.");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Continue to secure checkout";
+          }
+        });
+      });
+    })();
+  </script>
+  <script src="../main.js"></script>
+</body>
+</html>

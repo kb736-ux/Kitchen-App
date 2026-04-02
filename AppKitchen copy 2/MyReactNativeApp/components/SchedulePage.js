@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  TextInput,
+  RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  Image,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
@@ -9,6 +23,121 @@ const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function shiftRowKey(s) {
+  if (!s) return '';
+  if (s.id != null) return `id:${s.id}`;
+  return `${s.shift_date}|${s.employee_name}|${s.start_time}|${s.end_time}`;
+}
+
+function buildProfileLabel(profile) {
+  const firstLast = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
+  return firstLast || (profile?.display_name || '').trim() || (profile?.employee_name || '').trim();
+}
+
+function getInitials(name) {
+  return String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || '?';
+}
+
+function mergeShiftRows(prev, incoming) {
+  const map = new Map();
+  (prev || []).forEach((row) => map.set(shiftRowKey(row), row));
+  (incoming || []).forEach((row) => map.set(shiftRowKey(row), row));
+  return Array.from(map.values()).sort((a, b) => {
+    const c = (a.shift_date || '').localeCompare(b.shift_date || '');
+    return c !== 0 ? c : String(a.start_time || '').localeCompare(String(b.start_time || ''));
+  });
+}
+
+function addDaysToYmd(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return formatLocalDateYMD(d);
+}
+
+function addMonthsToYmd(dateStr, months) {
+  const d = new Date(`${dateStr}T12:00:00`);
+  d.setMonth(d.getMonth() + months);
+  return formatLocalDateYMD(d);
+}
+
+function getShiftSeriesInterval(prevDate, nextDate) {
+  if (!prevDate || !nextDate) return null;
+  if (addDaysToYmd(prevDate, 7) === nextDate) return 'weekly';
+  if (addMonthsToYmd(prevDate, 1) === nextDate) return 'monthly';
+  return null;
+}
+
+function groupRepeatingShifts(rows) {
+  const byPattern = new Map();
+  (rows || []).forEach((row) => {
+    const key = [
+      row.employee_name || '',
+      row.position || '',
+      row.start_time || '',
+      row.end_time || '',
+    ].join('|');
+    if (!byPattern.has(key)) byPattern.set(key, []);
+    byPattern.get(key).push(row);
+  });
+
+  const groups = [];
+  byPattern.forEach((list) => {
+    const sorted = [...list].sort((a, b) => (a.shift_date || '').localeCompare(b.shift_date || ''));
+    if (sorted.length === 0) return;
+
+    let run = [sorted[0]];
+    let runInterval = null;
+
+    const flush = () => {
+      if (run.length === 0) return;
+      groups.push({
+        shift: run[0],
+        shifts: [...run],
+        repeatInterval: run.length > 1 ? runInterval : null,
+        repeatCount: run.length,
+        repeatUntil: run[run.length - 1]?.shift_date || run[0]?.shift_date || '',
+      });
+    };
+
+    for (let i = 1; i < sorted.length; i += 1) {
+      const prev = run[run.length - 1];
+      const curr = sorted[i];
+      const step = getShiftSeriesInterval(prev.shift_date, curr.shift_date);
+
+      if (run.length === 1) {
+        if (step) {
+          runInterval = step;
+          run.push(curr);
+        } else {
+          flush();
+          run = [curr];
+          runInterval = null;
+        }
+        continue;
+      }
+
+      if (step && step === runInterval) {
+        run.push(curr);
+      } else {
+        flush();
+        run = [curr];
+        runInterval = null;
+      }
+    }
+
+    flush();
+  });
+
+  return groups.sort((a, b) => (a.shift?.shift_date || '').localeCompare(b.shift?.shift_date || ''));
+}
 
 const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
   const {
@@ -37,6 +166,8 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
   // Shift action modal state
   const [showShiftModal, setShowShiftModal] = useState(false);
   const [selectedShift, setSelectedShift] = useState(null);
+  const [shiftTasks, setShiftTasks] = useState([]);
+  const [loadingShiftTasks, setLoadingShiftTasks] = useState(false);
   const [shiftNote, setShiftNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -73,6 +204,36 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
     }
   }, [orgId, employeeId, employeeName, displayName, firstName, lastName, defaultEmployeeName]);
 
+  /**
+   * Dots on the month grid only reflect rows in `shifts`. The rolling fetch below is bounded;
+   * this always loads the month you are looking at from Supabase and merges (so June / far
+   * future months match what you see when you tap a day — roster was already correct).
+   */
+  useEffect(() => {
+    if (!orgId) return;
+    const y = currentMonth.getFullYear();
+    const m = currentMonth.getMonth();
+    const first = new Date(y, m, 1);
+    const last = new Date(y, m + 1, 0);
+    const startStr = formatLocalDateYMD(first);
+    const endStr = formatLocalDateYMD(last);
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('org_id', orgId)
+        .gte('shift_date', startStr)
+        .lte('shift_date', endStr)
+        .order('shift_date', { ascending: true });
+      if (cancelled || error) return;
+      setShifts((prev) => mergeShiftRows(prev, data || []));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMonth, orgId]);
+
   async function fetchNotifications() {
     const { data, error } = await supabase
       .from('notifications')
@@ -98,9 +259,9 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
     try {
       const now = new Date();
       const past = new Date(now);
-      past.setDate(past.getDate() - 90);
+      past.setDate(past.getDate() - 365);
       const future = new Date(now);
-      future.setDate(future.getDate() + 60);
+      future.setDate(future.getDate() + 365);
       const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
       const { data, error } = await supabase
@@ -121,7 +282,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
             console.log('[Schedule] sample shift:', JSON.stringify({ id: rows[0].id, employee_name: rows[0].employee_name, employee_id: rows[0].employee_id, shift_date: rows[0].shift_date, position: rows[0].position }));
           }
         }
-        setShifts(rows);
+        setShifts((prev) => mergeShiftRows(prev, rows));
       }
     } catch (e) {
       console.warn('[Schedule] fetchShifts exception:', e?.message || e);
@@ -219,6 +380,18 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
 
   const calendarDays = getCalendarDays();
   const scheduleShifts = myShifts.filter((s) => s.shift_date >= todayStr);
+  const groupedScheduleShifts = useMemo(
+    () => groupRepeatingShifts(scheduleShifts),
+    [scheduleShifts]
+  );
+
+  const getRepeatSummary = (group) => {
+    if (!group?.repeatInterval || !group?.repeatCount || group.repeatCount < 2) return '';
+    const unit = group.repeatInterval === 'monthly' ? 'month' : 'week';
+    const everyLabel = group.repeatInterval === 'monthly' ? 'monthly' : 'weekly';
+    const countLabel = `${group.repeatCount} ${unit}${group.repeatCount === 1 ? '' : 's'}`;
+    return `Repeats ${everyLabel} for ${countLabel} until ${formatDate(group.repeatUntil)}`;
+  };
 
   // ── Time-off modal helpers ─────────────────────────────────────────────────
   const getModalCalendarDays = () => {
@@ -340,11 +513,93 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
   const closeShiftModal = () => {
     setShowShiftModal(false);
     setSelectedShift(null);
+    setShiftTasks([]);
+    setLoadingShiftTasks(false);
     setShiftNote('');
     setShowTransferPicker(false);
     setSelectedTransferTarget(null);
     setTransferCoworkers([]);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchShiftTasks() {
+      if (!orgId || !selectedShift?.id || !showShiftModal) {
+        setShiftTasks([]);
+        setLoadingShiftTasks(false);
+        return;
+      }
+
+      setLoadingShiftTasks(true);
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('id, text, status, completed_at, created_at, shift_id')
+        .eq('org_id', orgId)
+        .eq('shift_id', selectedShift.id)
+        .order('id', { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn('[Schedule] fetchShiftTasks error:', error.message);
+        setShiftTasks([]);
+      } else {
+        let rows = data || [];
+
+        // Fallback: if the visible shift row has a different id than the one
+        // tasks were originally linked to, look up sibling shift rows that
+        // share the same employee/date/time and pull tasks from any of them.
+        if (
+          rows.length === 0 &&
+          selectedShift?.shift_date &&
+          selectedShift?.start_time &&
+          selectedShift?.end_time
+        ) {
+          const { data: siblingShifts, error: siblingErr } = await supabase
+            .from('shifts')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('shift_date', selectedShift.shift_date)
+            .eq('start_time', selectedShift.start_time)
+            .eq('end_time', selectedShift.end_time)
+            .eq('employee_name', selectedShift.employee_name || '');
+
+          if (cancelled) return;
+
+          if (siblingErr) {
+            console.warn('[Schedule] fetchShiftTasks sibling shift lookup error:', siblingErr.message);
+          } else {
+            const siblingIds = [...new Set((siblingShifts || []).map((s) => s.id).filter(Boolean))];
+            if (siblingIds.length > 0) {
+              const { data: fallbackTasks, error: fallbackErr } = await supabase
+                .from('tasks')
+                .select('id, text, status, completed_at, created_at, shift_id')
+                .eq('org_id', orgId)
+                .in('shift_id', siblingIds)
+                .order('id', { ascending: true });
+
+              if (cancelled) return;
+
+              if (fallbackErr) {
+                console.warn('[Schedule] fetchShiftTasks fallback task lookup error:', fallbackErr.message);
+              } else {
+                rows = fallbackTasks || [];
+              }
+            }
+          }
+        }
+
+        setShiftTasks(rows);
+      }
+      setLoadingShiftTasks(false);
+    }
+
+    fetchShiftTasks();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, selectedShift?.id, showShiftModal]);
 
   const openDayRoster = async (dateStr) => {
     setRosterDate(dateStr);
@@ -371,37 +626,87 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
     setTransferCoworkers([]);
     setTransferSearch('');
     try {
-      // Find who is already scheduled on that date
-      const { data: dayShifts } = await supabase
-        .from('shifts')
-        .select('employee_name')
-        .eq('org_id', orgId)
-        .eq('shift_date', shift.shift_date);
+      const norm = (v) => (v || '').trim().toLowerCase();
+      const shiftPos = norm(shift?.position);
+      const selfNames = new Set(shiftNameCandidates.map(norm).filter(Boolean));
 
-      const scheduledOnDay = new Set(
-        (dayShifts || []).map(s => (s.employee_name || '').toLowerCase())
+      const [{ data: dayShifts }, { data: capabilityRows }, profileRes] = await Promise.all([
+        supabase
+          .from('shifts')
+          .select('employee_name')
+          .eq('org_id', orgId)
+          .eq('shift_date', shift.shift_date),
+        supabase
+          .from('employee_positions')
+          .select('employee_name, positions')
+          .eq('org_id', orgId),
+        supabase
+          .from('profiles')
+          .select('employee_name, display_name, first_name, last_name, avatar_url, avatar_color')
+          .eq('org_id', orgId),
+      ]);
+      if (profileRes.error) {
+        console.warn('[Transfer] profiles query error:', profileRes.error.message);
+      }
+      const profiles = profileRes.data;
+
+      const profileByKey = new Map();
+      (profiles || []).forEach((p) => {
+        const label = buildProfileLabel(p);
+        const info = {
+          rawName: (p.employee_name || '').trim() || label,
+          label,
+          avatarUrl: (p.avatar_url || '').trim() || null,
+          avatarColor: (p.avatar_color || '').trim() || '#4CAF50',
+        };
+        const empKey = norm(p.employee_name);
+        const displayKey = norm(p.display_name);
+        const labelKey = norm(label);
+        const firstKey = norm(p.first_name);
+        const lastKey = norm(p.last_name);
+        if (empKey) profileByKey.set(empKey, info);
+        if (displayKey) profileByKey.set(displayKey, info);
+        if (labelKey) profileByKey.set(labelKey, info);
+        if (firstKey && !profileByKey.has(firstKey)) profileByKey.set(firstKey, info);
+        if (lastKey && !profileByKey.has(lastKey)) profileByKey.set(lastKey, info);
+      });
+
+      const scheduledOnDay = new Set();
+      (dayShifts || []).forEach((s) => {
+        const raw = norm(s.employee_name);
+        if (!raw) return;
+        scheduledOnDay.add(raw);
+        const profileInfo = profileByKey.get(raw);
+        if (profileInfo?.label) scheduledOnDay.add(norm(profileInfo.label));
+        if (profileInfo?.rawName) scheduledOnDay.add(norm(profileInfo.rawName));
+      });
+
+      const capableByKey = new Map();
+      (capabilityRows || []).forEach((row) => {
+        const rawName = (row.employee_name || '').trim();
+        const rawKey = norm(rawName);
+        const positions = Array.isArray(row.positions) ? row.positions : [];
+        const canDoPosition = positions.some((p) => {
+          const name = typeof p === 'string' ? p : (p?.name || '');
+          return norm(name) === shiftPos;
+        });
+        if (!rawKey || !canDoPosition) return;
+        const profileInfo = profileByKey.get(rawKey);
+        const label = profileInfo?.label || rawName;
+        const labelKey = norm(label);
+        if (selfNames.has(rawKey) || selfNames.has(labelKey)) return;
+        if (scheduledOnDay.has(rawKey) || scheduledOnDay.has(labelKey)) return;
+        capableByKey.set(rawKey, {
+          rawName,
+          label,
+          avatarUrl: profileInfo?.avatarUrl || null,
+          avatarColor: profileInfo?.avatarColor || '#4CAF50',
+        });
+      });
+
+      setTransferCoworkers(
+        Array.from(capableByKey.values()).sort((a, b) => a.label.localeCompare(b.label))
       );
-
-      // Find all employees who have ever been scheduled with this position
-      const { data: positionShifts } = await supabase
-        .from('shifts')
-        .select('employee_name')
-        .eq('org_id', orgId)
-        .eq('position', shift.position);
-
-      const allWithPosition = [
-        ...new Set(
-          (positionShifts || [])
-            .map(s => s.employee_name)
-            .filter(name => name && name.toLowerCase() !== employeeName.toLowerCase())
-        ),
-      ];
-
-      // Keep only those NOT already scheduled that day
-      const available = allWithPosition.filter(
-        name => !scheduledOnDay.has(name.toLowerCase())
-      );
-      setTransferCoworkers(available);
     } catch (e) {
       console.warn('[Transfer] fetchAvailableCoworkers error:', e.message);
     } finally {
@@ -413,13 +718,21 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
     if (!selectedShift) return;
     setSubmitting(true);
     try {
+      const targetEmployeeName =
+        typeof targetEmployee === 'string'
+          ? targetEmployee
+          : (targetEmployee?.rawName || null);
+      const targetEmployeeLabel =
+        typeof targetEmployee === 'string'
+          ? targetEmployee
+          : (targetEmployee?.label || targetEmployee?.rawName || null);
       const payload = {
         org_id: orgId,
         shift_id: selectedShift.id,
         employee_name: employeeName,
         request_type: type,
         note: shiftNote.trim() || null,
-        target_employee: targetEmployee,
+        target_employee: targetEmployeeName,
         status: 'pending',
       };
       console.log('[ShiftRequest] inserting:', JSON.stringify(payload));
@@ -429,7 +742,11 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
         throw error;
       }
       console.log('[ShiftRequest] insert OK:', JSON.stringify(inserted));
-      const label = type === 'time_off' ? 'Time Off' : targetEmployee ? `Transfer to ${targetEmployee}` : 'Transfer';
+      const label = type === 'time_off'
+        ? 'Time Off'
+        : targetEmployeeLabel
+          ? `Transfer to ${targetEmployeeLabel}`
+          : 'Transfer';
       const notePart = shiftNote.trim() ? ` — Note: ${shiftNote.trim()}` : '';
       const { error: notifErr } = await supabase.from('notifications').insert({
         org_id: orgId,
@@ -567,13 +884,16 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
         {/* Shifts List (today onwards) */}
         <Text style={styles.sectionTitle}>Shifts</Text>
 
-        {scheduleShifts.length === 0 ? (
+        {groupedScheduleShifts.length === 0 ? (
           <Text style={styles.emptyText}>No upcoming shifts scheduled.</Text>
         ) : (
           <View style={styles.scheduleList}>
-            {scheduleShifts.map((shift) => (
+            {groupedScheduleShifts.map((group) => {
+              const shift = group.shift;
+              const repeatSummary = getRepeatSummary(group);
+              return (
               <TouchableOpacity
-                key={shift.id}
+                key={`${shift.id || shiftRowKey(shift)}|${group.repeatUntil || shift.shift_date}`}
                 style={styles.staffItem}
                 onPress={() => openShiftModal(shift)}
                 activeOpacity={0.7}
@@ -583,6 +903,9 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
                   <Text style={styles.shiftTime}>
                     {formatTime(shift.start_time)} – {formatTime(shift.end_time)}
                   </Text>
+                  {repeatSummary ? (
+                    <Text style={styles.repeatSummary}>{repeatSummary}</Text>
+                  ) : null}
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.staffPosition}>{shift.position || '—'}</Text>
@@ -592,7 +915,7 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
                   <Ionicons name="chevron-forward" size={14} color="#a0aec0" style={{ marginTop: 4 }} />
                 </View>
               </TouchableOpacity>
-            ))}
+            );})}
           </View>
         )}
 
@@ -773,155 +1096,212 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
         animationType="slide"
         onRequestClose={closeShiftModal}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeShiftModal}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalCard}>
-            {/* Handle bar */}
-            <View style={styles.shiftModalHandle} />
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        >
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeShiftModal}>
+            <View style={[styles.modalCard, styles.shiftModalCard]}>
+              <View style={styles.shiftModalHandle} />
 
-            {/* Shift summary */}
-            {selectedShift && (
-              <>
-                <View style={styles.shiftModalHeader}>
-                  <View style={styles.shiftModalIconBg}>
-                    <Ionicons name="calendar" size={22} color="#4CAF50" />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.shiftModalDate}>{formatDate(selectedShift.shift_date)}</Text>
-                    <Text style={styles.shiftModalTime}>
-                      {formatTime(selectedShift.start_time)} – {formatTime(selectedShift.end_time)}
-                    </Text>
-                  </View>
-                  <View style={styles.shiftModalBadge}>
-                    <Text style={styles.shiftModalBadgeText}>{selectedShift.position || '—'}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.shiftModalDivider} />
-
-                <Text style={styles.shiftModalNoteLabel}>Note to manager (optional)</Text>
-                <TextInput
-                  style={styles.shiftModalNoteInput}
-                  placeholder="e.g. doctor's appointment, family event…"
-                  placeholderTextColor="#a0aec0"
-                  value={shiftNote}
-                  onChangeText={setShiftNote}
-                  multiline
-                  maxLength={200}
-                />
-
-                {showTransferPicker ? (
-                  /* Transfer coworker picker */
-                  <View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                      <Ionicons name="swap-horizontal-outline" size={16} color="#2b6cb0" style={{ marginRight: 6 }} />
-                      <Text style={[styles.shiftModalNoteLabel, { marginBottom: 0 }]}>
-                        Available Coworkers — {selectedShift.position || 'Same Role'}
-                      </Text>
-                    </View>
-
-                    {loadingTransfer ? (
-                      <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 20 }} />
-                    ) : transferCoworkers.length === 0 ? (
-                      <View style={styles.transferEmpty}>
-                        <Ionicons name="people-outline" size={32} color="#cbd5e0" />
-                        <Text style={styles.transferEmptyText}>
-                          No available coworkers for this position on this day.
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                contentContainerStyle={styles.shiftModalScrollContent}
+              >
+                {selectedShift && (
+                  <>
+                    <View style={styles.shiftModalHeader}>
+                      <View style={styles.shiftModalIconBg}>
+                        <Ionicons name="calendar" size={22} color="#4CAF50" />
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={styles.shiftModalDate}>{formatDate(selectedShift.shift_date)}</Text>
+                        <Text style={styles.shiftModalTime}>
+                          {formatTime(selectedShift.start_time)} – {formatTime(selectedShift.end_time)}
                         </Text>
                       </View>
+                      <View style={styles.shiftModalBadge}>
+                        <Text style={styles.shiftModalBadgeText}>{selectedShift.position || '—'}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.shiftModalDivider} />
+
+                    <Text style={styles.shiftModalSectionLabel}>Assigned Tasks</Text>
+                    {loadingShiftTasks ? (
+                      <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 12 }} />
+                    ) : shiftTasks.length > 0 ? (
+                      <View style={styles.shiftTasksList}>
+                        {shiftTasks.map((task) => {
+                          const isDone =
+                        String(task.status || '').toLowerCase() === 'completed' ||
+                        task.completed === true ||
+                        !!task.completed_at;
+                          return (
+                            <View
+                              key={task.id}
+                              style={[styles.shiftTaskRow, isDone && styles.shiftTaskRowCompleted]}
+                            >
+                              <Ionicons
+                                name={isDone ? 'checkmark-circle' : 'ellipse-outline'}
+                                size={18}
+                                color={isDone ? '#4CAF50' : '#94a3b8'}
+                                style={{ marginRight: 10, marginTop: 1 }}
+                              />
+                              <Text style={[styles.shiftTaskText, isDone && styles.shiftTaskTextCompleted]}>
+                                {task.text}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
                     ) : (
-                      <>
-                        <View style={styles.transferSearchContainer}>
-                          <Ionicons name="search" size={16} color="#4a5568" style={{ marginRight: 6 }} />
-                          <TextInput
-                            style={styles.transferSearchInput}
-                            placeholder="Search coworkers..."
-                            placeholderTextColor="#a0aec0"
-                            value={transferSearch}
-                            onChangeText={setTransferSearch}
-                          />
-                          {transferSearch.length > 0 && (
-                            <TouchableOpacity onPress={() => setTransferSearch('')}>
-                              <Ionicons name="close-circle" size={16} color="#a0aec0" />
-                            </TouchableOpacity>
-                          )}
+                      <Text style={styles.shiftTasksEmpty}>
+                        No tasks assigned to this shift yet.
+                      </Text>
+                    )}
+
+                    <View style={styles.shiftModalDivider} />
+
+                    <Text style={styles.shiftModalNoteLabel}>Note to manager (optional)</Text>
+                    <TextInput
+                      style={styles.shiftModalNoteInput}
+                      placeholder="e.g. doctor's appointment, family event…"
+                      placeholderTextColor="#a0aec0"
+                      value={shiftNote}
+                      onChangeText={setShiftNote}
+                      multiline
+                      maxLength={200}
+                    />
+
+                    {showTransferPicker ? (
+                      <View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                          <Ionicons name="swap-horizontal-outline" size={16} color="#2b6cb0" style={{ marginRight: 6 }} />
+                          <Text style={[styles.shiftModalNoteLabel, { marginBottom: 0 }]}>
+                            Available Coworkers — {selectedShift.position || 'Same Role'}
+                          </Text>
                         </View>
-                        {transferCoworkers
-                          .filter(name =>
-                            name.toLowerCase().includes(transferSearch.trim().toLowerCase())
-                          )
-                          .map(name => (
-                        <TouchableOpacity
-                          key={name}
-                          style={[
-                            styles.coworkerRow,
-                            selectedTransferTarget === name && styles.coworkerRowSelected,
-                          ]}
-                          onPress={() => setSelectedTransferTarget(name)}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.coworkerAvatar}>
-                            <Text style={styles.coworkerAvatarText}>
-                              {name.charAt(0).toUpperCase()}
+
+                        {loadingTransfer ? (
+                          <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 20 }} />
+                        ) : transferCoworkers.length === 0 ? (
+                          <View style={styles.transferEmpty}>
+                            <Ionicons name="people-outline" size={32} color="#cbd5e0" />
+                            <Text style={styles.transferEmptyText}>
+                              No available coworkers for this position on this day.
                             </Text>
                           </View>
-                          <Text style={styles.coworkerName}>{name}</Text>
-                          {selectedTransferTarget === name && (
-                            <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
-                          )}
+                        ) : (
+                          <>
+                            <View style={styles.transferSearchContainer}>
+                              <Ionicons name="search" size={16} color="#4a5568" style={{ marginRight: 6 }} />
+                              <TextInput
+                                style={styles.transferSearchInput}
+                                placeholder="Search coworkers..."
+                                placeholderTextColor="#a0aec0"
+                                value={transferSearch}
+                                onChangeText={setTransferSearch}
+                              />
+                              {transferSearch.length > 0 && (
+                                <TouchableOpacity onPress={() => setTransferSearch('')}>
+                                  <Ionicons name="close-circle" size={16} color="#a0aec0" />
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                            {transferCoworkers
+                              .filter((coworker) => {
+                                const needle = transferSearch.trim().toLowerCase();
+                                if (!needle) return true;
+                                return [coworker.label, coworker.rawName]
+                                  .filter(Boolean)
+                                  .some((value) => value.toLowerCase().includes(needle));
+                              })
+                              .map((coworker) => (
+                                <TouchableOpacity
+                                  key={coworker.rawName || coworker.label}
+                                  style={[
+                                    styles.coworkerRow,
+                                    selectedTransferTarget === coworker.rawName && styles.coworkerRowSelected,
+                                  ]}
+                                  onPress={() => setSelectedTransferTarget(coworker.rawName)}
+                                  activeOpacity={0.7}
+                                >
+                                  {coworker.avatarUrl ? (
+                                    <Image source={{ uri: coworker.avatarUrl }} style={styles.coworkerAvatarImage} />
+                                  ) : (
+                                    <View style={[styles.coworkerAvatar, { backgroundColor: coworker.avatarColor || '#4CAF50' }]}>
+                                      <Text style={styles.coworkerAvatarText}>
+                                        {getInitials(coworker.label || coworker.rawName)}
+                                      </Text>
+                                    </View>
+                                  )}
+                                  <Text style={styles.coworkerName}>{coworker.label || coworker.rawName}</Text>
+                                  {selectedTransferTarget === coworker.rawName && (
+                                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                                  )}
+                                </TouchableOpacity>
+                              ))}
+                          </>
+                        )}
+
+                        {selectedTransferTarget && (
+                          <TouchableOpacity
+                            style={[styles.shiftActionBtn, styles.shiftActionTransfer, { marginTop: 12 }]}
+                            onPress={() => handleShiftRequest('transfer', transferCoworkers.find((coworker) => coworker.rawName === selectedTransferTarget) || selectedTransferTarget)}
+                            disabled={submitting}
+                          >
+                            <Ionicons name="swap-horizontal-outline" size={18} color="#2b6cb0" style={{ marginRight: 6 }} />
+                            <Text style={styles.shiftActionTransferText}>
+                              {submitting
+                                ? 'Sending…'
+                                : `Send to ${transferCoworkers.find((coworker) => coworker.rawName === selectedTransferTarget)?.label || selectedTransferTarget}`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                          style={{ alignItems: 'center', paddingVertical: 12 }}
+                          onPress={() => { setShowTransferPicker(false); setSelectedTransferTarget(null); }}
+                        >
+                          <Text style={{ fontSize: 14, color: '#718096' }}>← Back</Text>
                         </TouchableOpacity>
-                      ))}
-                      </>
+                      </View>
+                    ) : (
+                      <View style={styles.shiftModalActions}>
+                        <TouchableOpacity
+                          style={[styles.shiftActionBtn, styles.shiftActionTimeOff]}
+                          onPress={() => handleShiftRequest('time_off')}
+                          disabled={submitting}
+                        >
+                          <Ionicons name="time-outline" size={18} color="#c05621" style={{ marginRight: 6 }} />
+                          <Text style={styles.shiftActionTimeOffText}>Request Time Off</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.shiftActionBtn, styles.shiftActionTransfer]}
+                          onPress={() => { setShowTransferPicker(true); fetchAvailableCoworkers(selectedShift); }}
+                          disabled={submitting}
+                        >
+                          <Ionicons name="swap-horizontal-outline" size={18} color="#2b6cb0" style={{ marginRight: 6 }} />
+                          <Text style={styles.shiftActionTransferText}>Request Transfer</Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
 
-                    {selectedTransferTarget && (
-                      <TouchableOpacity
-                        style={[styles.shiftActionBtn, styles.shiftActionTransfer, { marginTop: 12 }]}
-                        onPress={() => handleShiftRequest('transfer', selectedTransferTarget)}
-                        disabled={submitting}
-                      >
-                        <Ionicons name="swap-horizontal-outline" size={18} color="#2b6cb0" style={{ marginRight: 6 }} />
-                        <Text style={styles.shiftActionTransferText}>
-                          {submitting ? 'Sending…' : `Send to ${selectedTransferTarget}`}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity
-                      style={{ alignItems: 'center', paddingVertical: 12 }}
-                      onPress={() => { setShowTransferPicker(false); setSelectedTransferTarget(null); }}
-                    >
-                      <Text style={{ fontSize: 14, color: '#718096' }}>← Back</Text>
+                    <TouchableOpacity style={styles.shiftModalCancelBtn} onPress={closeShiftModal}>
+                      <Text style={styles.shiftModalCancelText}>Cancel</Text>
                     </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View style={styles.shiftModalActions}>
-                    <TouchableOpacity
-                      style={[styles.shiftActionBtn, styles.shiftActionTimeOff]}
-                      onPress={() => handleShiftRequest('time_off')}
-                      disabled={submitting}
-                    >
-                      <Ionicons name="time-outline" size={18} color="#c05621" style={{ marginRight: 6 }} />
-                      <Text style={styles.shiftActionTimeOffText}>Request Time Off</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.shiftActionBtn, styles.shiftActionTransfer]}
-                      onPress={() => { setShowTransferPicker(true); fetchAvailableCoworkers(selectedShift); }}
-                      disabled={submitting}
-                    >
-                      <Ionicons name="swap-horizontal-outline" size={18} color="#2b6cb0" style={{ marginRight: 6 }} />
-                      <Text style={styles.shiftActionTransferText}>Request Transfer</Text>
-                    </TouchableOpacity>
-                  </View>
+                  </>
                 )}
-
-                <TouchableOpacity style={styles.shiftModalCancelBtn} onPress={closeShiftModal}>
-                  <Text style={styles.shiftModalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            )}
+              </ScrollView>
+            </View>
           </TouchableOpacity>
-        </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Time Off Modal */}
@@ -1123,6 +1503,7 @@ const styles = StyleSheet.create({
   },
   staffName: { fontSize: 16, fontWeight: '600', color: '#2d3748' },
   shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
+  repeatSummary: { fontSize: 12, color: '#4CAF50', marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
   staffPosition: { fontSize: 15, color: '#4CAF50', fontWeight: '500' },
   employeeTag: { fontSize: 12, color: '#718096', marginTop: 2 },
 
@@ -1177,6 +1558,37 @@ const styles = StyleSheet.create({
   },
   shiftModalBadgeText: { fontSize: 12, fontWeight: '600', color: '#2b6cb0' },
   shiftModalDivider: { height: 1, backgroundColor: '#e2e8f0', marginBottom: 16 },
+  shiftModalSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#718096',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  shiftTasksList: { marginBottom: 18, gap: 8 },
+  shiftTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#f8fafc',
+  },
+  shiftTaskRowCompleted: {
+    backgroundColor: '#f0fff4',
+    borderColor: '#c6f6d5',
+  },
+  shiftTaskText: { flex: 1, fontSize: 14, color: '#2d3748', lineHeight: 20 },
+  shiftTaskTextCompleted: { color: '#718096', textDecorationLine: 'line-through' },
+  shiftTasksEmpty: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 18,
+    fontStyle: 'italic',
+  },
   shiftModalNoteLabel: { fontSize: 12, fontWeight: '600', color: '#718096', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   shiftModalNoteInput: {
     borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10,
@@ -1266,6 +1678,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center',
     marginRight: 12,
   },
+  coworkerAvatarImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 12,
+    backgroundColor: '#e2e8f0',
+  },
   coworkerAvatarText: { color: 'white', fontWeight: '700', fontSize: 15 },
   coworkerName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#2d3748' },
 
@@ -1312,6 +1731,18 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 24,
     paddingBottom: 36,
+  },
+  modalKeyboardRoot: {
+    flex: 1,
+  },
+  shiftModalCard: {
+    maxHeight: '92%',
+    width: '100%',
+    paddingBottom: 20,
+  },
+  shiftModalScrollContent: {
+    paddingBottom: 8,
+    flexGrow: 1,
   },
   modalHeader: {
     flexDirection: 'row',

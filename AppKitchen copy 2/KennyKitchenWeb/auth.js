@@ -137,10 +137,21 @@
           </label>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
-          <label for="auth-owner-name" style="font-size:13px;font-weight:500;color:#374151;">Your name <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
-          <input id="auth-owner-name" type="text" autocomplete="name" placeholder="Alex Kim"
-            style="border-radius:10px;border:1px solid #e5e7eb;padding:9px 11px;font-size:14px;outline:none;"
-          />
+          <span style="font-size:13px;font-weight:500;color:#374151;">Your name</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;">
+              <label for="auth-owner-first" style="font-size:12px;font-weight:500;color:#6b7280;">First name</label>
+              <input id="auth-owner-first" type="text" autocomplete="given-name" placeholder="John"
+                style="border-radius:10px;border:1px solid #e5e7eb;padding:9px 11px;font-size:14px;outline:none;"
+              />
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;">
+              <label for="auth-owner-last" style="font-size:12px;font-weight:500;color:#6b7280;">Last name</label>
+              <input id="auth-owner-last" type="text" autocomplete="family-name" placeholder="Doe"
+                style="border-radius:10px;border:1px solid #e5e7eb;padding:9px 11px;font-size:14px;outline:none;"
+              />
+            </div>
+          </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
           <label for="auth-signup-email" style="font-size:13px;font-weight:500;color:#374151;">Email</label>
@@ -158,7 +169,7 @@
           style="margin-top:6px;border:none;border-radius:999px;background:#16a34a;color:#fff;font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           <span>Create restaurant &amp; account</span>
         </button>
-        <p style="font-size:11px;color:#9ca3af;margin:0;line-height:1.4;">By continuing you agree to use this account as the manager for this restaurant. Staff sign in on mobile with the same Supabase project.</p>
+        <p style="font-size:11px;color:#9ca3af;margin:0;line-height:1.4;">By continuing you agree to use this account as the manager for this restaurant. Staff use the same restaurant in the mobile app.</p>
       </div>
       </div>
       <div id="auth-unauthorized" style="display:none;margin-top:6px;font-size:12px;color:#374151;background:#fefce8;border-radius:10px;padding:8px 10px;">
@@ -321,6 +332,19 @@
 
     const user = data.user;
     await maybeCompletePendingRestaurantSignup(user);
+
+    try {
+      const paramsOnboard = new URLSearchParams(window.location.search || '');
+      if (paramsOnboard.get('onboard_paid') === '1') {
+        await waitForPostCheckoutOrg(user, 32, 1500);
+        const u = new URL(window.location.href);
+        u.searchParams.delete('onboard_paid');
+        u.searchParams.delete('session_id');
+        window.history.replaceState({}, '', u.pathname + (u.search ? u.search : '') + u.hash);
+      }
+    } catch (e) {
+      console.warn('[Auth] onboard_paid cleanup:', e?.message);
+    }
 
     const [{ data: adminRow, error: adminError }, { data: mgrRows }] = await Promise.all([
       window.supabaseClient
@@ -503,7 +527,7 @@
     return ['starter', 'growth', 'scale'].includes(v) ? v : 'starter';
   }
 
-  async function bootstrapNewRestaurant(user, restaurantName, displayName, subscriptionPlan) {
+  async function bootstrapNewRestaurant(user, restaurantName, displayName, subscriptionPlan, explicitFirst, explicitLast) {
     const supa = window.supabaseClient;
     const name = (restaurantName || '').trim();
     if (!name) throw new Error('Please enter your restaurant name.');
@@ -542,10 +566,20 @@
     }
 
     const email = String(user.email || '').trim();
-    const dn = (displayName || '').trim() || email.split('@')[0] || 'Manager';
-    const parts = dn.split(/\s+/).filter(Boolean);
-    const firstName = parts[0] || '';
-    const lastName = parts.slice(1).join(' ') || '';
+    const fnEx = String(explicitFirst || '').trim();
+    const lnEx = String(explicitLast || '').trim();
+    let dn = (displayName || '').trim();
+    if (fnEx || lnEx) {
+      dn = [fnEx, lnEx].filter(Boolean).join(' ').trim();
+    }
+    if (!dn) dn = email.split('@')[0] || 'Manager';
+    let firstName = fnEx;
+    let lastName = lnEx;
+    if (!fnEx && !lnEx) {
+      const parts = dn.split(/\s+/).filter(Boolean);
+      firstName = parts[0] || '';
+      lastName = parts.slice(1).join(' ') || '';
+    }
 
     const { error: profErr } = await supa.from('profiles').insert({
       org_id: orgId,
@@ -575,10 +609,32 @@
   async function clearPendingRestaurantMeta() {
     try {
       await window.supabaseClient.auth.updateUser({
-        data: { kk_pending_restaurant: '', kk_subscription_plan: '' },
+        data: {
+          kk_pending_restaurant: '',
+          kk_subscription_plan: '',
+          kk_manager_first: '',
+          kk_manager_last: '',
+        },
       });
     } catch (e) {
       console.warn('[Auth] Could not clear signup metadata:', e?.message);
+    }
+  }
+
+  async function waitForPostCheckoutOrg(user, maxAttempts, delayMs) {
+    if (!window.supabaseClient || !user?.id) return;
+    for (let i = 0; i < maxAttempts; i++) {
+      const { data: mgrRows } = await window.supabaseClient
+        .from('org_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .eq('role', 'manager')
+        .limit(1);
+      if (Array.isArray(mgrRows) && mgrRows.length > 0) return;
+      await new Promise((r) => setTimeout(r, delayMs));
+      try {
+        await window.supabaseClient.auth.refreshSession();
+      } catch (_) {}
     }
   }
 
@@ -601,11 +657,13 @@
       return;
     }
 
+    const fnMeta = String(user.user_metadata?.kk_manager_first || '').trim();
+    const lnMeta = String(user.user_metadata?.kk_manager_last || '').trim();
     const displayName = String(user.user_metadata?.full_name || user.user_metadata?.name || '').trim();
     const metaPlan = String(user.user_metadata?.kk_subscription_plan || '').toLowerCase().trim();
     const plan = ['starter', 'growth', 'scale'].includes(metaPlan) ? metaPlan : 'starter';
     try {
-      await bootstrapNewRestaurant(user, pending, displayName, plan);
+      await bootstrapNewRestaurant(user, pending, displayName, plan, fnMeta, lnMeta);
       await clearPendingRestaurantMeta();
     } catch (e) {
       console.warn('[Auth] Pending restaurant bootstrap failed:', e?.message || e);
@@ -652,7 +710,8 @@
     const tabIn = document.getElementById('auth-tab-signin');
     const tabUp = document.getElementById('auth-tab-signup');
     const restName = document.getElementById('auth-restaurant-name');
-    const ownerName = document.getElementById('auth-owner-name');
+    const ownerFirst = document.getElementById('auth-owner-first');
+    const ownerLast = document.getElementById('auth-owner-last');
     const upEmail = document.getElementById('auth-signup-email');
     const upPass = document.getElementById('auth-signup-password');
     const upSubmit = document.getElementById('auth-signup-submit');
@@ -661,7 +720,46 @@
 
     showError('');
     showInfo('');
-    setAuthMode('signin');
+
+    let startMode = 'signin';
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('login') === '1') {
+        startMode = 'signin';
+      } else if (params.get('signup') === '1' || params.get('onboard') === '1') {
+        startMode = 'signup';
+      }
+      if (params.get('onboard_paid') === '1') {
+        startMode = 'signin';
+      }
+      setAuthMode(startMode);
+      if (startMode === 'signup') {
+        const planParam = String(params.get('plan') || '').toLowerCase().trim();
+        if (planParam === 'starter' || planParam === 'growth' || planParam === 'scale') {
+          const radio = document.querySelector(
+            `#auth-overlay input[name="kk-signup-plan"][value="${planParam}"]`
+          );
+          if (radio) radio.checked = true;
+        }
+        const preEmail = String(params.get('email') || '').trim();
+        if (preEmail && upEmail) upEmail.value = preEmail;
+        const preFirst = String(params.get('first_name') || '').trim();
+        const preLast = String(params.get('last_name') || '').trim();
+        if (preFirst && ownerFirst) ownerFirst.value = preFirst;
+        if (preLast && ownerLast) ownerLast.value = preLast;
+      }
+    } catch (_) {
+      setAuthMode('signin');
+    }
+
+    try {
+      const p2 = new URLSearchParams(window.location.search || '');
+      if (p2.get('onboard_paid') === '1') {
+        showInfo(
+          'Sign in with the email and password you used on the payment step. If checkout just finished, your restaurant may take a few seconds to activate.'
+        );
+      }
+    } catch (_) {}
 
     if (tabIn) {
       tabIn.onclick = () => {
@@ -679,12 +777,27 @@
           const last = window.localStorage?.getItem('kk_admin_email');
           if (last && upEmail && !upEmail.value) upEmail.value = last;
         } catch (_) {}
+        try {
+          const params = new URLSearchParams(window.location.search || '');
+          if (params.get('signup') === '1' || params.get('onboard') === '1') {
+            const preEmail = String(params.get('email') || '').trim();
+            if (preEmail && upEmail) upEmail.value = preEmail;
+            const preFirst = String(params.get('first_name') || '').trim();
+            const preLast = String(params.get('last_name') || '').trim();
+            if (preFirst && ownerFirst) ownerFirst.value = preFirst;
+            if (preLast && ownerLast) ownerLast.value = preLast;
+          }
+        } catch (_) {}
       };
     }
 
     try {
-      const last = window.localStorage?.getItem('kk_admin_email');
-      if (last && !emailInput.value) emailInput.value = last;
+      const ob = window.localStorage?.getItem('kk_onboard_email');
+      if (ob) emailInput.value = ob;
+      else {
+        const last = window.localStorage?.getItem('kk_admin_email');
+        if (last && !emailInput.value) emailInput.value = last;
+      }
     } catch (e) {
       console.warn('[Auth] Could not load saved admin email:', e?.message);
     }
@@ -731,11 +844,16 @@
         return;
       }
       const restaurantName = (restName?.value || '').trim();
-      const ownerDisp = (ownerName?.value || '').trim();
+      const fn = (ownerFirst?.value || '').trim();
+      const ln = (ownerLast?.value || '').trim();
       const email = (upEmail?.value || '').trim().toLowerCase();
       const password = upPass?.value || '';
       if (!restaurantName) {
         showError('Enter your restaurant name.');
+        return;
+      }
+      if (!fn || !ln) {
+        showError('Enter your first and last name.');
         return;
       }
       if (!email) {
@@ -753,12 +871,15 @@
       showInfo('');
       try {
         const selectedPlan = readSelectedSignupPlan();
+        const ownerDisp = `${fn} ${ln}`.trim();
         const { data, error } = await window.supabaseClient.auth.signUp({
           email,
           password,
           options: {
             data: {
               full_name: ownerDisp,
+              kk_manager_first: fn,
+              kk_manager_last: ln,
               kk_pending_restaurant: restaurantName,
               kk_subscription_plan: selectedPlan,
             },
@@ -785,7 +906,7 @@
           return;
         }
 
-        await bootstrapNewRestaurant(data.user, restaurantName, ownerDisp, selectedPlan);
+        await bootstrapNewRestaurant(data.user, restaurantName, ownerDisp, selectedPlan, fn, ln);
         await clearPendingRestaurantMeta();
         try {
           window.localStorage?.setItem('kk_admin_email', email);

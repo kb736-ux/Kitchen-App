@@ -86,7 +86,7 @@ const swipeStyles = StyleSheet.create({
   },
 });
 
-const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShift, toggleUrgent, addUrgentTask, onRefresh, transferRequests = [], acceptTaskTransfer, declineTaskTransfer }) => {
+const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShift, toggleUrgent, addUrgentTask, onRefresh }) => {
   const [urgentInput, setUrgentInput] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef(null);
@@ -134,38 +134,6 @@ const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShi
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
         }
       >
-        {/* Transfer requests — accept/decline */}
-        {transferRequests.length > 0 && (
-          <View style={styles.transferRequestsCard}>
-            <View style={styles.transferRequestsTitleRow}>
-              <Ionicons name="swap-horizontal" size={16} color="#3182ce" style={{ marginRight: 6 }} />
-              <Text style={styles.transferRequestsTitle}>Transfer requests</Text>
-            </View>
-            {transferRequests.map((req) => (
-              <View key={req.id} style={styles.transferRequestRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.transferRequestTask}>{req.task_text || 'Task'}</Text>
-                  <Text style={styles.transferRequestFrom}>{req.from_employee_name} wants to transfer to you</Text>
-                </View>
-                <View style={styles.transferRequestActions}>
-                  <TouchableOpacity
-                    style={styles.transferDeclineBtn}
-                    onPress={() => declineTaskTransfer?.(req.id)}
-                  >
-                    <Text style={styles.transferDeclineText}>Decline</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.transferAcceptBtn}
-                    onPress={() => acceptTaskTransfer?.(req.id)}
-                  >
-                    <Text style={styles.transferAcceptText}>Accept</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* Date */}
         <Text style={styles.dateText}>{getCurrentDate()}</Text>
         
@@ -317,72 +285,6 @@ const styles = StyleSheet.create({
   },
   tasksList: {
     paddingBottom: 20,
-  },
-  transferRequestsCard: {
-    backgroundColor: '#ebf8ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1.5,
-    borderColor: '#90cdf4',
-  },
-  transferRequestsTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  transferRequestsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#2b6cb0',
-  },
-  transferRequestRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#bee3f8',
-    gap: 12,
-  },
-  transferRequestTask: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#2d3748',
-  },
-  transferRequestFrom: {
-    fontSize: 12,
-    color: '#718096',
-    marginTop: 2,
-  },
-  transferRequestActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  transferDeclineBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#fff5f5',
-    borderWidth: 1,
-    borderColor: '#feb2b2',
-  },
-  transferDeclineText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#e53e3e',
-  },
-  transferAcceptBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#c6f6d5',
-    borderWidth: 1,
-    borderColor: '#9ae6b4',
-  },
-  transferAcceptText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#276749',
   },
   swipeHint: {
     fontSize: 12,

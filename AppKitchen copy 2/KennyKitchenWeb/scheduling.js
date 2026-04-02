@@ -32,6 +32,15 @@ if (typeof window.shiftData === 'undefined') {
     } catch (e) {
         console.warn('Could not load shiftData from localStorage:', e);
     }
+    // Sanitize any bad times that leaked from the old overnight +24 bug (e.g. 28:27)
+    Object.keys(window.shiftData).forEach(emp => {
+        window.shiftData[emp] = (window.shiftData[emp] || []).filter(s => {
+            const bad = /^(\d{2}):/.test(s.startTime) && parseInt(s.startTime, 10) >= 24
+                     || /^(\d{2}):/.test(s.endTime) && parseInt(s.endTime, 10) >= 24;
+            if (bad) console.warn('[shiftData] Removed bad shift for', emp, s);
+            return !bad;
+        });
+    });
 }
 
 function persistShiftData() {
@@ -183,7 +192,7 @@ async function openShiftRequestsPanel() {
 async function cleanupPastShiftRequests() {
     if (!window.supabaseClient || !window.ORG_ID) return;
     try {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getTodayLocalYmd();
         // Find all shifts in the past for this org
         const { data: pastShifts, error } = await window.supabaseClient
             .from('shifts')
@@ -261,6 +270,7 @@ async function loadShiftRequests() {
     // Fetch the corresponding shift details for each request
     const shiftIds = [...new Set(requests.map(r => r.shift_id).filter(Boolean))];
     let shiftsMap = {};
+    const requestNameMap = await buildProfileDisplayLabelMap();
     if (shiftIds.length > 0) {
         const { data: shifts } = await window.supabaseClient
             .from('shifts')
@@ -271,6 +281,8 @@ async function loadShiftRequests() {
 
     container.innerHTML = requests.map(req => {
         const shift = shiftsMap[req.shift_id] || {};
+        const displayRequester = getEmployeeDisplayLabelFromMap(requestNameMap, req.employee_name) || req.employee_name || 'Unknown';
+        const displayTarget = getEmployeeDisplayLabelFromMap(requestNameMap, req.target_employee) || req.target_employee || '';
         const typeLabel = req.request_type === 'time_off' ? '🕐 Time Off' : '🔄 Transfer';
         const typeColor = req.request_type === 'time_off' ? '#c05621' : '#2b6cb0';
         const typeBg   = req.request_type === 'time_off' ? '#fff5eb' : '#ebf8ff';
@@ -292,30 +304,30 @@ async function loadShiftRequests() {
         const safeShiftId = req.shift_id || '';
 
         return `
-            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-                    <div>
-                        <span style="font-weight:700;font-size:15px;color:#2d3748;">${escapeHtml(req.employee_name)}</span>
+            <div class="shift-request-card">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px;max-width:100%;">
+                    <div style="min-width:0;">
+                        <span style="font-weight:700;font-size:15px;color:#2d3748;">${escapeHtml(displayRequester)}</span>
                         <span style="background:${typeBg};color:${typeColor};font-size:12px;font-weight:600;
                                padding:2px 8px;border-radius:20px;margin-left:8px;">${typeLabel}</span>
                     </div>
-                    <span style="font-size:12px;color:#a0aec0;">${ago}</span>
+                    <span style="font-size:12px;color:#a0aec0;flex-shrink:0;">${ago}</span>
                 </div>
-                <div style="background:#f7fafc;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;color:#4a5568;">
+                <div class="shift-request-shift-block" style="background:#f7fafc;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;color:#4a5568;">
                     <i class="fas fa-calendar-day" style="color:#4CAF50;margin-right:6px;"></i>
                     <strong>${shiftDate}</strong>${shiftTime ? ' · ' + shiftTime : ''}
                     ${shift.position ? `<span style="margin-left:8px;background:#e8f5e9;color:#276749;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(shift.position)}</span>` : ''}
                 </div>
-                ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;">"${escapeHtml(req.note)}"</p>` : ''}
-                ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;">Transfer to: <strong>${escapeHtml(req.target_employee)}</strong></p>` : ''}
-                <div style="display:flex;gap:8px;">
-                    <button onclick="approveShiftRequest('${req.id}','${safeShiftId}','${escapeHtml(req.employee_name)}','${escapeHtml(shift.position || '')}','${req.request_type}','${req.target_employee || ''}')"
-                        style="flex:1;background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;
+                ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;max-width:100%;overflow-wrap:anywhere;">"${escapeHtml(req.note)}"</p>` : ''}
+                ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;max-width:100%;overflow-wrap:anywhere;">Transfer to: <strong>${escapeHtml(displayTarget)}</strong></p>` : ''}
+                <div class="shift-request-actions">
+                    <button type="button" onclick="approveShiftRequest('${req.id}','${safeShiftId}','${escapeHtml(req.employee_name)}','${escapeHtml(shift.position || '')}','${req.request_type}','${req.target_employee || ''}')"
+                        style="background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;
                                font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-check"></i> Approve
                     </button>
-                    <button onclick="denyShiftRequest('${req.id}','${escapeHtml(req.employee_name)}')"
-                        style="flex:1;background:#fff0f0;color:#e53e3e;border:1.5px solid #fed7d7;border-radius:8px;
+                    <button type="button" onclick="denyShiftRequest('${req.id}','${escapeHtml(req.employee_name)}')"
+                        style="background:#fff0f0;color:#e53e3e;border:1.5px solid #fed7d7;border-radius:8px;
                                padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-times"></i> Deny
                     </button>
@@ -338,7 +350,7 @@ function getShiftEntryDateStr(s) {
     if (dayIndex < 0) return null;
     const d = new Date(String(s.weekStart).slice(0, 10) + 'T12:00:00');
     d.setDate(d.getDate() + dayIndex);
-    return d.toISOString().split('T')[0];
+    return formatLocalYmd(d);
 }
 
 function removeEmployeeShiftsInDateRangeLocal(employeeName, startDateStr, endDateStr) {
@@ -383,7 +395,14 @@ async function fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, dateS
         .eq('shift_date', dateStr);
     if (error || !data) return [];
     const mine = normEmployeeKey(employeeDisplayName);
-    return data.filter((row) => normEmployeeKey(row.employee_name || '') === mine);
+    // Normalize HH:MM:SS → HH:MM and filter to this employee
+    return data
+        .filter((row) => normEmployeeKey(row.employee_name || '') === mine)
+        .map((row) => ({
+            ...row,
+            start_time: String(row.start_time || '').slice(0, 5),
+            end_time: String(row.end_time || '').slice(0, 5),
+        }));
 }
 
 /** Overlap vs other saved shifts for same person on same day (Supabase). */
@@ -396,6 +415,51 @@ async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, sta
         }
     }
     return { overlap: false };
+}
+
+/** One fetch for assign-shift recurrence (was N×260 round-trips and froze the UI). */
+async function fetchApprovedTimeOffRequestsForOrg() {
+    if (!window.supabaseClient || !window.ORG_ID) return [];
+    const { data, error } = await window.supabaseClient
+        .from('shift_requests')
+        .select('employee_name, time_off_start_date, time_off_end_date')
+        .eq('org_id', window.ORG_ID)
+        .eq('status', 'approved')
+        .eq('request_type', 'time_off');
+    if (error || !data?.length) return [];
+    return data;
+}
+
+function employeeCoveredByTimeOffRows(rows, employeeDisplayName, dateStr) {
+    const mine = normEmployeeKey(employeeDisplayName);
+    for (const r of rows || []) {
+        if (normEmployeeKey(r.employee_name || '') !== mine) continue;
+        const s = r.time_off_start_date;
+        const e = r.time_off_end_date || r.time_off_start_date;
+        if (!s || !e) continue;
+        if (dateStr >= s && dateStr <= e) return true;
+    }
+    return false;
+}
+
+/** Shifts for one employee between two dates (inclusive), times normalized to HH:MM. */
+async function fetchEmployeeShiftsInDateRange(employeeDisplayName, startYmd, endYmd) {
+    if (!window.supabaseClient || !window.ORG_ID || !startYmd || !endYmd) return [];
+    const { data, error } = await window.supabaseClient
+        .from('shifts')
+        .select('id, shift_date, start_time, end_time, employee_name')
+        .eq('org_id', window.ORG_ID)
+        .gte('shift_date', startYmd)
+        .lte('shift_date', endYmd);
+    if (error || !data) return [];
+    const mine = normEmployeeKey(employeeDisplayName);
+    return data
+        .filter((row) => normEmployeeKey(row.employee_name || '') === mine)
+        .map((row) => ({
+            ...row,
+            start_time: String(row.start_time || '').slice(0, 5),
+            end_time: String(row.end_time || '').slice(0, 5),
+        }));
 }
 
 async function approveShiftRequest(requestId, shiftId, employeeName, position, requestType, targetEmployee) {
@@ -413,6 +477,18 @@ async function approveShiftRequest(requestId, shiftId, employeeName, position, r
 
     if (requestType === 'transfer' && targetEmployee) {
         // ── TRANSFER: reassign shift to the target employee ─────────────
+        let previousEmployeeName = '';
+        let shiftDate = '';
+        if (shiftId) {
+            const { data: beforeShift } = await window.supabaseClient
+                .from('shifts')
+                .select('employee_name, shift_date')
+                .eq('id', shiftId)
+                .maybeSingle();
+            previousEmployeeName = (beforeShift?.employee_name || '').trim();
+            shiftDate = (beforeShift?.shift_date || '').trim();
+        }
+
         const targetId = typeof window.getEmployeeIdFromName === 'function'
             ? window.getEmployeeIdFromName(targetEmployee) : null;
 
@@ -424,6 +500,16 @@ async function approveShiftRequest(requestId, shiftId, employeeName, position, r
         if (shiftErr) {
             showNotification('Could not transfer shift: ' + shiftErr.message, 'error');
             return;
+        }
+
+        if (typeof window.transferTasksForShift === 'function') {
+            const tr = await window.transferTasksForShift(shiftId, targetEmployee, targetId, {
+                previousEmployeeName,
+                shiftDate,
+            });
+            if (!tr.ok && tr.error && !/shift_id|column|does not exist|42703/i.test(tr.error)) {
+                showNotification(`Shift transferred, but tasks could not be reassigned: ${tr.error}`, 'error');
+            }
         }
 
         await window.supabaseClient
@@ -705,7 +791,6 @@ async function syncSupabaseShiftsToGrid() {
     if (!hasGrid) {
         syncSupabaseShiftsToGrid._retries = (syncSupabaseShiftsToGrid._retries || 0) + 1;
         if (syncSupabaseShiftsToGrid._retries <= 24) {
-            console.warn('[Supabase] syncSupabaseShiftsToGrid: no schedule grid yet, retrying…');
             setTimeout(() => void syncSupabaseShiftsToGrid(), 250);
         }
         return;
@@ -713,7 +798,6 @@ async function syncSupabaseShiftsToGrid() {
     syncSupabaseShiftsToGrid._retries = 0;
 
     const weekStart = getWeekStart(currentWeekStart);
-    // Build date range for the 7 days starting on Monday (local calendar — avoid UTC toISOString drift)
     const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
     const sundayDate = new Date(mondayDate);
     sundayDate.setDate(mondayDate.getDate() + 6);
@@ -740,91 +824,60 @@ async function syncSupabaseShiftsToGrid() {
     }
 
     const rs = normShiftTimeHM;
-    const rowStart = (r) => rs(r.start_time);
-    const rowEnd = (r) => rs(r.end_time);
 
-    let added = 0;
     (rows || []).forEach(row => {
         if (!row.employee_name || !row.shift_date || !row.start_time || !row.end_time) return;
 
         const dayKey = getDayKeyForDate(row.shift_date);
-        if (!dayKey) {
-            console.warn('[Supabase] sync: could not map shift_date to day', row.shift_date, row.id);
-            return;
-        }
+        if (!dayKey) return;
 
         const empName = row.employee_name;
-        const rS = rowStart(row);
-        const rE = rowEnd(row);
+        const rS = rs(row.start_time);
+        const rE = rs(row.end_time);
 
-        // Match shiftData under this employee OR any key (short name vs full name)
-        let alreadyLocal = (window.shiftData[empName] || []).some(s =>
-            s.day === dayKey &&
-            s.weekStart === weekStart &&
-            rs(s.startTime) === rS &&
-            rs(s.endTime) === rE
+        // Skip if already rendered in the DOM
+        if (document.querySelector(`.shift-card[data-shift-id="${row.id}"]`)) return;
+
+        // Skip if already in shiftData for this week (prevents duplicates on initial load)
+        const alreadyLocal = Object.entries(window.shiftData || {}).some(([key, list]) =>
+            normEmployeeKey(key) === normEmployeeKey(empName) &&
+            (list || []).some(s =>
+                s.day === dayKey &&
+                s.weekStart === weekStart &&
+                rs(s.startTime) === rS &&
+                rs(s.endTime) === rE
+            )
         );
-        if (!alreadyLocal && window.shiftData) {
-            alreadyLocal = Object.values(window.shiftData).some(list =>
-                (list || []).some(s => s.shiftId && String(s.shiftId) === String(row.id))
-            );
-        }
-        if (!alreadyLocal && window.shiftData) {
-            alreadyLocal = Object.entries(window.shiftData).some(([key, list]) =>
-                normEmployeeKey(key) === normEmployeeKey(empName) &&
-                (list || []).some(s =>
-                    s.day === dayKey &&
-                    s.weekStart === weekStart &&
-                    rs(s.startTime) === rS &&
-                    rs(s.endTime) === rE
-                )
-            );
-        }
+        if (alreadyLocal) return;
 
-        const alreadyDOM = !!document.querySelector(`.shift-card[data-shift-id="${row.id}"]`);
-
-        if (alreadyLocal || alreadyDOM) return;
-
-        // ── This shift is in Supabase but NOT on the grid — add it ───────────
-        const timeDisplay = formatTo12h(row.start_time) + ' - ' + formatTo12h(row.end_time);
+        // Normalize end time: Supabase stores HH:MM:SS so cap at "23:59" for display
+        const rawEnd = String(row.end_time || '').slice(0, 5);
+        const rawStart = String(row.start_time || '').slice(0, 5);
+        const timeDisplay = formatTo12h(rawStart) + ' - ' + formatTo12h(rawEnd);
         const posSlug = String(row.position || 'line-cook').toLowerCase().replace(/\s+/g, '-');
         const posLabel = row.position || 'Line Cook';
-        const hours = calculateShiftHours(row.start_time, row.end_time);
+        const hours = calculateShiftHours(rawStart, rawEnd);
 
         const card = createShiftCard(empName, posSlug, timeDisplay, dayKey, hours, posLabel);
-        if (!card) {
-            console.warn('[Supabase] sync: createShiftCard failed for', empName, dayKey, row.id);
-            return;
-        }
+        if (!card) return;
 
         card.dataset.shiftId = row.id;
-        card.style.outline = '2px dashed #e53e3e';
-        card.title = 'Database-only shift (was missing from this grid). Open to edit or delete.';
 
         if (!window.shiftData[empName]) window.shiftData[empName] = [];
         window.shiftData[empName].push({
             day: dayKey,
-            startTime: row.start_time,
-            endTime: row.end_time,
+            shiftDate: row.shift_date,
+            startTime: rawStart,
+            endTime: rawEnd,
             hours,
             weekStart,
             position: posLabel,
             shiftId: row.id,
         });
-
-        added++;
     });
 
-    if (added > 0) {
-        persistShiftData();
-        console.log(`[Supabase] Synced ${added} DB-only shift(s) to the grid (red dashed outline).`);
-        showNotification(
-            `${added} shift(s) from the database were missing from the grid — they now appear with a red outline. Delete any duplicate.`,
-            'error'
-        );
-    } else {
-        console.log('[Supabase] syncSupabaseShiftsToGrid: no extra DB rows to render (week', startStr, '–', endStr, ',', (rows || []).length, 'rows from API).');
-    }
+    persistShiftData();
+    console.log(`[Supabase] Grid synced for week ${startStr}–${endStr} (${(rows || []).length} shifts).`);
 }
 
 // DevTools: window.syncSupabaseShiftsFromDatabase()
@@ -956,24 +1009,22 @@ function setupWeekNavigation() {
     const nextWeekBtn = document.getElementById('next-week');
     
     if (prevWeekBtn) {
-        prevWeekBtn.addEventListener('click', () => {
+        prevWeekBtn.addEventListener('click', async () => {
             currentWeekStart.setDate(currentWeekStart.getDate() - 7);
             updateWeekDisplay();
-            // Reinitialize hours for new week
+            clearShiftCardsFromGrid();
             initializeEmployeeHours();
-            // Sync any DB-only shifts for the new week
-            syncSupabaseShiftsToGrid();
+            await syncSupabaseShiftsToGrid();
         });
     }
     
     if (nextWeekBtn) {
-        nextWeekBtn.addEventListener('click', () => {
+        nextWeekBtn.addEventListener('click', async () => {
             currentWeekStart.setDate(currentWeekStart.getDate() + 7);
             updateWeekDisplay();
-            // Reinitialize hours for new week
+            clearShiftCardsFromGrid();
             initializeEmployeeHours();
-            // Sync any DB-only shifts for the new week
-            syncSupabaseShiftsToGrid();
+            await syncSupabaseShiftsToGrid();
         });
     }
     
@@ -982,6 +1033,21 @@ function setupWeekNavigation() {
 
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/** Remove all shift cards from the grid so the new week starts empty. */
+function clearShiftCardsFromGrid() {
+    document.querySelectorAll('.shift-card').forEach(card => card.remove());
+    document.querySelectorAll('.day-column').forEach(col => {
+        if (!col.querySelector('.shift-card') && !col.querySelector('.empty-day')) {
+            const addBtn = col.querySelector('.add-shift-btn');
+            if (addBtn && !col.querySelector('.empty-day')) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-day';
+                col.insertBefore(empty, addBtn.nextSibling);
+            }
+        }
+    });
+}
 
 function updateWeekDisplay() {
     const weekDisplay = document.getElementById('current-week');
@@ -1003,7 +1069,7 @@ function updateWeekDisplay() {
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = getTodayLocalYmd();
     
     // Update day headers with dates and mark current/past
     DAY_NAMES.forEach((dayKey, index) => {
@@ -1012,7 +1078,7 @@ function updateWeekDisplay() {
             const d = new Date(currentWeekStart);
             d.setDate(d.getDate() + index);
             const dateNum = d.getDate();
-            const dateStr = d.toISOString().split('T')[0];
+            const dateStr = formatLocalYmd(d);
             header.textContent = `${DAY_LABELS[index]} ${dateNum}`;
             header.classList.remove('day-header-today', 'day-header-past');
             header.removeAttribute('data-date');
@@ -1028,7 +1094,7 @@ function updateWeekDisplay() {
         if (column) {
             const d = new Date(currentWeekStart);
             d.setDate(d.getDate() + index);
-            const dateStr = d.toISOString().split('T')[0];
+            const dateStr = formatLocalYmd(d);
             column.classList.remove('day-column-today', 'day-column-past');
             column.removeAttribute('data-date');
             column.dataset.date = dateStr;
@@ -1120,6 +1186,7 @@ function setupModalHandlers() {
     document.getElementById('shift-details-save-btn')?.addEventListener('click', async function handleShiftDetailsSave() {
         const ctx = _shiftModalContext;
         if (!ctx) return;
+        if (document.getElementById('shift-details-modal')?.dataset?.pastView === '1') return;
         const { shiftCard: cardRef, displayName, day, start24, end24, posSelect, taskList } = ctx;
         const newPos = posSelect?.value;
         const newStart = document.getElementById('shift-details-start')?.value;
@@ -1208,7 +1275,7 @@ function setupModalHandlers() {
         let taskSyncFailed = 0;
         let taskSyncError = '';
         for (const desc of descriptions) {
-            const r = await addTaskToProgress(displayName, desc);
+            const r = await addTaskToProgress(displayName, desc, { shiftId: supabaseId || null });
             if (r && r.ok === false) {
                 taskSyncFailed += 1;
                 taskSyncError = r.error || 'Unknown error';
@@ -1223,6 +1290,9 @@ function setupModalHandlers() {
             showNotification(`Shift updated${descriptions.length ? ` and ${descriptions.length} task(s) assigned` : ''} for ${displayName}.`, 'success');
         }
     });
+
+    wireAssignShiftRepeatControls();
+    updateAssignShiftRepeatUI();
 }
 
 // Enable/disable Assign button and show message when selected day is in the past
@@ -1233,7 +1303,7 @@ function updateAssignShiftConfirmState() {
     if (!daySelect || !confirmBtn) return;
     const day = daySelect.value;
     const selectedDate = getDateForDay(day);
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayLocalYmd();
     const isPast = selectedDate && selectedDate < todayStr;
     confirmBtn.disabled = !!isPast;
     if (pastDayMsg) pastDayMsg.style.display = isPast ? 'block' : 'none';
@@ -1256,6 +1326,38 @@ function profileScheduleDisplayLabel(p) {
     const dn = (p.display_name || '').trim();
     if (dn) return dn;
     return (p.employee_name || '').trim() || '';
+}
+
+/** Map profile aliases to a human-friendly display label. */
+async function buildProfileDisplayLabelMap() {
+    const labelByKey = new Map();
+    if (!window.supabaseClient || !window.ORG_ID) return labelByKey;
+
+    const { data: profiles } = await window.supabaseClient
+        .from('profiles')
+        .select('employee_name, display_name, first_name, last_name')
+        .eq('org_id', window.ORG_ID);
+
+    (profiles || []).forEach((p) => {
+        const label = profileScheduleDisplayLabel(p);
+        if (!label) return;
+        const emp = normEmployeeKey(p.employee_name);
+        const display = normEmployeeKey(p.display_name);
+        const first = normEmployeeKey((p.first_name || '').trim());
+        if (emp) labelByKey.set(emp, label);
+        if (display) labelByKey.set(display, label);
+        if (first && !labelByKey.has(first)) labelByKey.set(first, label);
+    });
+
+    return labelByKey;
+}
+
+function getEmployeeDisplayLabelFromMap(labelMap, rawName) {
+    const raw = String(rawName || '').trim();
+    if (!raw) return '';
+    const key = normEmployeeKey(raw);
+    if (labelMap && labelMap.has(key)) return labelMap.get(key);
+    return raw;
 }
 
 /**
@@ -1443,7 +1545,10 @@ function closeModal(modalId) {
     if (modal) {
         modal.classList.remove('active');
         document.body.style.overflow = '';
-        if (modalId === 'shift-details-modal') _shiftModalContext = null;
+        if (modalId === 'shift-details-modal') {
+            _shiftModalContext = null;
+            modal.dataset.pastView = '';
+        }
         
         // Reset form
         const form = modal.querySelector('form');
@@ -1452,10 +1557,21 @@ function closeModal(modalId) {
         } else {
             // Reset individual form controls
             modal.querySelectorAll('input, select').forEach(control => {
-                if (control.id !== 'day-select') {
+                if (control.id === 'day-select') return;
+                if (control.type === 'checkbox') {
+                    control.checked = false;
+                } else {
                     control.value = '';
                 }
             });
+        }
+
+        if (modalId === 'shift-details-modal') {
+            applyShiftDetailsPastViewUI(false);
+        }
+
+        if (modalId === 'assign-shift-modal') {
+            resetAssignShiftRepeatForm();
         }
         
         // Show day selector again
@@ -1466,144 +1582,309 @@ function closeModal(modalId) {
     }
 }
 
-// Shift Assignment
-async function assignShift() {
-    const employeeSelect = document.getElementById('employee-select');
-    const positionSelect = document.getElementById('position-select');
-    const startTimeInput = document.getElementById('start-time');
-    const endTimeInput = document.getElementById('end-time');
-    const daySelect = document.getElementById('day-select');
-    
-    const employee = employeeSelect.value;
-    const position = positionSelect.value;
-    const startTime = startTimeInput.value;
-    const endTime = endTimeInput.value;
-    const day = daySelect.value;
-    
-    if (!employee || !position || !startTime || !endTime || !day) {
-        showNotification('Please fill in all fields', 'error');
-        return;
-    }
-    
-    const selectedDate = getDateForDay(day);
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (selectedDate && selectedDate < todayStr) {
-        showNotification('Cannot assign a shift to a past day.', 'error');
-        return;
-    }
-    
-    // Check if employee has an approved drop for this day
-    const employeeName = getEmployeeDisplayName(employee);
-    
-    if (isEmployeeDropping(employeeName, selectedDate)) {
-        showNotification(`${employeeName} has an approved drop for ${formatDateForDisplay(selectedDate)}. Cannot schedule shift.`, 'error');
-        return;
-    }
+/** Max occurrences when "Forever" is selected (avoids inserting unbounded rows). */
+const RECUR_FOREVER_WEEKLY_COUNT = 260;
+const RECUR_FOREVER_MONTHLY_COUNT = 60;
 
-    if (window.supabaseClient && window.ORG_ID && selectedDate) {
-        if (await employeeHasApprovedTimeOffOnDate(employeeName, selectedDate)) {
-            showNotification(
-                `${employeeName} has approved time off that includes ${formatDateForDisplay(selectedDate)}. You cannot schedule a shift during that period.`,
-                'error'
-            );
-            return;
-        }
-        const supOv = await employeeHasSupabaseShiftOverlap(employeeName, selectedDate, startTime, endTime);
-        if (supOv.overlap) {
-            const o = supOv.other || {};
-            showNotification(
-                `${employeeName} already has a shift that day (${o.start_time || '?'}–${o.end_time || '?'}) that overlaps these times. Change times or remove the other shift first.`,
-                'error'
-            );
-            return;
-        }
-    }
-
-    // Prevent overlapping shifts for the same employee on the same day (local grid)
-    const existingShifts = (window.shiftData[employeeName] || []).filter(s => s.day === day);
-    for (const s of existingShifts) {
-        if (shiftTimeRangesOverlap(startTime, endTime, s.startTime, s.endTime)) {
-            showNotification(`${employeeName} already has a shift on ${day} that overlaps (${s.startTime}–${s.endTime}). Remove it first.`, 'error');
-            return;
-        }
-    }
-
-    // Calculate hours for this shift
-    const shiftHours = calculateShiftHours(startTime, endTime);
-    const weekStart = getWeekStart(currentWeekStart);
-    
-    // Check current hours for the week
-    const currentHours = getEmployeeWeeklyHours(employeeName, weekStart);
-    const newTotalHours = currentHours + shiftHours;
-    
-    // Check for overtime warning
-    if (newTotalHours > 40) {
-        openOvertimeWarningModal(employeeName, currentHours, shiftHours, newTotalHours, () => {
-            proceedWithShiftAssignment(employee, position, startTime, endTime, day, shiftHours, weekStart);
-        });
-        return;
-    }
-    
-    // Proceed with assignment
-    proceedWithShiftAssignment(employee, position, startTime, endTime, day, shiftHours, weekStart);
+function addCalendarDaysYmd(ymd, deltaDays) {
+    const d = new Date(String(ymd).slice(0, 10) + 'T12:00:00');
+    d.setDate(d.getDate() + deltaDays);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
 }
 
-function proceedWithShiftAssignment(employee, position, startTime, endTime, day, shiftHours, weekStart) {
+function addCalendarMonthsYmd(ymd, deltaMonths) {
+    const d = new Date(String(ymd).slice(0, 10) + 'T12:00:00');
+    d.setMonth(d.getMonth() + deltaMonths);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+/**
+ * @param {string} baseYmd - First shift date YYYY-MM-DD
+ * @param {{ enabled: boolean, interval: 'weekly'|'monthly', endMode: 'count'|'forever', count: string }} repeat
+ */
+function buildRecurringShiftDates(baseYmd, repeat) {
+    if (!repeat || !repeat.enabled) return [baseYmd];
+    const weekly = repeat.interval !== 'monthly';
+    const forever = repeat.endMode === 'forever';
+    let total;
+    if (forever) {
+        total = weekly ? RECUR_FOREVER_WEEKLY_COUNT : RECUR_FOREVER_MONTHLY_COUNT;
+    } else {
+        const raw = parseInt(String(repeat.count || '2'), 10) || 2;
+        const cap = weekly ? 104 : 36;
+        total = Math.min(Math.max(2, raw), cap);
+    }
+    const out = [];
+    for (let i = 0; i < total; i++) {
+        if (weekly) out.push(addCalendarDaysYmd(baseYmd, 7 * i));
+        else out.push(addCalendarMonthsYmd(baseYmd, i));
+    }
+    return out;
+}
+
+function getAssignShiftRepeatOptionsFromDom() {
+    const en = document.getElementById('assign-shift-repeat-enabled');
+    const intervalEl = document.getElementById('assign-shift-repeat-interval');
+    const endModeEl = document.getElementById('assign-shift-repeat-end-mode');
+    const countEl = document.getElementById('assign-shift-repeat-count');
+    return {
+        enabled: !!(en && en.checked),
+        interval: intervalEl && intervalEl.value === 'monthly' ? 'monthly' : 'weekly',
+        endMode: endModeEl && endModeEl.value === 'forever' ? 'forever' : 'count',
+        count: countEl ? countEl.value : '4',
+    };
+}
+
+function updateAssignShiftRepeatUI() {
+    const en = document.getElementById('assign-shift-repeat-enabled');
+    const opts = document.getElementById('assign-shift-repeat-options');
+    const wrap = document.getElementById('assign-shift-repeat-count-wrap');
+    const endMode = document.getElementById('assign-shift-repeat-end-mode');
+    const interval = document.getElementById('assign-shift-repeat-interval');
+    const count = document.getElementById('assign-shift-repeat-count');
+    const hint = document.getElementById('assign-shift-repeat-hint');
+    if (!en || !opts) return;
+    const on = en.checked;
+    opts.hidden = !on;
+    if (!on) return;
+    const forever = endMode && endMode.value === 'forever';
+    if (wrap) wrap.style.display = forever ? 'none' : 'block';
+    if (count && interval) {
+        const monthly = interval.value === 'monthly';
+        count.max = monthly ? 36 : 104;
+        const n = parseInt(count.value, 10);
+        if (!Number.isNaN(n) && n > parseInt(count.max, 10)) count.value = String(count.max);
+    }
+    if (hint) {
+        if (forever) {
+            hint.textContent = interval && interval.value === 'monthly'
+                ? `Creates ${RECUR_FOREVER_MONTHLY_COUNT} monthly rows (~5 years). Delete extras anytime.`
+                : `Creates ${RECUR_FOREVER_WEEKLY_COUNT} weekly rows (~5 years). Delete extras anytime.`;
+        } else {
+            hint.textContent = interval && interval.value === 'monthly'
+                ? 'Includes this first shift. Up to 36 occurrences.'
+                : 'Includes this first shift. Up to 104 occurrences.';
+        }
+    }
+}
+
+function resetAssignShiftRepeatForm() {
+    const en = document.getElementById('assign-shift-repeat-enabled');
+    if (en) en.checked = false;
+    const intervalEl = document.getElementById('assign-shift-repeat-interval');
+    if (intervalEl) intervalEl.value = 'weekly';
+    const endModeEl = document.getElementById('assign-shift-repeat-end-mode');
+    if (endModeEl) endModeEl.value = 'count';
+    const countEl = document.getElementById('assign-shift-repeat-count');
+    if (countEl) {
+        countEl.value = '4';
+        countEl.max = 104;
+    }
+    updateAssignShiftRepeatUI();
+}
+
+function wireAssignShiftRepeatControls() {
+    const en = document.getElementById('assign-shift-repeat-enabled');
+    const interval = document.getElementById('assign-shift-repeat-interval');
+    const endMode = document.getElementById('assign-shift-repeat-end-mode');
+    const count = document.getElementById('assign-shift-repeat-count');
+    if (!en) return;
+    const refresh = () => updateAssignShiftRepeatUI();
+    en.addEventListener('change', refresh);
+    if (interval) interval.addEventListener('change', refresh);
+    if (endMode) endMode.addEventListener('change', refresh);
+    if (count) count.addEventListener('change', refresh);
+}
+
+// Shift Assignment
+async function assignShift() {
+    const confirmBtn = document.getElementById('assign-shift-confirm-btn');
+    const prevBtnText = confirmBtn ? confirmBtn.textContent : '';
+    const setWorking = (on) => {
+        if (!confirmBtn) return;
+        confirmBtn.disabled = !!on;
+        confirmBtn.textContent = on ? 'Working…' : prevBtnText;
+    };
+
+    try {
+        setWorking(true);
+
+        const employeeSelect = document.getElementById('employee-select');
+        const positionSelect = document.getElementById('position-select');
+        const startTimeInput = document.getElementById('start-time');
+        const endTimeInput = document.getElementById('end-time');
+        const daySelect = document.getElementById('day-select');
+
+        const employee = employeeSelect?.value;
+        const position = positionSelect?.value;
+        const startTime = startTimeInput?.value;
+        const endTime = endTimeInput?.value;
+        const day = daySelect?.value;
+
+        if (!employee || !position || !startTime || !endTime || !day) {
+            showNotification('Please fill in all fields', 'error');
+            return;
+        }
+
+        const selectedDate = getDateForDay(day);
+        if (!selectedDate) {
+            showNotification('Could not resolve the selected day.', 'error');
+            return;
+        }
+
+        const employeeName = getEmployeeDisplayName(employee);
+        const repeat = getAssignShiftRepeatOptionsFromDom();
+        const shiftDatesYmd = buildRecurringShiftDates(selectedDate, repeat);
+        const todayStr = getTodayLocalYmd();
+
+        let timeOffRows = [];
+        /** @type {Record<string, Array<{ id: string, shift_date: string, start_time: string, end_time: string }>>|null} */
+        let shiftsByDate = null;
+        if (window.supabaseClient && window.ORG_ID && shiftDatesYmd.length > 0) {
+            const sorted = [...shiftDatesYmd].sort();
+            const rangeStart = sorted[0];
+            const rangeEnd = sorted[sorted.length - 1];
+            const [toRows, rangeShifts] = await Promise.all([
+                fetchApprovedTimeOffRequestsForOrg(),
+                fetchEmployeeShiftsInDateRange(employeeName, rangeStart, rangeEnd),
+            ]);
+            timeOffRows = toRows;
+            shiftsByDate = {};
+            for (const row of rangeShifts) {
+                const d = row.shift_date;
+                if (!shiftsByDate[d]) shiftsByDate[d] = [];
+                shiftsByDate[d].push(row);
+            }
+        }
+
+        for (const dateStr of shiftDatesYmd) {
+            if (dateStr < todayStr) {
+                showNotification(`Cannot assign on ${formatDateForDisplay(dateStr)} (past date).`, 'error');
+                return;
+            }
+            if (isEmployeeDropping(employeeName, dateStr)) {
+                showNotification(`${employeeName} has an approved drop on ${formatDateForDisplay(dateStr)}.`, 'error');
+                return;
+            }
+            if (window.supabaseClient && window.ORG_ID && shiftsByDate) {
+                if (employeeCoveredByTimeOffRows(timeOffRows, employeeName, dateStr)) {
+                    showNotification(
+                        `${employeeName} has time off on ${formatDateForDisplay(dateStr)}. Change recurrence or dates.`,
+                        'error'
+                    );
+                    return;
+                }
+                const rows = shiftsByDate[dateStr] || [];
+                for (const row of rows) {
+                    if (shiftTimeRangesOverlap(startTime, endTime, row.start_time, row.end_time)) {
+                        showNotification(
+                            `${employeeName} already overlaps on ${dateStr} (${row.start_time || '?'}–${row.end_time || '?'}).`,
+                            'error'
+                        );
+                        return;
+                    }
+                }
+            }
+            const wk = getWeekStart(new Date(dateStr + 'T12:00:00'));
+            const dk = getDayKeyForDate(dateStr);
+            const existingShifts = (window.shiftData[employeeName] || []).filter((s) => s.day === dk && s.weekStart === wk);
+            for (const s of existingShifts) {
+                if (shiftTimeRangesOverlap(startTime, endTime, s.startTime, s.endTime)) {
+                    showNotification(
+                        `${employeeName} already has a shift on ${formatDateForDisplay(dateStr)} (${s.startTime}–${s.endTime}).`,
+                        'error'
+                    );
+                    return;
+                }
+            }
+        }
+
+        const shiftHours = calculateShiftHours(startTime, endTime);
+        const weekStartFirst = getWeekStart(new Date(shiftDatesYmd[0] + 'T12:00:00'));
+        const currentHours = getEmployeeWeeklyHours(employeeName, weekStartFirst);
+        const newTotalHours = currentHours + shiftHours;
+
+        if (newTotalHours > 40) {
+            openOvertimeWarningModal(employeeName, currentHours, shiftHours, newTotalHours, () => {
+                proceedWithShiftAssignment(employee, position, startTime, endTime, shiftHours, shiftDatesYmd);
+            });
+            return;
+        }
+
+        proceedWithShiftAssignment(employee, position, startTime, endTime, shiftHours, shiftDatesYmd);
+    } catch (e) {
+        console.error('[assignShift]', e);
+        showNotification(e?.message || 'Could not assign shift. Check the console.', 'error');
+    } finally {
+        setWorking(false);
+    }
+}
+
+/** @param {string[]} shiftDatesYmd - YYYY-MM-DD for each occurrence (first = selected day) */
+function proceedWithShiftAssignment(employee, position, startTime, endTime, shiftHours, shiftDatesYmd) {
     const employeeName = getEmployeeDisplayName(employee);
-    
-    // Convert 24-hour time to 12-hour format
+
     const formatTime = (time24) => {
         const [hours, minutes] = time24.split(':');
         const hour12 = hours % 12 || 12;
         const ampm = hours >= 12 ? 'pm' : 'am';
         return `${hour12}${minutes !== '00' ? ':' + minutes : ''}${ampm}`;
     };
-    
+
     const formattedTime = `${formatTime(startTime)} - ${formatTime(endTime)}`;
-    
-    // Store shift data
-    if (!window.shiftData[employeeName]) {
-        window.shiftData[employeeName] = [];
-    }
-    window.shiftData[employeeName].push({
-        day,
-        startTime,
-        endTime,
-        hours: shiftHours,
-        weekStart: weekStart,
-        position: position
-    });
-    persistShiftData();
-    
-    // Update hours tracking
-    if (!window.employeeHours[employeeName]) {
-        window.employeeHours[employeeName] = {};
-    }
-    if (!window.employeeHours[employeeName][weekStart]) {
-        window.employeeHours[employeeName][weekStart] = 0;
-    }
-    window.employeeHours[employeeName][weekStart] += shiftHours;
-    
+
     const POSITION_LABELS = {
         'line-cook': 'Line Cook', 'server': 'Server', 'dish': 'Dish', 'prep': 'Prep',
         'foh-manager': 'FOH Manager', 'dishwasher': 'Dishwasher', 'dessert': 'Dessert',
         'hot-foods': 'Hot Foods', 'mod': 'MOD', 'cold-foods': 'Cold Foods', 'expo': 'Expo'
     };
     const positionLabel = POSITION_LABELS[position]
-        || String(position || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        || String(position || '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-    // Create new shift card
-    const card = createShiftCard(employee, position, formattedTime, day, shiftHours, positionLabel);
-    
-    // Show success notification
-    const totalHours = window.employeeHours[employeeName][weekStart];
-    showNotification(`Shift assigned to ${employeeName}. Total hours this week: ${totalHours.toFixed(1)}`, 'success');
+    const visibleWeekStartStr = getWeekStart(currentWeekStart);
+    const metaByIndex = [];
+
+    if (!window.shiftData[employeeName]) window.shiftData[employeeName] = [];
+
+    shiftDatesYmd.forEach((shiftDate) => {
+        const dayKey = getDayKeyForDate(shiftDate);
+        const weekStartStr = getWeekStart(new Date(shiftDate + 'T12:00:00'));
+        window.shiftData[employeeName].push({
+            day: dayKey,
+            shiftDate,
+            startTime,
+            endTime,
+            hours: shiftHours,
+            weekStart: weekStartStr,
+            position: position
+        });
+        if (!window.employeeHours[employeeName]) window.employeeHours[employeeName] = {};
+        if (!window.employeeHours[employeeName][weekStartStr]) window.employeeHours[employeeName][weekStartStr] = 0;
+        window.employeeHours[employeeName][weekStartStr] += shiftHours;
+
+        let card = null;
+        if (weekStartStr === visibleWeekStartStr) {
+            card = createShiftCard(employee, position, formattedTime, dayKey, shiftHours, positionLabel);
+        }
+        metaByIndex.push({ card, shiftDate, dayKey, weekStartStr });
+    });
+    persistShiftData();
+
+    const gridWeekHours = window.employeeHours[employeeName][visibleWeekStartStr] || 0;
+    const n = shiftDatesYmd.length;
+    if (n === 1) {
+        showNotification(`Shift assigned to ${employeeName}. Total hours this week: ${gridWeekHours.toFixed(1)}`, 'success');
+    } else {
+        showNotification(`${n} shifts assigned to ${employeeName}. Hours on the visible week: ${gridWeekHours.toFixed(1)}`, 'success');
+    }
 
     if (window.supabaseClient && window.ORG_ID) {
-        const shiftDate = getDateForDay(day);
-        // positionLabel already computed above
-
-        // 0. Add this position to employee's capabilities if not already there (so Employees page shows correct count)
         (async () => {
             const { data: existing } = await window.supabaseClient
                 .from('employee_positions')
@@ -1619,47 +1900,55 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, day,
                     { onConflict: 'org_id,employee_name' }
                 );
             }
-        })();
 
-        // 1. Insert notification immediately so the mobile bell lights up right away
-        insertInAppNotification(employeeName, day, formattedTime, null);
-
-        // 2. Sync shift to Supabase so it appears on the mobile calendar
-        window.supabaseClient
-            .from('shifts')
-            .insert({
+            const empId = typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(employeeName) : null;
+            const rows = shiftDatesYmd.map((shift_date) => ({
                 org_id: window.ORG_ID,
-                shift_date: shiftDate,
+                shift_date,
                 start_time: startTime,
                 end_time: endTime,
                 position: positionLabel,
                 employee_name: employeeName,
-                employee_id: typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(employeeName) : null
-            })
-            .select()
-            .single()
-            .then(({ data, error }) => {
+                employee_id: empId
+            }));
+
+            const CHUNK = 50;
+            let syncError = null;
+            for (let i = 0; i < rows.length; i += CHUNK) {
+                const chunk = rows.slice(i, i + CHUNK);
+                const { data, error } = await window.supabaseClient.from('shifts').insert(chunk).select('id, shift_date');
                 if (error) {
-                    console.warn('[Supabase] Could not save shift:', error.message);
-                    showNotification(`⚠️ Shift saved locally but failed to sync to mobile: ${error.message}`, 'error');
-                } else if (data) {
-                    if (card) card.dataset.shiftId = data.id;
-                    // Persist shiftId into shiftData so it survives page reload
-                    const empShifts = window.shiftData[employeeName] || [];
-                    const entry = empShifts.find(s =>
-                        s.day === day && s.startTime === startTime && s.endTime === endTime && s.weekStart === weekStart
-                    );
-                    if (entry) {
-                        entry.shiftId = data.id;
-                        persistShiftData();
-                    }
-                    // Also send Expo push notification to the device
-                    sendShiftNotification(employeeName, day, formattedTime);
+                    syncError = error;
+                    console.warn('[Supabase] Could not save shifts batch:', error.message);
+                    break;
                 }
-            });
+                for (let j = 0; j < (data || []).length; j++) {
+                    const row = data[j];
+                    const globalIdx = i + j;
+                    const meta = metaByIndex[globalIdx];
+                    if (!meta || !row) continue;
+                    const empShifts = window.shiftData[employeeName] || [];
+                    const entry = empShifts.find((s) =>
+                        s.shiftDate === meta.shiftDate &&
+                        s.startTime === startTime &&
+                        s.endTime === endTime &&
+                        s.weekStart === meta.weekStartStr
+                    );
+                    if (entry) entry.shiftId = row.id;
+                    if (meta.card) meta.card.dataset.shiftId = row.id;
+                }
+            }
+            persistShiftData();
+            if (syncError) {
+                showNotification(`⚠️ Shifts saved locally but sync failed: ${syncError.message}`, 'error');
+            } else {
+                const day0 = getDayKeyForDate(shiftDatesYmd[0]);
+                insertInAppNotification(employeeName, day0, formattedTime, null);
+                sendShiftNotification(employeeName, day0, formattedTime);
+            }
+        })();
     }
 
-    // Close modal
     closeModal('assign-shift-modal');
 }
 
@@ -1693,13 +1982,31 @@ function shiftTimeRangesOverlap(startA, endA, startB, endB) {
     return a0 < b1 && a1 > b0;
 }
 
-// Get week start date (Monday) as string
+// Get week start date (Monday) as YYYY-MM-DD string (local time, no UTC drift)
 function getWeekStart(date) {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust to Monday
     d.setDate(diff);
-    return d.toISOString().split('T')[0];
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+}
+
+/** YYYY-MM-DD in the browser's local calendar (avoids UTC drift from toISOString). */
+function formatLocalYmd(d) {
+    const x = new Date(d);
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, '0');
+    const day = String(x.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function getTodayLocalYmd() {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return formatLocalYmd(t);
 }
 
 // Get day key (monday..sunday) for a date string YYYY-MM-DD
@@ -1716,8 +2023,8 @@ async function loadCalendarShiftsFromSupabase(monthDate) {
     const month = monthDate.getMonth();
     const first = new Date(year, month, 1);
     const last = new Date(year, month + 1, 0);
-    const startStr = first.toISOString().split('T')[0];
-    const endStr = last.toISOString().split('T')[0];
+    const startStr = formatLocalYmd(first);
+    const endStr = formatLocalYmd(last);
     const { data: rows, error } = await window.supabaseClient
         .from('shifts')
         .select('shift_date, start_time, end_time, employee_name')
@@ -1731,7 +2038,7 @@ async function loadCalendarShiftsFromSupabase(monthDate) {
     }
     if (!window.calendarShiftsByDate) window.calendarShiftsByDate = {};
     for (let d = new Date(first.getTime()); d <= last; d.setDate(d.getDate() + 1)) {
-        const ds = d.toISOString().split('T')[0];
+        const ds = formatLocalYmd(d);
         delete window.calendarShiftsByDate[ds];
     }
     (rows || []).forEach(s => {
@@ -1849,7 +2156,7 @@ function showDayPopup(dateStr) {
     const d = new Date(dateStr + 'T12:00:00');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const isToday = dateStr === today.toISOString().split('T')[0];
+    const isToday = dateStr === getTodayLocalYmd();
     titleEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + (isToday ? ' (Today)' : '');
     const shifts = getShiftsForDate(dateStr);
     if (shifts.length === 0) {
@@ -1886,16 +2193,9 @@ function getEmployeeWeeklyHours(employeeName, weekStart) {
 function initializeEmployeeHours() {
     const weekStart = getWeekStart(currentWeekStart);
 
-    // Save any dynamically-added shifts (non-HTML) from localStorage before clearing
-    const savedDynamic = {};
-    Object.keys(window.shiftData || {}).forEach(emp => {
-        const weekShifts = (window.shiftData[emp] || []).filter(s => s.weekStart === weekStart);
-        if (weekShifts.length > 0) savedDynamic[emp] = weekShifts;
-    });
-
-    // Clear current week so DOM becomes source of truth for hardcoded shifts
+    // Clear hours and shiftData for this week — syncSupabaseShiftsToGrid will repopulate from DB
     Object.keys(window.employeeHours).forEach(emp => {
-        if (window.employeeHours[emp][weekStart]) {
+        if (window.employeeHours[emp] && window.employeeHours[emp][weekStart]) {
             delete window.employeeHours[emp][weekStart];
         }
     });
@@ -1904,106 +2204,49 @@ function initializeEmployeeHours() {
             window.shiftData[emp] = window.shiftData[emp].filter(s => s.weekStart !== weekStart);
         }
     });
-    
+
+    // Pick up any shift cards that are still in the DOM (initial page load only — cleared on nav)
     document.querySelectorAll('.shift-card').forEach(card => {
         const employeeName = card.dataset.employeeName || card.querySelector('.employee-name')?.textContent?.trim();
         const timeText = card.querySelector('.shift-time')?.textContent || '';
-        
+
         if (employeeName && timeText) {
-            // Parse time from "4pm - 1am" format
-            const timeMatch = timeText.match(/(\d+)(?::(\d+))?(am|pm)\s*-\s*(\d+)(?::(\d+))?(am|pm)/);
+            const timeMatch = timeText.match(/(\d+)(?::(\d+))?(am|pm)\s*-\s*(\d+)(?::(\d+))?(am|pm)/i);
             if (timeMatch) {
                 const startH = parseInt(timeMatch[1]);
                 const startM = parseInt(timeMatch[2] || 0);
-                const startPeriod = timeMatch[3];
+                const startPeriod = timeMatch[3].toLowerCase();
                 const endH = parseInt(timeMatch[4]);
                 const endM = parseInt(timeMatch[5] || 0);
-                const endPeriod = timeMatch[6];
-                
+                const endPeriod = timeMatch[6].toLowerCase();
+
                 let start24 = startH + (startPeriod === 'pm' && startH !== 12 ? 12 : 0);
                 if (startPeriod === 'am' && startH === 12) start24 = 0;
                 let end24 = endH + (endPeriod === 'pm' && endH !== 12 ? 12 : 0);
                 if (endPeriod === 'am' && endH === 12) end24 = 0;
-                
-                // Handle overnight shifts
-                if (end24 < start24) {
-                    end24 += 24;
-                }
-                
+                // Do NOT add 24 for overnight — calculateShiftHours handles that internally.
+                // Storing 28:27 breaks Supabase lookups.
+
                 const startTime = `${String(start24).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
                 const endTime = `${String(end24).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
-                
+
                 const dayColumn = card.closest('.day-column');
                 const day = dayColumn?.dataset.day;
                 if (day) {
-                    const shiftWeekStart = getWeekStart(currentWeekStart);
                     const hours = calculateShiftHours(startTime, endTime);
-                    
-                    if (!window.shiftData[employeeName]) {
-                        window.shiftData[employeeName] = [];
-                    }
-                    // Check if this shift already exists
-                    const exists = window.shiftData[employeeName].some(s => 
-                        s.day === day && s.startTime === startTime && s.endTime === endTime && s.weekStart === shiftWeekStart
+                    if (!window.shiftData[employeeName]) window.shiftData[employeeName] = [];
+                    const exists = window.shiftData[employeeName].some(s =>
+                        s.day === day && s.startTime === startTime && s.endTime === endTime && s.weekStart === weekStart
                     );
                     if (!exists) {
-                        window.shiftData[employeeName].push({
-                            day,
-                            startTime,
-                            endTime,
-                            hours,
-                            weekStart: shiftWeekStart
-                        });
-                        persistShiftData();
+                        window.shiftData[employeeName].push({ day, startTime, endTime, hours, weekStart });
                     }
-                    
-                    if (!window.employeeHours[employeeName]) {
-                        window.employeeHours[employeeName] = {};
-                    }
-                    if (!window.employeeHours[employeeName][shiftWeekStart]) {
-                        window.employeeHours[employeeName][shiftWeekStart] = 0;
-                    }
-                    // Only add if not already counted
-                    if (!exists) {
-                        window.employeeHours[employeeName][shiftWeekStart] += hours;
-                    }
+                    if (!window.employeeHours[employeeName]) window.employeeHours[employeeName] = {};
+                    if (!window.employeeHours[employeeName][weekStart]) window.employeeHours[employeeName][weekStart] = 0;
+                    if (!exists) window.employeeHours[employeeName][weekStart] += hours;
                 }
             }
         }
-    });
-
-    // Restore dynamically-added shifts that were not in the HTML DOM
-    Object.keys(savedDynamic).forEach(empName => {
-        savedDynamic[empName].forEach(savedShift => {
-            const already = (window.shiftData[empName] || []).some(s =>
-                s.day === savedShift.day &&
-                s.startTime === savedShift.startTime &&
-                s.endTime === savedShift.endTime
-            );
-            if (!already) {
-                // Recreate the card visually
-                const timeDisplay = formatTo12h(savedShift.startTime) + ' - ' + formatTo12h(savedShift.endTime);
-                const posRaw = savedShift.position || 'line-cook';
-                const posSlug = String(posRaw).includes(' ')
-                    ? String(posRaw).toLowerCase().replace(/\s+/g, '-')
-                    : String(posRaw);
-                const posLabel = String(posRaw).includes(' ')
-                    ? String(posRaw)
-                    : String(posRaw).replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                const card = createShiftCard(empName, posSlug, timeDisplay, savedShift.day, savedShift.hours, posLabel);
-                if (card && savedShift.shiftId) {
-                    card.dataset.shiftId = savedShift.shiftId;
-                }
-
-                // Restore into shiftData and hours
-                if (!window.shiftData[empName]) window.shiftData[empName] = [];
-                window.shiftData[empName].push(savedShift);
-
-                if (!window.employeeHours[empName]) window.employeeHours[empName] = {};
-                if (!window.employeeHours[empName][weekStart]) window.employeeHours[empName][weekStart] = 0;
-                window.employeeHours[empName][weekStart] += savedShift.hours || 0;
-            }
-        });
     });
 
     persistShiftData();
@@ -2046,6 +2289,12 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     const prettyPos = positionLabelOverride
         || positionNames[position]
         || String(position || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const colDate = dayColumn.dataset?.date;
+    const isPastCol = colDate && colDate < getTodayLocalYmd();
+    const hintHtml = isPastCol
+        ? '<i class="fas fa-eye"></i> Click to view tasks for this shift'
+        : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
     
     shiftCard.innerHTML = `
         <div class="shift-header">
@@ -2056,7 +2305,7 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
             <div class="employee-avatar">${employeeNames[employee]?.charAt(0) || employee.charAt(0).toUpperCase()}</div>
             <span class="employee-name">${displayName}</span>
         </div>
-        <div class="shift-card-hint"><i class="fas fa-pen"></i> Click to edit shift & assign tasks</div>
+        <div class="shift-card-hint">${hintHtml}</div>
     `;
 
     shiftCard.dataset.employeeName = displayName;
@@ -2113,6 +2362,42 @@ function formatTo12h(time24) {
 // Combined Edit Shift + Assign Task modal — context for Save & Assign handler
 let _shiftModalContext = null;
 
+function applyShiftDetailsPastViewUI(isPast) {
+    const modal = document.getElementById('shift-details-modal');
+    const banner = document.getElementById('shift-details-past-banner');
+    if (banner) {
+        banner.hidden = !isPast;
+    }
+    const addTasksGroup = document.getElementById('shift-details-add-task-row')?.closest('.form-group');
+    const recipesGroup = document.getElementById('shift-details-active-recipes')?.closest('.form-group');
+    const commonGroup = modal?.querySelector('.common-tasks-list')?.closest('.form-group');
+    const display = isPast ? 'none' : '';
+    if (addTasksGroup) addTasksGroup.style.display = display;
+    if (recipesGroup) recipesGroup.style.display = display;
+    if (commonGroup) commonGroup.style.display = display;
+
+    ['shift-details-position', 'shift-details-start', 'shift-details-end'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !!isPast;
+    });
+    const del = document.getElementById('shift-details-delete-btn');
+    const save = document.getElementById('shift-details-save-btn');
+    if (del) del.style.display = isPast ? 'none' : '';
+    if (save) save.style.display = isPast ? 'none' : '';
+
+    const sections = modal?.querySelectorAll('.shift-details-section-title');
+    if (sections && sections[0]) {
+        sections[0].innerHTML = isPast
+            ? '<i class="fas fa-clock"></i> Shift'
+            : '<i class="fas fa-clock"></i> Edit Shift';
+    }
+    if (sections && sections[1]) {
+        sections[1].innerHTML = isPast
+            ? '<i class="fas fa-clipboard-list"></i> Tasks for this shift'
+            : '<i class="fas fa-clipboard-list"></i> Assign Tasks';
+    }
+}
+
 // Combined Edit Shift + Assign Task modal
 function openShiftDetailsModal(shiftCard, employee, position, time, day) {
     const modal = document.getElementById('shift-details-modal');
@@ -2140,64 +2425,93 @@ function openShiftDetailsModal(shiftCard, employee, position, time, day) {
     const start24 = parts[0] ? parseTo24h(parts[0]) : '';
     const end24   = parts[1] ? parseTo24h(parts[1]) : '';
 
+    const dayColumnEl = document.querySelector(`.day-column[data-day="${day}"]`);
+    const shiftDateStr = (dayColumnEl?.dataset?.date) || getDateForDay(day) || '';
+    const isPastShift = !!(shiftDateStr && shiftDateStr < getTodayLocalYmd());
+    modal.dataset.pastView = isPastShift ? '1' : '';
+    applyShiftDetailsPastViewUI(isPastShift);
+
     titleEl.innerHTML = `<i class="fas fa-user-clock"></i> ${displayName} — ${day.charAt(0).toUpperCase() + day.slice(1)}`;
     empInput.value = displayName;
-    posSelect.value = position;
-    startInput.value = start24;
-    endInput.value = end24;
+    if (posSelect) posSelect.value = position;
+    if (startInput) startInput.value = start24;
+    if (endInput) endInput.value = end24;
 
     taskList.innerHTML = '';
-    addTaskRow(taskList);
-    // Show tasks already assigned to this employee (kitchenTasks + home progress list if present).
-    loadExistingTasksForEmployee(displayName, existingList, existingGroup);
-    loadActiveRecipesInto(recipesList, taskList);
+    if (existingList) existingList.innerHTML = '';
+    if (existingGroup) existingGroup.style.display = 'none';
+    if (!isPastShift) {
+        void loadActiveRecipesInto(recipesList, taskList);
+    } else if (recipesList) {
+        recipesList.innerHTML = '';
+    }
 
     modal.dataset.employeeName = displayName;
     const cardRef = shiftCard;
+    const existingShiftId = cardRef?.dataset?.shiftId || '';
+    modal.dataset.shiftId = existingShiftId;
+    modal.dataset.shiftDate = shiftDateStr;
+    modal.dataset.startTime = start24 || '';
+    modal.dataset.endTime = end24 || '';
     _shiftModalContext = { shiftCard, displayName, day, start24, end24, posSelect, taskList };
+
+    if (existingShiftId) {
+        void loadExistingTasksForEmployee(displayName, existingList, existingGroup, {
+            shiftId: existingShiftId,
+            shiftDate: shiftDateStr,
+            startTime: start24,
+            endTime: end24,
+            historyView: isPastShift,
+        });
+    }
 
     const newDeleteBtn = deleteBtn.cloneNode(true);
     deleteBtn.replaceWith(newDeleteBtn);
-    newDeleteBtn.addEventListener('click', () => {
-        if (!confirm(`Delete ${displayName}'s shift on ${day}?`)) return;
+    if (!isPastShift) {
+        newDeleteBtn.addEventListener('click', () => {
+            if (!confirm(`Delete ${displayName}'s shift on ${day}?`)) return;
 
-        const weekStart = getWeekStart(currentWeekStart);
-        const empShifts = window.shiftData[displayName] || [];
-        const idx = empShifts.findIndex(s =>
-            s.day === day && s.weekStart === weekStart &&
-            s.startTime === start24 && s.endTime === end24
-        );
-        if (idx !== -1) {
-            const oldHours = empShifts[idx].hours || 0;
-            if (window.employeeHours[displayName]?.[weekStart] !== undefined) {
-                window.employeeHours[displayName][weekStart] -= oldHours;
+            const weekStart = getWeekStart(currentWeekStart);
+            const empShifts = window.shiftData[displayName] || [];
+            const idx = empShifts.findIndex(s =>
+                s.day === day && s.weekStart === weekStart &&
+                s.startTime === start24 && s.endTime === end24
+            );
+            if (idx !== -1) {
+                const oldHours = empShifts[idx].hours || 0;
+                if (window.employeeHours[displayName]?.[weekStart] !== undefined) {
+                    window.employeeHours[displayName][weekStart] -= oldHours;
+                }
+                empShifts.splice(idx, 1);
+                window.shiftData[displayName] = empShifts;
+                persistShiftData();
             }
-            empShifts.splice(idx, 1);
-            window.shiftData[displayName] = empShifts;
-            persistShiftData();
-        }
 
-        const supabaseId = cardRef.dataset.shiftId;
-        if (supabaseId && window.supabaseClient) {
-            window.supabaseClient.from('shifts').delete().eq('id', supabaseId)
-                .then(({ error }) => { if (error) console.warn('[Supabase] Could not delete shift:', error.message); });
-        }
+            const supabaseId = cardRef.dataset.shiftId;
+            if (supabaseId && window.supabaseClient) {
+                window.supabaseClient.from('shifts').delete().eq('id', supabaseId)
+                    .then(({ error }) => { if (error) console.warn('[Supabase] Could not delete shift:', error.message); });
+            }
 
-        cardRef.style.transition = 'all 0.25s ease';
-        cardRef.style.opacity = '0';
-        cardRef.style.transform = 'scale(0.95)';
-        setTimeout(() => cardRef.remove(), 250);
+            cardRef.style.transition = 'all 0.25s ease';
+            cardRef.style.opacity = '0';
+            cardRef.style.transform = 'scale(0.95)';
+            setTimeout(() => cardRef.remove(), 250);
 
-        closeModal('shift-details-modal');
-        showNotification(`Shift for ${displayName} deleted.`, 'success');
-    });
+            closeModal('shift-details-modal');
+            showNotification(`Shift for ${displayName} deleted.`, 'success');
+        });
+    }
 
-    addTaskBtn.onclick = () => addTaskRow(taskList);
+    if (addTaskBtn) {
+        addTaskBtn.onclick = isPastShift ? null : () => addTaskRow(taskList);
+    }
 
     openModal('shift-details-modal');
     document.body.style.overflow = 'hidden';
-    const firstInput = taskList.querySelector('.task-input');
-    if (firstInput) firstInput.focus();
+    if (!isPastShift) {
+        startInput?.focus();
+    }
 }
 
 function isRecipeMarkedActive(recipe) {
@@ -2410,7 +2724,7 @@ function getDateForDay(dayName) {
     const targetDate = new Date(currentWeekStart);
     targetDate.setDate(targetDate.getDate() + dayIndex);
     
-    return targetDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    return formatLocalYmd(targetDate);
 }
 
 // Get employee display name from select value
@@ -2733,7 +3047,6 @@ async function openAssignTaskModal(employeeName, day) {
     
     titleEl.textContent = 'Assign Task';
     taskList.innerHTML = '';
-    addTaskRow(taskList);
     modal.dataset.day = day || '';
     
     if (typeof loadEmployeePositionsFromSupabase === 'function') {
@@ -2750,38 +3063,129 @@ async function openAssignTaskModal(employeeName, day) {
     loadExistingTasksForEmployee(selectedName, existingTasksList, existingTasksGroup);
     openModal('assign-task-modal');
     loadActiveRecipes();
-    const taskInput = taskList.querySelector('.task-input');
-    if (taskInput) taskInput.focus();
+    employeeSelect?.focus();
 }
 
-// Load existing tasks for an employee and display them in the modal
-function loadExistingTasksForEmployee(employeeName, container, groupElement) {
+/** Show only open assignments in scheduling modals — not completed history. */
+function kitchenTaskIsActive(task) {
+    return task && !task.completed;
+}
+
+// Load existing tasks for an employee and display them in the modal.
+// If a shift id is provided, only show tasks linked to that specific shift.
+async function loadExistingTasksForEmployee(employeeName, container, groupElement, options = {}) {
     if (!container || !groupElement) return;
+    const shiftIdFilter = options?.shiftId ? String(options.shiftId) : null;
+    let allowedShiftIds = shiftIdFilter ? new Set([shiftIdFilter]) : null;
+    const historyView = !!options.historyView;
     
     // Clear existing content
     container.innerHTML = '';
+
+    if (historyView && shiftIdFilter && window.supabaseClient && window.ORG_ID) {
+        try {
+            const { data: dbTasks, error: dbErr } = await window.supabaseClient
+                .from('tasks')
+                .select('id, text, employee_name, employee_id, shift_id, status, completed_at')
+                .eq('org_id', window.ORG_ID)
+                .eq('shift_id', shiftIdFilter);
+            if (dbErr) {
+                console.warn('[ShiftDetails] History task load failed:', dbErr.message);
+                groupElement.style.display = 'none';
+                return;
+            }
+            const rows = dbTasks || [];
+            if (rows.length === 0) {
+                groupElement.style.display = 'none';
+                return;
+            }
+            groupElement.style.display = 'block';
+            rows.forEach((task) => {
+                const nameKey =
+                    (typeof window.getEmployeeNameFromId === 'function' && task.employee_id
+                        ? window.getEmployeeNameFromId(task.employee_id)
+                        : null) ||
+                    task.employee_name ||
+                    '';
+                const mappedName = nameKey
+                    ? ((typeof window.getEmployeeDisplayName === 'function'
+                        ? window.getEmployeeDisplayName(nameKey)
+                        : null) || nameKey)
+                    : 'Unassigned';
+                const completed = schedulingTaskRowCompleted(task);
+                const item = createExistingTaskItem(
+                    mappedName,
+                    (task.text || '').trim(),
+                    completed,
+                    task.shift_id ? String(task.shift_id) : shiftIdFilter,
+                    { readOnly: true }
+                );
+                container.appendChild(item);
+            });
+        } catch (e) {
+            console.warn('[ShiftDetails] History task load failed:', e?.message || e);
+            groupElement.style.display = 'none';
+        }
+        return;
+    }
+
+    if (
+        allowedShiftIds &&
+        window.supabaseClient &&
+        window.ORG_ID &&
+        options?.shiftDate &&
+        options?.startTime &&
+        options?.endTime
+    ) {
+        try {
+            const { data: siblingRows, error: siblingErr } = await window.supabaseClient
+                .from('shifts')
+                .select('id')
+                .eq('org_id', window.ORG_ID)
+                .eq('shift_date', options.shiftDate)
+                .eq('start_time', options.startTime)
+                .eq('end_time', options.endTime)
+                .eq('employee_name', employeeName);
+            if (!siblingErr && siblingRows?.length) {
+                allowedShiftIds = new Set(
+                    siblingRows.map((row) => String(row.id)).filter(Boolean)
+                );
+            }
+        } catch (e) {
+            console.warn('[ShiftDetails] sibling shift lookup failed:', e?.message || e);
+        }
+    }
     
     // Get tasks from window.kitchenTasks
     const existingTasks = [];
     if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
         window.kitchenTasks.forEach(task => {
-            if (task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName)) {
+            const taskShiftId = task.shift_id ? String(task.shift_id) : null;
+            if (
+                kitchenTaskIsActive(task) &&
+                task.assignee &&
+                assigneeMatchesEmployeeName(task.assignee, employeeName) &&
+                (!allowedShiftIds || (taskShiftId && allowedShiftIds.has(taskShiftId)))
+            ) {
                 existingTasks.push({
                     assignee: task.assignee,
-                    description: task.description
+                    description: task.description,
+                    shift_id: taskShiftId
                 });
             }
         });
     }
     
-    // Also check tasks from the progress list on the home page
-    const progressList = document.querySelector('.progress-list');
+    // Progress rows do not reliably know which shift they belong to,
+    // so only use them for employee-wide task views.
+    const progressList = allowedShiftIds ? null : document.querySelector('.progress-list');
     if (progressList) {
         progressList.querySelectorAll('.progress-item').forEach(item => {
             const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
             const description = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
             const isCompleted = item.dataset.completed === 'true' || item.classList.contains('task-completed');
             
+            if (isCompleted) return;
             if (assignee && assigneeMatchesEmployeeName(assignee, employeeName) && description) {
                 // Check if already added
                 const alreadyExists = existingTasks.some(t => 
@@ -2791,7 +3195,8 @@ function loadExistingTasksForEmployee(employeeName, container, groupElement) {
                     existingTasks.push({
                         assignee: assignee,
                         description: description,
-                        completed: isCompleted
+                        completed: isCompleted,
+                        shift_id: null
                     });
                 }
             }
@@ -2803,7 +3208,7 @@ function loadExistingTasksForEmployee(employeeName, container, groupElement) {
         groupElement.style.display = 'block';
         
         existingTasks.forEach(task => {
-            const taskItem = createExistingTaskItem(task.assignee, task.description, task.completed);
+            const taskItem = createExistingTaskItem(task.assignee, task.description, task.completed, task.shift_id || null);
             container.appendChild(taskItem);
         });
     } else {
@@ -2812,7 +3217,8 @@ function loadExistingTasksForEmployee(employeeName, container, groupElement) {
 }
 
 // Create a display item for an existing task (read-only in modal)
-function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
+function createExistingTaskItem(employeeName, taskDescription, isCompleted, shiftId = null, opts = {}) {
+    const readOnly = !!opts.readOnly;
     const currentUser = getCurrentUser();
     const isAssignedToCurrentUser = currentUser && currentUser.toLowerCase() === employeeName.toLowerCase();
     
@@ -2820,8 +3226,19 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
     taskItem.className = `existing-task-item ${isCompleted ? 'task-completed' : ''}`;
     taskItem.dataset.employeeName = employeeName;
     taskItem.dataset.taskDescription = taskDescription;
+    if (shiftId) taskItem.dataset.shiftId = shiftId;
+
+    if (readOnly) {
+        const readonlyDiv = document.createElement('div');
+        readonlyDiv.className = 'task-status-readonly';
+        readonlyDiv.innerHTML = `
+            <i class="fas ${isCompleted ? 'fa-check-circle task-status-complete' : 'fa-circle task-status-pending'} task-status-icon ${isCompleted ? 'task-status-complete' : 'task-status-pending'}"></i>
+            <span class="task-text" style="${isCompleted ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(taskDescription)}</span>
+        `;
+        taskItem.appendChild(readonlyDiv);
+        return taskItem;
+    }
     
-    // Create delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'btn-delete-task';
     deleteBtn.type = 'button';
@@ -2830,27 +3247,32 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
     deleteBtn.addEventListener('click', function(e) {
         e.stopPropagation();
         if (confirm(`Remove task "${taskDescription}" from ${employeeName}?`)) {
-            removeTask(employeeName, taskDescription);
+            removeTask(employeeName, taskDescription, shiftId);
             const shiftModal = document.getElementById('shift-details-modal');
             const assignModal = document.getElementById('assign-task-modal');
-            let listEl, groupEl, empName;
+            let listEl, groupEl, empName, modalShiftId = null;
             if (shiftModal?.classList.contains('active')) {
                 listEl = document.getElementById('shift-details-existing-tasks-list');
                 groupEl = document.getElementById('shift-details-existing-tasks-group');
                 empName = shiftModal.dataset.employeeName;
+                modalShiftId = shiftModal.dataset.shiftId || null;
             } else if (assignModal) {
                 listEl = document.getElementById('existing-tasks-list');
                 groupEl = document.getElementById('existing-tasks-group');
                 empName = assignModal.dataset.employeeName;
             }
             if (empName && listEl && groupEl) {
-                loadExistingTasksForEmployee(empName, listEl, groupEl);
+                loadExistingTasksForEmployee(empName, listEl, groupEl, {
+                    shiftId: modalShiftId,
+                    shiftDate: shiftModal?.dataset.shiftDate || null,
+                    startTime: shiftModal?.dataset.startTime || null,
+                    endTime: shiftModal?.dataset.endTime || null,
+                });
             }
         }
     });
     
     if (isAssignedToCurrentUser) {
-        // Show checkbox for assigned employee
         const label = document.createElement('label');
         label.className = 'task-checkbox-label';
         label.innerHTML = `
@@ -2861,9 +3283,7 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
         const checkbox = label.querySelector('.task-checkbox');
         if (checkbox) {
             checkbox.addEventListener('change', function() {
-                // Update the task in the main progress list
                 updateTaskInProgressList(employeeName, taskDescription, this.checked);
-                // Update local display
                 if (this.checked) {
                     taskItem.classList.add('task-completed');
                     const taskText = taskItem.querySelector('.task-text');
@@ -2884,7 +3304,6 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
         
         taskItem.appendChild(label);
     } else {
-        // Show read-only status for others
         const readonlyDiv = document.createElement('div');
         readonlyDiv.className = 'task-status-readonly';
         readonlyDiv.innerHTML = `
@@ -2894,7 +3313,6 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted) {
         taskItem.appendChild(readonlyDiv);
     }
     
-    // Add delete button
     taskItem.appendChild(deleteBtn);
     
     return taskItem;
@@ -3055,15 +3473,7 @@ function addTaskRow(listEl) {
     const removeBtn = row.querySelector('.btn-remove-task');
     if (removeBtn) {
         removeBtn.addEventListener('click', () => {
-            const allRows = listEl.querySelectorAll('.task-row');
-            if (allRows.length === 1) {
-                // Keep at least one row; just clear it
-                const input = row.querySelector('.task-input');
-                if (input) input.value = '';
-                input?.focus();
-            } else {
-                row.remove();
-            }
+            row.remove();
         });
     }
 
@@ -3077,61 +3487,50 @@ function addTaskRow(listEl) {
     return input;
 }
 
+function schedulingTaskRowCompleted(task) {
+    const st = (task?.status || '').toString().trim().toLowerCase();
+    if (['completed', 'complete', 'done', 'archived', 'cancelled'].includes(st)) return true;
+    if (task?.completed_at) return true;
+    return false;
+}
+
 // Add task to Kitchen Progress section (shared function). Returns { ok, error?, skipped?, localOnly? }.
-async function addTaskToProgress(employeeName, taskDescription) {
-    // Store task data globally
+async function addTaskToProgress(employeeName, taskDescription, options = {}) {
+    const shiftIdOpt = options && options.shiftId ? String(options.shiftId) : null;
     if (typeof window.kitchenTasks === 'undefined') {
         window.kitchenTasks = [];
     }
 
     const existing = window.kitchenTasks.find(task =>
-        task.assignee === employeeName && task.description === taskDescription
+        task.assignee === employeeName &&
+        task.description === taskDescription &&
+        String(task.shift_id || '') === String(shiftIdOpt || '')
     );
     const taskExists = !!existing;
 
-    if (!taskExists) {
-        window.kitchenTasks.push({
-            assignee: employeeName,
-            description: taskDescription,
-            timestamp: new Date().toISOString(),
-            completed: false
-        });
-    }
-
-    // If we're on the home page, add it immediately to the progress list
-    const progressList = document.querySelector('.progress-list');
-    if (progressList) {
-        const existingTasks = Array.from(progressList.querySelectorAll('.progress-item'));
-        const existsInDOM = existingTasks.some(item => {
-            const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
-            const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
-            return assignee === employeeName && desc === taskDescription;
-        });
-
-        if (!existsInDOM) {
-            if (typeof window.createTaskItem === 'function') {
-                window.createTaskItem(progressList, employeeName, taskDescription);
-            } else if (typeof createTaskItem === 'function') {
-                createTaskItem(progressList, employeeName, taskDescription);
-            }
-        }
-    }
-
-    try {
-        localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-    } catch (e) {
-        console.warn('Could not save tasks to localStorage:', e);
-    }
-
     if (!window.supabaseClient || !window.ORG_ID) {
         if (!taskExists) {
-            console.warn('[Tasks] No Supabase client or ORG_ID — task stored locally only');
+            const row = {
+                assignee: employeeName,
+                description: taskDescription,
+                timestamp: new Date().toISOString(),
+                completed: false
+            };
+            if (shiftIdOpt) row.shift_id = shiftIdOpt;
+            window.kitchenTasks.push(row);
+            try {
+                localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+            } catch (e) {
+                console.warn('Could not save tasks to localStorage:', e);
+            }
         }
         return { ok: true, localOnly: true };
     }
 
     const localRow = window.kitchenTasks.find(t =>
-        t.assignee === employeeName && t.description === taskDescription
+        t.assignee === employeeName &&
+        t.description === taskDescription &&
+        String(t.shift_id || '') === String(shiftIdOpt || '')
     );
     if (localRow?.supabase_id) {
         return { ok: true, skipped: true };
@@ -3139,17 +3538,18 @@ async function addTaskToProgress(employeeName, taskDescription) {
 
     const canonicalName = typeof window.getCanonicalEmployeeName === 'function'
         ? window.getCanonicalEmployeeName(employeeName) : employeeName;
-    const assigneeId = typeof window.getEmployeeIdFromName === 'function'
-        ? window.getEmployeeIdFromName(canonicalName) || window.getEmployeeIdFromName(employeeName)
+    const employeeIdForTask = typeof window.getEmployeeIdFromName === 'function'
+        ? window.getEmployeeIdFromName(canonicalName || employeeName)
         : null;
     const payload = {
         org_id: window.ORG_ID,
         text: taskDescription,
         employee_name: canonicalName,
-        employee_id: assigneeId,
+        employee_id: employeeIdForTask || null,
         status: 'todo',
         is_urgent: false
     };
+    if (shiftIdOpt) payload.shift_id = shiftIdOpt;
 
     let { data, error } = await window.supabaseClient.from('tasks').insert(payload).select();
     if (error && /employee_name/i.test(error.message || '')) {
@@ -3159,31 +3559,80 @@ async function addTaskToProgress(employeeName, taskDescription) {
         data = retry.data;
         error = retry.error;
     }
+    if (error && shiftIdOpt && /shift_id|column|does not exist|42703/i.test(error.message || '')) {
+        const noShift = { ...payload };
+        delete noShift.shift_id;
+        const retry2 = await window.supabaseClient.from('tasks').insert(noShift).select();
+        data = retry2.data;
+        error = retry2.error;
+        if (localRow) delete localRow.shift_id;
+    }
     if (error) {
         console.warn('[Supabase] Task insert failed:', error.message);
         return { ok: false, error: error.message };
     }
     const row = Array.isArray(data) ? data[0] : data;
-    if (row?.id && localRow) {
-        localRow.supabase_id = row.id;
+    if (row?.id) {
+        if (localRow) {
+            localRow.supabase_id = row.id;
+            localRow.assignee = employeeName;
+            localRow.description = taskDescription;
+            localRow.timestamp = row.created_at || localRow.timestamp;
+            localRow.completed = schedulingTaskRowCompleted(row);
+            localRow.shift_id = row.shift_id || localRow.shift_id || null;
+        } else {
+            const nextRow = {
+                assignee: employeeName,
+                description: taskDescription,
+                timestamp: row.created_at || new Date().toISOString(),
+                completed: schedulingTaskRowCompleted(row),
+                supabase_id: row.id
+            };
+            if (row.shift_id || shiftIdOpt) nextRow.shift_id = row.shift_id || shiftIdOpt;
+            window.kitchenTasks.push(nextRow);
+        }
         try {
             localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
         } catch (_) {}
+
+        const progressList = document.querySelector('.progress-list');
+        if (progressList) {
+            const existingTasks = Array.from(progressList.querySelectorAll('.progress-item'));
+            const existsInDOM = existingTasks.some(item => {
+                const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
+                const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
+                return assignee === employeeName && desc === taskDescription;
+            });
+            if (!existsInDOM) {
+                if (typeof window.createTaskItem === 'function') {
+                    window.createTaskItem(progressList, employeeName, taskDescription);
+                } else if (typeof createTaskItem === 'function') {
+                    createTaskItem(progressList, employeeName, taskDescription);
+                }
+            }
+        }
         notifyTaskAssigned(employeeName, taskDescription);
     }
     return { ok: true };
 }
 
 // Remove a task from an employee
-function removeTask(employeeName, taskDescription) {
+function removeTask(employeeName, taskDescription, shiftId = null) {
+    const shiftIdFilter = shiftId ? String(shiftId) : null;
     // Remove from window.kitchenTasks
     if (typeof window.kitchenTasks !== 'undefined') {
         const removedTask = window.kitchenTasks.find(t =>
-            t.assignee === employeeName && t.description === taskDescription
+            t.assignee === employeeName &&
+            t.description === taskDescription &&
+            (!shiftIdFilter || String(t.shift_id || '') === shiftIdFilter)
         );
 
         window.kitchenTasks = window.kitchenTasks.filter(task => 
-            !(task.assignee === employeeName && task.description === taskDescription)
+            !(
+                task.assignee === employeeName &&
+                task.description === taskDescription &&
+                (!shiftIdFilter || String(task.shift_id || '') === shiftIdFilter)
+            )
         );
         
         // Save to localStorage
@@ -3198,7 +3647,10 @@ function removeTask(employeeName, taskDescription) {
             const query = window.supabaseClient.from('tasks').delete().eq('org_id', window.ORG_ID);
             const deletion = removedTask?.supabase_id
                 ? query.eq('id', removedTask.supabase_id)
-                : query.eq('text', taskDescription);
+                : query
+                    .eq('text', taskDescription)
+                    .eq('employee_name', employeeName)
+                    .eq('shift_id', shiftIdFilter || null);
             deletion.then(({ error }) => {
                 if (error) console.warn('[Supabase] Task delete failed:', error.message);
             });
@@ -3485,15 +3937,9 @@ function assigneeMatchesEmployeeName(assignee, employeeName) {
         if (canAssignee && me === canAssignee) return true;
         if (canCard && me === canCard) return true;
     }
-    const rawTokens = raw.split(/\s+/).filter(Boolean);
-    const meTokens = me.split(/\s+/).filter(Boolean);
-    const rawFirst = rawTokens[0] || '';
-    const meFirst = meTokens[0] || '';
-    if (rawFirst && meFirst && rawFirst === meFirst) return true;
+    // Full-string contains only (no "same first name" shortcut — avoids cross-matching people).
     if (raw.startsWith(`${me} `) || raw.endsWith(` ${me}`) || raw.includes(` ${me} `)) return true;
     if (me.startsWith(`${raw} `) || me.endsWith(` ${raw}`) || me.includes(` ${raw} `)) return true;
-    if (rawTokens.length === 1 && meFirst === raw) return true;
-    if (meTokens.length === 1 && rawFirst === me) return true;
     return false;
 }
 
@@ -3502,7 +3948,12 @@ function getEmployeeTasksForCardPreview(employeeName, max = 3) {
     const out = [];
     if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
         for (const task of window.kitchenTasks) {
-            if (task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName) && task.description) {
+            if (
+                kitchenTaskIsActive(task) &&
+                task.assignee &&
+                assigneeMatchesEmployeeName(task.assignee, employeeName) &&
+                task.description
+            ) {
                 out.push({ text: task.description, completed: !!task.completed });
                 if (out.length >= max) break;
             }
@@ -3516,7 +3967,9 @@ function employeeHasTasks(employeeName) {
     // Check in window.kitchenTasks
     if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
         const hasTask = window.kitchenTasks.some(task =>
-            task.assignee && assigneeMatchesEmployeeName(task.assignee, employeeName)
+            kitchenTaskIsActive(task) &&
+            task.assignee &&
+            assigneeMatchesEmployeeName(task.assignee, employeeName)
         );
         if (hasTask) return true;
     }
@@ -3526,6 +3979,8 @@ function employeeHasTasks(employeeName) {
     if (progressList) {
         const taskItems = progressList.querySelectorAll('.progress-item');
         for (const item of taskItems) {
+            const isCompleted = item.dataset.completed === 'true' || item.classList.contains('task-completed');
+            if (isCompleted) continue;
             const assigneeEl = item.querySelector('.task-assignee');
             if (assigneeEl && assigneeMatchesEmployeeName(assigneeEl.textContent, employeeName)) {
                 return true;
@@ -3536,50 +3991,14 @@ function employeeHasTasks(employeeName) {
     return false;
 }
 
-// Update shift card visual indicator based on task status
+// Shift cards are clean — no task warnings or previews pulled from global employee tasks.
+// Tasks are managed separately; shifts and tasks are independent.
 function updateShiftCardTaskIndicator(shiftCard, employeeName) {
-    const hasTasks = employeeHasTasks(employeeName);
-    
-    // Remove existing warning indicator
     const existingWarning = shiftCard.querySelector('.task-warning');
-    if (existingWarning) {
-        existingWarning.remove();
-    }
+    if (existingWarning) existingWarning.remove();
     const existingPreview = shiftCard.querySelector('.shift-task-preview');
-    if (existingPreview) {
-        existingPreview.remove();
-    }
-    
-    // Remove warning class
+    if (existingPreview) existingPreview.remove();
     shiftCard.classList.remove('no-tasks-warning');
-    
-    if (!hasTasks) {
-        // Add warning class for yellow background
-        shiftCard.classList.add('no-tasks-warning');
-        
-        // Add warning indicator
-        const warningDiv = document.createElement('div');
-        warningDiv.className = 'task-warning';
-        warningDiv.innerHTML = `
-            <i class="fas fa-exclamation-triangle"></i>
-            <span class="warning-text">This employee has not been assigned any tasks</span>
-        `;
-        shiftCard.appendChild(warningDiv);
-    } else {
-        const lines = getEmployeeTasksForCardPreview(employeeName, 3);
-        if (lines.length > 0) {
-            const preview = document.createElement('div');
-            preview.className = 'shift-task-preview';
-            preview.setAttribute('aria-label', 'Assigned tasks');
-            lines.forEach(({ text, completed }) => {
-                const span = document.createElement('span');
-                span.className = 'shift-task-preview-line' + (completed ? ' completed' : '');
-                span.textContent = text;
-                preview.appendChild(span);
-            });
-            shiftCard.appendChild(preview);
-        }
-    }
 }
 
 // Check all shift cards for task status
@@ -3678,9 +4097,7 @@ notificationStyles.textContent = `
 document.head.appendChild(notificationStyles);
 
 // ── Supabase task sync ────────────────────────────────────────────────────────
-// When the Supabase client is ready:
-// 1) Push any tasks in localStorage that never made it to Supabase (fixes orphaned tasks)
-// 2) Pull tasks from DB and merge into window.kitchenTasks
+// When Supabase is ready, treat DB task rows as the source of truth for web task UI.
 window.addEventListener('supabase-ready', async function () {
     if (!window.supabaseClient || !window.ORG_ID) return;
     loadRecentAnnouncements();
@@ -3693,60 +4110,15 @@ window.addEventListener('supabase-ready', async function () {
         await loadEmployeePositionsFromSupabase();
     }
 
-    // 1) Sync localStorage tasks → Supabase (tasks assigned before insert fix)
-    const toSync = window.kitchenTasks.filter(t => !t.supabase_id && !t.completed);
-    for (const t of toSync) {
-        const canonicalName = (t.assignee && typeof window.getCanonicalEmployeeName === 'function')
-            ? window.getCanonicalEmployeeName(t.assignee)
-            : (t.assignee || null);
-        const assigneeId = (canonicalName && typeof window.getEmployeeIdFromName === 'function')
-            ? window.getEmployeeIdFromName(canonicalName) || window.getEmployeeIdFromName(t.assignee)
-            : null;
-        const payload = {
-            org_id: window.ORG_ID,
-            text: t.description,
-            employee_name: canonicalName,
-            employee_id: assigneeId,
-            status: 'todo',
-            is_urgent: false,
-        };
-        let { data, error } = await window.supabaseClient.from('tasks').insert(payload).select().single();
-        // Legacy schema fallback (tasks.assigned_to instead of tasks.employee_name)
-        if (error && /employee_name/i.test(error.message || '')) {
-            const fallback = { ...payload };
-            delete fallback.employee_name;
-            const retry = await window.supabaseClient.from('tasks').insert(fallback).select().single();
-            data = retry.data;
-            error = retry.error;
-        }
-        if (!error && data) {
-            t.supabase_id = data.id;
-        } else if (error) {
-            console.warn('[Supabase] Could not sync local task to DB:', error.message);
-        }
-    }
-    if (toSync.length > 0) {
-        localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-    }
-
-    // 2) Pull from DB and merge into kitchenTasks
     const { data: tasks, error } = await window.supabaseClient
         .from('tasks')
         .select('*')
-        .eq('org_id', window.ORG_ID)
-        .neq('status', 'completed');
+        .eq('org_id', window.ORG_ID);
 
     if (error) { console.warn('[Supabase] Task load failed:', error.message); return; }
-    if (!tasks?.length) {
-        if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
-        return;
-    }
-
-    let added = 0;
-    tasks.forEach(task => {
-        const local = window.kitchenTasks.find(t =>
-            t.description === task.text && t.supabase_id === task.id
-        );
+    const nextKitchenTasks = [];
+    (tasks || []).forEach(task => {
+        if (schedulingTaskRowCompleted(task)) return;
         const nameKey =
             (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
             || task.employee_name
@@ -3757,24 +4129,19 @@ window.addEventListener('supabase-ready', async function () {
                 ? window.getEmployeeDisplayName(nameKey)
                 : null) || nameKey)
             : 'Unassigned';
-        if (!local) {
-            window.kitchenTasks.push({
-                assignee: mappedName,
-                description: task.text,
-                timestamp: task.created_at,
-                completed: task.status === 'completed',
-                supabase_id: task.id
-            });
-            added++;
-        } else if (local.assignee !== mappedName) {
-            local.assignee = mappedName;
-            added++;
-        }
+        const kt = {
+            assignee: mappedName,
+            description: task.text,
+            timestamp: task.created_at,
+            completed: false,
+            supabase_id: task.id
+        };
+        if (task.shift_id) kt.shift_id = task.shift_id;
+        nextKitchenTasks.push(kt);
     });
 
-    if (added > 0) {
-        localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-        if (typeof loadStoredTasks === 'function') loadStoredTasks();
-    }
+    window.kitchenTasks = nextKitchenTasks;
+    localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+    if (typeof loadStoredTasks === 'function') loadStoredTasks();
     if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
 });

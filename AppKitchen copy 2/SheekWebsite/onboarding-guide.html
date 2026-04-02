@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Setup guide — Sheek</title>
+  <meta name="description" content="After you subscribe: add staff, build schedules, and roll out the mobile app." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="index.html" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#pricing">Pricing</a>
+        <a href="onboard/index.html">Get started</a>
+        <a href="index.html#contact">Contact</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+        <a class="btn btn-primary" href="onboard/index.html">Onboard</a>
+        <button type="button" class="menu-toggle" aria-expanded="false" aria-label="Open menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+    <nav class="nav-mobile" hidden>
+      <a href="index.html#features">Features</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a href="onboard/index.html">Get started</a>
+      <a href="index.html#contact">Contact</a>
+      <a data-sheek-login href="#">Log in</a>
+      <a class="btn btn-primary nav-mobile-cta" href="onboard/index.html">Onboard</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="section onboarding-hero">
+      <div class="wrap">
+        <p class="eyebrow">After checkout</p>
+        <h1 class="section-title onboarding-hero-title">Setup guide</h1>
+        <p class="section-sub onboarding-hero-sub" style="max-width: 640px;">
+          New restaurants start with the <a href="onboard/index.html" style="color: var(--accent);">three-step onboard flow</a> (manager details → restaurant &amp; plan → payment).
+          Use this page as a checklist once you’re in the dashboard.
+        </p>
+      </div>
+    </section>
+
+    <section class="section onboarding-steps-wrap">
+      <div class="wrap">
+        <ol class="onboarding-steps">
+          <li class="onboarding-step">
+            <span class="step-num">1</span>
+            <div class="step-body">
+              <h2>Add your team</h2>
+              <p>Add people to the roster with roles and contact info. Limits follow your subscription tier (Starter / Growth / Scale).</p>
+              <a class="btn btn-outline" data-sheek-app="employees.html" href="#">Go to Employees</a>
+            </div>
+          </li>
+          <li class="onboarding-step">
+            <span class="step-num">2</span>
+            <div class="step-body">
+              <h2>Build the schedule</h2>
+              <p>Assign shifts by day, handle requests, and link tasks to shifts when you’re ready.</p>
+              <a class="btn btn-outline" data-sheek-app="scheduling.html" href="#">Go to Scheduling</a>
+            </div>
+          </li>
+          <li class="onboarding-step">
+            <span class="step-num">3</span>
+            <div class="step-body">
+              <h2>Billing &amp; plan changes</h2>
+              <p>Open <strong>Admin Settings</strong> (your name in the top-right) to manage Stripe billing or update payment details.</p>
+              <a class="btn btn-outline" data-sheek-dashboard href="#">Open dashboard</a>
+            </div>
+          </li>
+          <li class="onboarding-step">
+            <span class="step-num">4</span>
+            <div class="step-body">
+              <h2>Invite staff to the app</h2>
+              <p>
+                Share the <strong>Sheek mobile app</strong> install link your team uses. Each person signs in with the <strong>same email</strong> you added under Employees.
+              </p>
+              <p class="step-note"><i class="fas fa-mobile-alt" aria-hidden="true"></i> Everyone stays on the <strong>same restaurant</strong> as the manager dashboard.</p>
+            </div>
+          </li>
+        </ol>
+
+        <div class="onboarding-cta-band">
+          <p>Need to create another restaurant?</p>
+          <a class="btn btn-light" href="onboard/index.html">Start onboard flow</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i> Sheek
+      </div>
+      <p class="footer-copy">&copy; <span id="y"></span> Sheek. <a href="index.html">Home</a> · <a href="onboard/index.html">Get started</a></p>
+    </div>
+  </footer>
+
+  <script src="site-config.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

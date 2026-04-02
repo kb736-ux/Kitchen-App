@@ -1,0 +1,51 @@
+Stripe + Sheek — deploy checklist
+==================================
+
+1) Supabase SQL
+   Run: KennyKitchenWeb/stripe-org-billing.sql (adds stripe_* columns on orgs).
+
+2) Stripe Dashboard
+   - Create three recurring Prices (monthly or yearly) for Starter / Growth / Scale.
+   - Copy each Price id (price_...).
+
+3) Stripe → Developers → Webhooks
+   - Endpoint URL: https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/stripe-webhook
+   - Events: checkout.session.completed, customer.subscription.created,
+     customer.subscription.updated, customer.subscription.deleted
+   - Copy the webhook signing secret (whsec_...).
+
+4) Stripe → Settings → Customer portal
+   - Enable the portal and allow customers to switch plans (add your three prices).
+
+5) Supabase CLI (install from https://supabase.com/docs/guides/cli)
+   cd "AppKitchen copy 2"
+   supabase login
+   supabase link --project-ref <YOUR_PROJECT_REF>
+
+   supabase secrets set STRIPE_SECRET_KEY=sk_live_... \
+     STRIPE_PUBLISHABLE_KEY=pk_live_... \
+     STRIPE_WEBHOOK_SECRET=whsec_... \
+     STRIPE_PRICE_STARTER=price_... \
+     STRIPE_PRICE_GROWTH=price_... \
+     STRIPE_PRICE_SCALE=price_...
+
+   STRIPE_PUBLISHABLE_KEY is required for the embedded “Pay on this site” flow
+   (stripe-checkout.html + stripe-subscribe-elements function). Hosted Checkout
+   does not need the publishable key on the server, but setting it is harmless.
+
+   supabase functions deploy stripe-checkout
+   supabase functions deploy stripe-portal
+   supabase functions deploy stripe-subscribe-elements
+   supabase functions deploy stripe-webhook
+
+   In Supabase Dashboard → Edge Functions → stripe-webhook: disable JWT verification
+   (Stripe calls this endpoint with the signing secret, not a user JWT).
+   Checkout and portal should require JWT (see supabase/config.toml).
+
+6) Test
+   - Serve the web app over http://localhost (not file://) so return URLs work.
+   - Admin → Subscribe with Stripe → complete test payment.
+   - Confirm org row: stripe_subscription_id, subscription_plan updated.
+
+Secrets already available to Edge Functions (do not set manually unless needed):
+SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY

@@ -15,6 +15,41 @@ const DAYS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 const SHORT_MONTHS_HP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
+function normEmployeeKey(v) {
+  return (v || '').trim().toLowerCase();
+}
+
+function buildProfileDisplayLabel(p) {
+  const firstLast = [p?.first_name, p?.last_name].filter(Boolean).join(' ').trim();
+  return firstLast || (p?.display_name || '').trim() || (p?.employee_name || '').trim();
+}
+
+/** Map normalized name keys → best display label (matches Schedule / web dashboard behavior). */
+function buildEmployeeDisplayLabelMap(profiles) {
+  const map = new Map();
+  (profiles || []).forEach((p) => {
+    const label = buildProfileDisplayLabel(p);
+    if (!label) return;
+    const keys = [
+      normEmployeeKey(p.employee_name),
+      normEmployeeKey(p.display_name),
+      normEmployeeKey(label),
+      normEmployeeKey(p.first_name),
+      normEmployeeKey(p.last_name),
+    ].filter(Boolean);
+    keys.forEach((k) => {
+      if (!map.has(k)) map.set(k, label);
+    });
+  });
+  return map;
+}
+
+function resolveEmployeeDisplayLabel(labelMap, raw) {
+  const key = normEmployeeKey(raw);
+  if (!key) return (raw || '').trim();
+  return labelMap.get(key) || (raw || '').trim();
+}
+
 const HomePage = ({
   orgId,
   currentOrgName = '',
@@ -37,6 +72,7 @@ const HomePage = ({
   const welcomeName = (profileData?.displayName || displayName || employeeName || '').trim() || employeeName;
   const [shiftDates, setShiftDates] = useState(new Set());
   const [announcements, setAnnouncements] = useState([]);
+  const [recentRequests, setRecentRequests] = useState([]);
   const [newShiftNotifCount, setNewShiftNotifCount] = useState(0);
 
   // Day roster modal
@@ -52,6 +88,7 @@ const HomePage = ({
     if (!orgId || authLoading) return;
     fetchWeekShifts();
     fetchAnnouncements();
+    fetchRecentRequests();
     fetchNewShiftNotifCount();
   }, [
     orgId,
@@ -66,14 +103,34 @@ const HomePage = ({
     defaultEmployeeName,
     profileData?.displayName,
     profileData?.employeeNameFromProfile,
+    profileData?.firstName,
+    profileData?.lastName,
   ]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && orgId) fetchNewShiftNotifCount();
+      if (state === 'active' && orgId) {
+        fetchNewShiftNotifCount();
+        fetchRecentRequests();
+      }
     });
     return () => sub?.remove();
-  }, [orgId]);
+  }, [
+    orgId,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    email,
+    firstName,
+    lastName,
+    defaultEmployeeName,
+    profileData?.displayName,
+    profileData?.employeeNameFromProfile,
+    profileData?.firstName,
+    profileData?.lastName,
+  ]);
 
   async function fetchNewShiftNotifCount() {
     if (!orgId) return;
@@ -167,6 +224,121 @@ const HomePage = ({
     if (data) setAnnouncements(data);
   }
 
+  async function fetchRecentRequests() {
+    if (!orgId || authLoading) return;
+    const since = new Date();
+    since.setDate(since.getDate() - 14);
+    const sinceIso = since.toISOString();
+
+    const candidateNames = Array.from(
+      new Set(
+        [
+          employeeName,
+          displayName,
+          defaultEmployeeName,
+          [firstName, lastName].filter(Boolean).join(' ').trim(),
+          (email || '').split('@')[0],
+          profileData?.displayName,
+          profileData?.employeeNameFromProfile,
+          [profileData?.firstName, profileData?.lastName].filter(Boolean).join(' ').trim(),
+        ]
+          .map((n) => (n || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const { data, error } = await supabase
+      .from('shift_requests')
+      .select('id, employee_name, request_type, status, note, target_employee, shift_id, created_at, time_off_start_date, time_off_end_date')
+      .eq('org_id', orgId)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(80);
+
+    if (error) {
+      console.warn('[Home] fetchRecentRequests failed:', error.message);
+      setRecentRequests([]);
+      return;
+    }
+
+    const mine = (data || [])
+      .map((row) => {
+        const isRequester = shiftRowMatchesEmployee(
+          { employee_name: row.employee_name, employee_id: null },
+          employeeId,
+          candidateNames,
+          authUserId
+        );
+        const isIncomingRecipient =
+          !!row.target_employee &&
+          shiftRowMatchesEmployee(
+            { employee_name: row.target_employee, employee_id: null },
+            employeeId,
+            candidateNames,
+            authUserId
+          );
+        if (!isRequester && !isIncomingRecipient) return null;
+        const requestRole = isRequester ? 'outgoing' : 'incoming';
+        return { ...row, requestRole };
+      })
+      .filter(Boolean);
+
+    const shiftIds = [...new Set(mine.map((r) => r.shift_id).filter(Boolean))];
+    let shiftMap = {};
+    if (shiftIds.length > 0) {
+      const { data: shiftRows } = await supabase
+        .from('shifts')
+        .select('id, shift_date, start_time, end_time, position')
+        .in('id', shiftIds);
+      (shiftRows || []).forEach((s) => {
+        shiftMap[s.id] = s;
+      });
+    }
+
+    const { data: profRows, error: profErr } = await supabase
+      .from('profiles')
+      .select('employee_name, display_name, first_name, last_name')
+      .eq('org_id', orgId);
+    if (profErr) {
+      console.warn('[Home] fetchRecentRequests profiles:', profErr.message);
+    }
+    const displayLabelMap = buildEmployeeDisplayLabelMap(profRows);
+
+    setRecentRequests(
+      mine.map((r) => ({
+        ...r,
+        shift: r.shift_id ? shiftMap[r.shift_id] || null : null,
+        _requesterDisplayName: resolveEmployeeDisplayLabel(displayLabelMap, r.employee_name),
+        _targetDisplayName: r.target_employee
+          ? resolveEmployeeDisplayLabel(displayLabelMap, r.target_employee)
+          : null,
+      }))
+    );
+  }
+
+  async function deleteShiftRequest(requestId) {
+    if (!requestId) return;
+    const { error } = await supabase.from('shift_requests').delete().eq('id', requestId);
+    if (error) {
+      console.warn('[Home] deleteShiftRequest failed:', error.message);
+      Alert.alert('Could not delete', error.message || 'You may not have permission to remove this request.');
+      return;
+    }
+    setRecentRequests((prev) => prev.filter((r) => r.id !== requestId));
+  }
+
+  function confirmDeleteRequest(req) {
+    if (!req?.id) return;
+    Alert.alert(
+      'Delete request',
+      'Remove this request? Managers will no longer see it in the queue.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteShiftRequest(req.id) },
+      ]
+    );
+  }
+
   const openDayRoster = async (dateStr) => {
     setRosterDate(dateStr);
     setRosterShifts([]);
@@ -213,6 +385,55 @@ const HomePage = ({
     const [h, m] = t.split(':');
     const hr = parseInt(h);
     return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const formatRequestStatus = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    if (s === 'approved' || s === 'accepted') return 'Accepted';
+    if (s === 'denied' || s === 'declined') return 'Denied';
+    return 'Awaiting approval';
+  };
+
+  const getRequestStatusStyle = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    if (s === 'approved' || s === 'accepted') return styles.requestStatusAccepted;
+    if (s === 'denied' || s === 'declined') return styles.requestStatusDenied;
+    return styles.requestStatusPending;
+  };
+
+  const formatRequestDetail = (req) => {
+    if (!req) return '';
+    if (req.request_type === 'time_off') {
+      const start = req.time_off_start_date ? formatShiftDate(req.time_off_start_date) : '';
+      const end = req.time_off_end_date && req.time_off_end_date !== req.time_off_start_date
+        ? formatShiftDate(req.time_off_end_date)
+        : '';
+      return end ? `${start} to ${end}` : start || req.note || 'Requested time off';
+    }
+    if (req.shift?.shift_date) {
+      const time = req.shift.start_time ? ` · ${formatTime(req.shift.start_time)} – ${formatTime(req.shift.end_time)}` : '';
+      return `${formatShiftDate(req.shift.shift_date)}${time}`;
+    }
+    return req.note || 'Shift transfer request';
+  };
+
+  const requestRowTitle = (req) => {
+    if (req.request_type === 'time_off') return 'Time Off';
+    if (req.requestRole === 'incoming') return 'Shift transferred to you';
+    return 'Your shift transfer';
+  };
+
+  const requestRowMeta = (req) => {
+    if (req.request_type === 'time_off') return null;
+    if (req.requestRole === 'incoming') {
+      const from = (req._requesterDisplayName || req.employee_name || '').trim();
+      return from ? `From ${from}` : null;
+    }
+    if (req.target_employee) {
+      const to = (req._targetDisplayName || req.target_employee || '').trim();
+      return to ? `Transfer to ${to}` : null;
+    }
+    return null;
   };
 
   const formatShiftDate = (dateStr) => {
@@ -419,6 +640,48 @@ const HomePage = ({
             ))}
           </View>
         )}
+
+        <View style={styles.requestsCard}>
+          <View style={styles.requestsHeader}>
+            <Ionicons name="time-outline" size={16} color="#2b6cb0" />
+            <Text style={styles.requestsTitle}>Your Requests</Text>
+          </View>
+          {recentRequests.length > 0 ? (
+            <Text style={styles.requestsHint}>Hold a request to delete it</Text>
+          ) : null}
+          {recentRequests.length === 0 ? (
+            <Text style={styles.requestsEmpty}>You have no pending requests</Text>
+          ) : (
+            recentRequests.map((req, i) => {
+              const meta = requestRowMeta(req);
+              return (
+                <TouchableOpacity
+                  key={req.id || `${req.created_at}-${i}`}
+                  style={styles.requestRowOutline}
+                  activeOpacity={0.92}
+                  delayLongPress={450}
+                  onLongPress={() => confirmDeleteRequest(req)}
+                  accessibilityLabel={`${requestRowTitle(req)}, ${formatRequestStatus(req.status)}. Long press to delete.`}
+                >
+                  <View style={styles.requestRow}>
+                    <View style={styles.requestRowTop}>
+                      <Text style={styles.requestType}>
+                        {requestRowTitle(req)}
+                      </Text>
+                      <View style={[styles.requestStatusPill, getRequestStatusStyle(req.status)]}>
+                        <Text style={styles.requestStatusText}>{formatRequestStatus(req.status)}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.requestDetail}>{formatRequestDetail(req)}</Text>
+                    {meta ? (
+                      <Text style={styles.requestMeta}>{meta}</Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
 
         {/* ── Urgent Tasks / Off Day ─────────────────────────────────────── */}
         {showWorkMode ? (
@@ -727,6 +990,37 @@ const styles = StyleSheet.create({
   announcementRowBorder: { borderTopWidth: 1, borderTopColor: '#fef08a' },
   announcementText: { fontSize: 14, color: '#78350f', fontWeight: '500', lineHeight: 20 },
   announcementMeta: { fontSize: 11, color: '#b7791f', marginTop: 3 },
+
+  requestsCard: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1.5,
+    borderColor: '#bfdbfe',
+  },
+  requestsHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  requestsTitle: { fontSize: 13, fontWeight: '700', color: '#1e3a8a', textTransform: 'uppercase', letterSpacing: 0.5 },
+  requestsHint: { fontSize: 12, color: '#64748b', marginBottom: 10 },
+  requestsEmpty: { fontSize: 14, color: '#475569', fontStyle: 'italic' },
+  requestRowOutline: {
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  requestRow: { paddingVertical: 10, paddingHorizontal: 12 },
+  requestRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  requestType: { fontSize: 14, fontWeight: '700', color: '#1e40af' },
+  requestDetail: { fontSize: 13, color: '#334155', marginTop: 6, lineHeight: 18 },
+  requestMeta: { fontSize: 12, color: '#64748b', marginTop: 4 },
+  requestStatusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  requestStatusPending: { backgroundColor: '#fef3c7' },
+  requestStatusAccepted: { backgroundColor: '#dcfce7' },
+  requestStatusDenied: { backgroundColor: '#fee2e2' },
+  requestStatusText: { fontSize: 11, fontWeight: '700', color: '#1f2937' },
 
   // Urgent tasks
   urgentCard: {

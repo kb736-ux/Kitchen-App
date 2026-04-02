@@ -1,0 +1,19 @@
+# Supabase CLI — https://supabase.com/docs/guides/cli
+# Run from repo: supabase link && supabase functions deploy stripe-checkout stripe-portal stripe-webhook stripe-onboard-checkout
+
+[functions.stripe-checkout]
+verify_jwt = true
+
+[functions.stripe-portal]
+verify_jwt = true
+
+# Embedded Payment Element (custom on-site card form)
+[functions.stripe-subscribe-elements]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Public marketing onboarding (creates auth user + Stripe Checkout; org created in webhook)
+[functions.stripe-onboard-checkout]
+verify_jwt = false

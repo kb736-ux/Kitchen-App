@@ -1742,14 +1742,20 @@ async function refreshProgress() {
                         local.assignee = mappedName;
                         changed = true;
                     }
+                    if (task.shift_id && String(local.shift_id || '') !== String(task.shift_id)) {
+                        local.shift_id = task.shift_id;
+                        changed = true;
+                    }
                 } else if (task.status !== 'completed') {
-                    window.kitchenTasks.push({
+                    const row = {
                         assignee: mappedName,
                         description: task.text,
                         timestamp: task.created_at,
                         completed: false,
                         supabase_id: task.id
-                    });
+                    };
+                    if (task.shift_id) row.shift_id = task.shift_id;
+                    window.kitchenTasks.push(row);
                     changed = true;
                 }
             });
@@ -1912,9 +1918,8 @@ window.addUrgentTaskFromWeb = async function() {
     const rawName = (assignSelect?.value || '').trim() || null;
     const employeeName = rawName && typeof window.getCanonicalEmployeeName === 'function'
         ? window.getCanonicalEmployeeName(rawName) : rawName;
-
-    const assigneeId = typeof window.getEmployeeIdFromName === 'function'
-        ? (window.getEmployeeIdFromName(employeeName) || window.getEmployeeIdFromName(rawName))
+    const employeeId = employeeName && typeof window.getEmployeeIdFromName === 'function'
+        ? window.getEmployeeIdFromName(employeeName)
         : null;
 
     let { error } = await window.supabaseClient
@@ -1923,7 +1928,7 @@ window.addUrgentTaskFromWeb = async function() {
             org_id: window.ORG_ID,
             text: text,
             employee_name: employeeName || null,
-            employee_id: assigneeId,
+            employee_id: employeeId || null,
             status: 'todo',
             is_urgent: true,
         });
@@ -1935,7 +1940,7 @@ window.addUrgentTaskFromWeb = async function() {
             .insert({
                 org_id: window.ORG_ID,
                 text: text,
-                    employee_id: assigneeId,
+                employee_id: employeeId || null,
                 status: 'todo',
                 is_urgent: true,
             });
@@ -2003,11 +2008,28 @@ async function removeUrgentTask(taskId) {
     loadUrgentTasks();
 };
 
-function dashboardTaskRowCompleted(t) {
+function webTaskRowCompleted(t) {
     const st = (t?.status || '').toString().trim().toLowerCase();
-    if (['completed', 'complete', 'done', 'archived'].includes(st)) return true;
+    if (['completed', 'complete', 'done', 'archived', 'cancelled'].includes(st)) return true;
     if (t?.completed_at) return true;
     return false;
+}
+
+function dashboardTaskRowCompleted(t) {
+    return webTaskRowCompleted(t);
+}
+
+/** Team overview counts: skip completions from prior days; keep open tasks + anything finished today (local date). */
+function dashboardTaskCountsTowardToday(t, todayStr) {
+    if (!dashboardTaskRowCompleted(t)) return true;
+    const ymd = (iso) => {
+        if (!iso) return null;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return null;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const doneDay = ymd(t.completed_at) || ymd(t.created_at);
+    return doneDay === todayStr;
 }
 
 function dashboardTaskAssigneeDisplayName(task) {
@@ -2029,7 +2051,7 @@ async function loadTodayShifts() {
     const [shiftsRes, positionsRes, tasksRes] = await Promise.all([
         window.supabaseClient
             .from('shifts')
-            .select('employee_name, position, start_time')
+            .select('id, employee_name, position, start_time')
             .eq('org_id', window.ORG_ID)
             .eq('shift_date', todayStr)
             .order('start_time', { ascending: true }),
@@ -2048,13 +2070,17 @@ async function loadTodayShifts() {
     const shifts = shiftsRes.data || [];
     const positions = positionsRes.data || [];
     const taskRows = tasksRes.data || [];
+    const taskRowsForTodaySummary = taskRows.filter((t) => dashboardTaskCountsTowardToday(t, todayStr));
 
     const onShiftToday = new Map();
+    const todayShiftIdsByEmployee = new Map();
     shifts.forEach((s) => {
         const name = (s.employee_name || '').trim();
         if (!name) return;
         const key = dashboardNormName(name);
         if (!onShiftToday.has(key)) onShiftToday.set(key, s);
+        if (!todayShiftIdsByEmployee.has(key)) todayShiftIdsByEmployee.set(key, new Set());
+        if (s.id != null) todayShiftIdsByEmployee.get(key).add(String(s.id));
     });
     window.todayShiftNames = new Set(shifts.map((s) => s.employee_name).filter(Boolean));
 
@@ -2075,10 +2101,15 @@ async function loadTodayShifts() {
     }
 
     const countsByKey = new Map();
-    taskRows.forEach((t) => {
+    taskRowsForTodaySummary.forEach((t) => {
         const assignee = dashboardTaskAssigneeDisplayName(t);
         if (!assignee || assignee.toLowerCase() === 'unassigned') return;
         const key = dashboardNormName(assignee);
+        const taskShiftId = t?.shift_id != null ? String(t.shift_id) : null;
+        const allowedShiftIds = todayShiftIdsByEmployee.get(key) || null;
+        if (allowedShiftIds && allowedShiftIds.size > 0) {
+            if (!taskShiftId || !allowedShiftIds.has(taskShiftId)) return;
+        }
         if (!countsByKey.has(key)) countsByKey.set(key, { total: 0, done: 0 });
         const c = countsByKey.get(key);
         c.total += 1;
@@ -2154,37 +2185,162 @@ window.addEventListener('supabase-ready', async function () {
 
     if (error) { console.warn('[Supabase] Dashboard task load failed:', error.message); return; }
 
-    if (typeof window.kitchenTasks === 'undefined') window.kitchenTasks = [];
-
-    let changed = false;
+    const nextKitchenTasks = [];
     (tasks || []).forEach(task => {
-        const local = window.kitchenTasks.find(t => t.supabase_id === task.id);
-        const mappedName = (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null) || 'Unassigned';
-        if (local) {
-            // Update status in case employee completed it on mobile
-            if (local.completed !== (task.status === 'completed')) {
-                local.completed = task.status === 'completed';
-                changed = true;
-            }
-            if (local.assignee !== mappedName) {
-                local.assignee = mappedName;
-                changed = true;
-            }
-        } else if (task.status !== 'completed') {
-            window.kitchenTasks.push({
-                assignee: mappedName,
-                description: task.text,
-                timestamp: task.created_at,
-                completed: false,
-                supabase_id: task.id
-            });
-            changed = true;
-        }
+        if (webTaskRowCompleted(task)) return;
+        const nameKey =
+            (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
+            || task.employee_name
+            || task.assigned_to
+            || null;
+        const mappedName = nameKey
+            ? ((typeof window.getEmployeeDisplayName === 'function'
+                ? window.getEmployeeDisplayName(nameKey)
+                : null) || nameKey)
+            : 'Unassigned';
+        const row = {
+            assignee: mappedName,
+            description: task.text,
+            timestamp: task.created_at,
+            completed: false,
+            supabase_id: task.id
+        };
+        if (task.shift_id) row.shift_id = task.shift_id;
+        nextKitchenTasks.push(row);
     });
 
-    if (changed) localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+    window.kitchenTasks = nextKitchenTasks;
+    localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
     loadStoredTasks(); // Re-render Kitchen Progress from merged kitchenTasks
 
     loadUrgentTasks();
     updateNavNotifBadge();
 });
+
+/**
+ * True if task.assignee / employee_name matches the previous shift holder (handles "Rohan" vs "Rohan Kumar").
+ */
+function taskAssigneeMatchesPrevious(taskEmployeeName, previousEmployeeName) {
+    const a = String(taskEmployeeName || '').trim().toLowerCase();
+    const b = String(previousEmployeeName || '').trim().toLowerCase();
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const bParts = b.split(/\s+/).filter(Boolean);
+    if (bParts.length && bParts.every((p) => a.includes(p))) return true;
+    const aParts = a.split(/\s+/).filter(Boolean);
+    if (aParts.length && aParts.every((p) => b.includes(p))) return true;
+    return false;
+}
+
+/** If shiftDateYmd is set, require created_at or due_at on that calendar day (or both missing = allow). */
+function taskDateMatchesShiftDay(task, shiftDateYmd) {
+    if (!shiftDateYmd) return true;
+    const ca = task.created_at ? String(task.created_at).slice(0, 10) : '';
+    const da = task.due_at ? String(task.due_at).slice(0, 10) : '';
+    if (!ca && !da) return true;
+    return ca === shiftDateYmd || da === shiftDateYmd;
+}
+
+/**
+ * When a shift is reassigned, move tasks linked by tasks.shift_id and legacy rows (null shift_id)
+ * still assigned to the previous employee for that shift day.
+ *
+ * opts: { previousEmployeeName?: string, shiftDate?: string } — pass from approve-transfer after reading the shift row.
+ */
+window.transferTasksForShift = async function transferTasksForShift(shiftId, newEmployeeName, newEmployeeId, opts) {
+    opts = opts || {};
+    if (!shiftId || !window.supabaseClient || !window.ORG_ID) return { ok: true, skipped: true };
+    const nameForTask =
+        (typeof window.getCanonicalEmployeeName === 'function'
+            ? window.getCanonicalEmployeeName(newEmployeeName)
+            : null) || newEmployeeName;
+    const payload = {
+        employee_name: nameForTask,
+        employee_id: newEmployeeId || null,
+    };
+
+    const { error } = await window.supabaseClient
+        .from('tasks')
+        .update(payload)
+        .eq('org_id', window.ORG_ID)
+        .eq('shift_id', shiftId);
+
+    if (error) {
+        const msg = error.message || '';
+        if (/shift_id|column|does not exist|42703/i.test(msg)) {
+            console.warn('[transferTasksForShift] shift_id batch update skipped —', msg);
+        } else {
+            console.warn('[transferTasksForShift] Update failed:', msg);
+            return { ok: false, error: msg };
+        }
+    }
+
+    const prev = (opts.previousEmployeeName || '').trim();
+    const shiftDay = (opts.shiftDate || '').trim();
+    if (prev) {
+        const { data: legacyRows, error: legErr } = await window.supabaseClient
+            .from('tasks')
+            .select('id, employee_name, created_at, due_at, shift_id')
+            .eq('org_id', window.ORG_ID)
+            .is('shift_id', null);
+        if (legErr) {
+            console.warn('[transferTasksForShift] legacy task fetch failed:', legErr.message);
+        } else {
+            const ids = (legacyRows || [])
+                .filter(
+                    (t) =>
+                        taskAssigneeMatchesPrevious(t.employee_name, prev) &&
+                        taskDateMatchesShiftDay(t, shiftDay)
+                )
+                .map((t) => t.id)
+                .filter(Boolean);
+            if (ids.length) {
+                const withShift = { ...payload, shift_id: shiftId };
+                let { error: u2 } = await window.supabaseClient
+                    .from('tasks')
+                    .update(withShift)
+                    .eq('org_id', window.ORG_ID)
+                    .in('id', ids);
+                if (u2 && /shift_id|column|does not exist|42703/i.test(u2.message || '')) {
+                    ({ error: u2 } = await window.supabaseClient
+                        .from('tasks')
+                        .update(payload)
+                        .eq('org_id', window.ORG_ID)
+                        .in('id', ids));
+                }
+                if (u2) {
+                    console.warn('[transferTasksForShift] legacy reassignment failed:', u2.message);
+                    return { ok: false, error: u2.message || 'Legacy task update failed' };
+                }
+            }
+        }
+    }
+
+    if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length) {
+        const displayName =
+            (typeof window.getEmployeeDisplayName === 'function'
+                ? window.getEmployeeDisplayName(newEmployeeName)
+                : null) || newEmployeeName;
+        let touched = false;
+        window.kitchenTasks.forEach((t) => {
+            const sid = t.shift_id;
+            const matchesShift = sid && String(sid) === String(shiftId);
+            const matchesLegacy =
+                prev &&
+                !sid &&
+                taskAssigneeMatchesPrevious(t.assignee, prev) &&
+                taskDateMatchesShiftDay({ created_at: t.timestamp, due_at: t.due_at }, shiftDay);
+            if (matchesShift || matchesLegacy) {
+                t.assignee = displayName;
+                if (matchesLegacy) t.shift_id = shiftId;
+                touched = true;
+            }
+        });
+        if (touched) {
+            try {
+                localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+            } catch (_) { /* ignore */ }
+        }
+    }
+    return { ok: true };
+};

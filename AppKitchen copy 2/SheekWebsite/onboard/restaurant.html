@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restaurant & plan — Sheek</title>
+  <meta name="description" content="Name your restaurant and choose a Sheek subscription tier." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="onboard-wizard-body">
+  <header class="site-header onboard-wizard-header">
+    <div class="wrap header-inner">
+      <a href="../index.html" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="../index.html#features">Features</a>
+        <a href="../index.html#pricing">Pricing</a>
+        <a href="index.html">Onboard</a>
+        <a href="../onboarding-guide.html">Setup guide</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="onboard-wizard-main">
+    <div class="wrap onboard-wizard-inner">
+      <p class="onboard-step-pill">Step 2 of 3</p>
+      <h1 class="onboard-wizard-title">Restaurant &amp; plan</h1>
+      <p class="onboard-wizard-lead">Choose how your restaurant appears in Sheek and which subscription tier fits your team size.</p>
+
+      <div class="onboarding-lead-card onboard-wizard-card onboard-wizard-card-wide">
+        <form id="onboard-step2-form" class="onboarding-lead-form">
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-restaurant">Restaurant name</label>
+            <input id="ob-restaurant" name="restaurant_name" type="text" autocomplete="organization" placeholder="e.g. Northside Diner" required />
+          </div>
+          <fieldset class="onboard-plan-fieldset">
+            <legend class="onboard-plan-legend">Subscription tier</legend>
+            <label class="onboard-plan-option">
+              <input type="radio" name="plan" value="starter" checked />
+              <span><strong>Starter</strong> — up to 20 employees</span>
+            </label>
+            <label class="onboard-plan-option">
+              <input type="radio" name="plan" value="growth" />
+              <span><strong>Growth</strong> — 21–40 employees</span>
+            </label>
+            <label class="onboard-plan-option">
+              <input type="radio" name="plan" value="scale" />
+              <span><strong>Scale</strong> — 41+ employees</span>
+            </label>
+          </fieldset>
+          <p id="ob2-err" class="onboarding-lead-error" role="alert" hidden></p>
+          <div class="onboard-wizard-actions">
+            <a class="btn btn-outline" href="index.html">Back</a>
+            <button type="submit" class="btn btn-primary">Continue</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="../onboard-config.js"></script>
+  <script src="../site-config.js"></script>
+  <script src="onboard.js"></script>
+  <script>
+    (function () {
+      document.addEventListener("DOMContentLoaded", function () {
+        if (!window.sheekOnboard.require(["first_name", "last_name", "email"], "index.html")) return;
+
+        var q = new URLSearchParams(window.location.search || "");
+        var qp = String(q.get("plan") || "").toLowerCase().trim();
+        var o = window.sheekOnboard.load();
+        var pref = qp === "starter" || qp === "growth" || qp === "scale" ? qp : o.pref_plan;
+        if (pref === "starter" || pref === "growth" || pref === "scale") {
+          var r = document.querySelector('input[name="plan"][value="' + pref + '"]');
+          if (r) r.checked = true;
+        }
+
+        var form = document.getElementById("onboard-step2-form");
+        var errEl = document.getElementById("ob2-err");
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          errEl.textContent = "";
+          errEl.setAttribute("hidden", "");
+          var name = String(document.getElementById("ob-restaurant").value || "").trim();
+          if (!name) {
+            errEl.textContent = "Enter your restaurant name.";
+            errEl.removeAttribute("hidden");
+            return;
+          }
+          var pr = form.querySelector('input[name="plan"]:checked');
+          var plan = pr ? String(pr.value || "").toLowerCase() : "starter";
+          window.sheekOnboard.save({ restaurant_name: name, plan: plan });
+          window.location.href = "payment.html";
+        });
+      });
+    })();
+  </script>
+  <script src="../main.js"></script>
+</body>
+</html>

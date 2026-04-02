@@ -262,6 +262,33 @@
                         <option value="sunday">Sunday</option>
                     </select>
                 </div>
+                <div class="form-group assign-shift-repeat-block">
+                    <label class="assign-shift-repeat-check">
+                        <input type="checkbox" id="assign-shift-repeat-enabled">
+                        Repeat this shift
+                    </label>
+                    <div id="assign-shift-repeat-options" class="assign-shift-repeat-options" hidden>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="assign-shift-repeat-interval">Repeat every</label>
+                            <select id="assign-shift-repeat-interval" class="form-control">
+                                <option value="weekly">Week (same weekday)</option>
+                                <option value="monthly">Month (same calendar date)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="assign-shift-repeat-end-mode">Stop repeating</label>
+                            <select id="assign-shift-repeat-end-mode" class="form-control">
+                                <option value="count">After a set number of occurrences</option>
+                                <option value="forever">Forever (fills ~5 years ahead)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="assign-shift-repeat-count-wrap">
+                            <label for="assign-shift-repeat-count">Number of occurrences</label>
+                            <input type="number" id="assign-shift-repeat-count" class="form-control" min="2" max="104" value="4">
+                            <p class="assign-shift-repeat-hint" id="assign-shift-repeat-hint">Includes this first shift. Weekly: up to 104; monthly: up to 36.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <p id="assign-shift-past-day-msg" class="assign-shift-past-day-msg" style="display: none;">This day is in the past. Shifts cannot be assigned to past days.</p>
@@ -297,7 +324,7 @@
                     <div id="task-list" class="task-list"></div>
                     <button type="button" class="btn-add-task" id="add-task-row">
                         <i class="fas fa-plus-circle"></i>
-                        Add another task
+                        Add task
                     </button>
                 </div>
                 <div class="form-group">
@@ -330,6 +357,9 @@
                 </button>
             </div>
             <div class="modal-body">
+                <p id="shift-details-past-banner" class="shift-details-past-banner" hidden>
+                    <i class="fas fa-archive"></i> Past shift — view only. Shifts and tasks stay on record; use the current week to edit or assign new work.
+                </p>
                 <div class="shift-details-section">
                     <h4 class="shift-details-section-title"><i class="fas fa-clock"></i> Edit Shift</h4>
                     <div class="form-group">
@@ -369,7 +399,7 @@
                         <div id="shift-details-task-list" class="task-list"></div>
                         <button type="button" class="btn-add-task" id="shift-details-add-task-row">
                             <i class="fas fa-plus-circle"></i>
-                            Add another task
+                            Add task
                         </button>
                     </div>
                     <div class="form-group">
@@ -498,6 +528,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
     <script src="subscriptionPlans.js?v=1"></script>
+    <script src="stripeBilling.js?v=1"></script>
     <script src="auth.js?v=20250308"></script>
     <script src="adminSettings.js"></script>
     <script src="employees.js"></script>

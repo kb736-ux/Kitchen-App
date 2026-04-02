@@ -1,5 +1,7 @@
 (function () {
   let adminUser = null;
+  /** When set, `subscription_plan` is driven by Stripe webhooks — do not overwrite from the dropdown on Save. */
+  let orgStripeSubscriptionId = null;
   let modalEl = null;
   let originalRestaurantName = null;
   let pendingAvatarFile = null;
@@ -113,15 +115,27 @@
       <div id="admin-settings-error" style="display:none;margin-bottom:8px;padding:6px 9px;border-radius:8px;font-size:12px;background:#fef2f2;color:#b91c1c;"></div>
       <div id="admin-settings-success" style="display:none;margin-bottom:8px;padding:6px 9px;border-radius:8px;font-size:12px;background:#ecfdf5;color:#166534;"></div>
       <div id="admin-subscription-block" style="border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin-bottom:14px;background:#fafafa;">
-        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Subscription plan</div>
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Subscription &amp; billing</div>
+        <div id="admin-stripe-status" style="font-size:12px;color:#4b5563;margin-bottom:8px;line-height:1.4;">—</div>
         <div id="admin-subscription-usage" style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.4;">—</div>
-        <label for="admin-subscription-plan" style="font-size:12px;font-weight:500;color:#374151;">Plan</label>
+        <label for="admin-subscription-plan" style="font-size:12px;font-weight:500;color:#374151;">Plan tier (employee limits)</label>
         <select id="admin-subscription-plan" style="width:100%;margin-top:4px;border-radius:10px;border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;box-sizing:border-box;">
           <option value="starter">Starter — up to 20 employees</option>
           <option value="growth">Growth — 21–40 employees</option>
           <option value="scale">Scale — 41+ employees</option>
         </select>
-        <p style="font-size:11px;color:#9ca3af;margin:8px 0 0;line-height:1.35;">Limits are based on roster size (profiles in Supabase). Connect billing (e.g. Stripe) separately when you&apos;re ready.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center;">
+          <button type="button" id="admin-stripe-checkout-btn" style="border-radius:999px;border:none;padding:8px 14px;font-size:13px;font-weight:600;background:#635bff;color:#fff;cursor:pointer;">
+            Subscribe (Stripe page)
+          </button>
+          <button type="button" id="admin-stripe-elements-btn" style="border-radius:999px;border:1px solid #86efac;padding:8px 14px;font-size:13px;font-weight:600;background:#f0fdf4;color:#166534;cursor:pointer;">
+            Pay on this site
+          </button>
+          <button type="button" id="admin-stripe-portal-btn" style="border-radius:999px;border:1px solid #c7d2fe;padding:8px 14px;font-size:13px;font-weight:600;background:#eef2ff;color:#4338ca;cursor:pointer;display:none;">
+            Billing portal
+          </button>
+        </div>
+        <p style="font-size:11px;color:#9ca3af;margin:8px 0 0;line-height:1.35;"><strong>Stripe page</strong> = hosted Checkout. <strong>Pay on this site</strong> = embedded card form (<code style="font-size:10px;">stripe-checkout.html</code>). Both use the same prices and webhooks. With an active subscription, the plan dropdown is locked — use the billing portal to change plans.</p>
       </div>
       <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px;">
         <div style="display:flex;gap:10px;">
@@ -196,6 +210,63 @@
     };
     modalEl.querySelector('#admin-send-reset').onclick = sendPasswordReset;
     modalEl.querySelector('#admin-settings-save').onclick = saveChanges;
+    modalEl.querySelector('#admin-stripe-checkout-btn')?.addEventListener('click', async () => {
+      showError('');
+      showSuccess('');
+      const btn = modalEl.querySelector('#admin-stripe-checkout-btn');
+      try {
+        if (!window.ORG_ID) throw new Error('No organization selected.');
+        if (typeof window.kkStripeCheckout !== 'function') {
+          throw new Error('Add stripeBilling.js to the page (before adminSettings.js).');
+        }
+        const plan = document.getElementById('admin-subscription-plan')?.value || 'starter';
+        if (btn) {
+          btn.disabled = true;
+          btn.style.opacity = '0.75';
+        }
+        await window.kkStripeCheckout(plan, window.ORG_ID);
+      } catch (e) {
+        showError(e?.message || 'Could not start checkout.');
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
+    });
+    modalEl.querySelector('#admin-stripe-elements-btn')?.addEventListener('click', () => {
+      showError('');
+      showSuccess('');
+      try {
+        if (!window.ORG_ID) throw new Error('No organization selected.');
+        const plan = document.getElementById('admin-subscription-plan')?.value || 'starter';
+        const q = new URLSearchParams({ plan, org_id: window.ORG_ID });
+        window.location.href = 'stripe-checkout.html?' + q.toString();
+      } catch (e) {
+        showError(e?.message || 'Could not open on-site checkout.');
+      }
+    });
+    modalEl.querySelector('#admin-stripe-portal-btn')?.addEventListener('click', async () => {
+      showError('');
+      showSuccess('');
+      const btn = modalEl.querySelector('#admin-stripe-portal-btn');
+      try {
+        if (!window.ORG_ID) throw new Error('No organization selected.');
+        if (typeof window.kkStripePortal !== 'function') {
+          throw new Error('Add stripeBilling.js to the page (before adminSettings.js).');
+        }
+        if (btn) {
+          btn.disabled = true;
+          btn.style.opacity = '0.75';
+        }
+        await window.kkStripePortal(window.ORG_ID);
+      } catch (e) {
+        showError(e?.message || 'Could not open billing portal.');
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
+    });
     modalEl.querySelector('#admin-avatar-pick').onclick = () => {
       modalEl.querySelector('#admin-avatar-file')?.click();
     };
@@ -351,7 +422,7 @@
           .catch(() => ({ data: null })),
         supa
           .from('orgs')
-          .select('name, subscription_plan')
+          .select('name, subscription_plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status')
           .eq('id', window.ORG_ID)
           .maybeSingle()
           .then((r) => ({ data: r.data, error: r.error })),
@@ -381,9 +452,38 @@
 
       const planSel = document.getElementById('admin-subscription-plan');
       const usageEl = document.getElementById('admin-subscription-usage');
+      const stripeStatusEl = document.getElementById('admin-stripe-status');
+      const portalBtn = document.getElementById('admin-stripe-portal-btn');
+
+      orgStripeSubscriptionId = (orgRow && orgRow.stripe_subscription_id) || null;
       const rawPlan = String(orgRow?.subscription_plan || 'starter').toLowerCase();
       const resolvedPlan = ['starter', 'growth', 'scale'].includes(rawPlan) ? rawPlan : 'starter';
-      if (planSel) planSel.value = resolvedPlan;
+      if (planSel) {
+        planSel.value = resolvedPlan;
+        planSel.disabled = !!orgStripeSubscriptionId;
+        planSel.title = orgStripeSubscriptionId
+          ? 'Plan is managed by Stripe. Use Billing portal to change plans.'
+          : '';
+      }
+      if (stripeStatusEl) {
+        const st = (orgRow?.stripe_subscription_status || '').trim();
+        if (orgStripeSubscriptionId) {
+          stripeStatusEl.textContent =
+            `Stripe subscription: ${st || 'active'} — plan tier syncs from your paid price.`;
+        } else if (orgRow?.stripe_customer_id) {
+          stripeStatusEl.textContent =
+            'Stripe customer on file — use Subscribe to start or finish a subscription, or open the billing portal.';
+        } else {
+          stripeStatusEl.textContent =
+            'No Stripe billing on file yet — choose a tier and click Subscribe with Stripe.';
+        }
+      }
+      if (portalBtn) {
+        portalBtn.style.display = orgRow?.stripe_customer_id ? 'inline-flex' : 'none';
+        portalBtn.disabled = false;
+        portalBtn.style.opacity = '1';
+      }
+
       if (usageEl && typeof window.kkGetEmployeeLimit === 'function' && typeof window.kkGetSubscriptionPlan === 'function') {
         const lim = window.kkGetEmployeeLimit(resolvedPlan);
         const p = window.kkGetSubscriptionPlan(resolvedPlan);
@@ -542,6 +642,18 @@
     }
 
     try {
+      let stripeSubIdForSave = orgStripeSubscriptionId;
+      if (window.ORG_ID) {
+        try {
+          const { data: freshOrg } = await supa
+            .from('orgs')
+            .select('stripe_subscription_id')
+            .eq('id', window.ORG_ID)
+            .maybeSingle();
+          stripeSubIdForSave = freshOrg?.stripe_subscription_id || null;
+        } catch (_) {}
+      }
+
       const updates = [];
       const userUpdate = {};
       if (email && email !== adminUser.email) userUpdate.email = email;
@@ -665,24 +777,31 @@
       let newPlan = String(planEl?.value || 'starter').toLowerCase();
       if (!['starter', 'growth', 'scale'].includes(newPlan)) newPlan = 'starter';
 
-      if (typeof window.kkGetEmployeeLimit === 'function' && window.ORG_ID) {
-        const { count: pc, error: pcErr } = await supa
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('org_id', window.ORG_ID);
-        if (!pcErr) {
-          const lim = window.kkGetEmployeeLimit(newPlan);
-          if (lim != null && (pc ?? 0) > lim) {
-            throw new Error(
-              `Plan "${window.kkGetSubscriptionPlan(newPlan).label}" allows up to ${lim} employees. You have ${pc}. Remove roster entries or choose Scale.`
-            );
+      if (!stripeSubIdForSave) {
+        if (typeof window.kkGetEmployeeLimit === 'function' && window.ORG_ID) {
+          const { count: pc, error: pcErr } = await supa
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('org_id', window.ORG_ID);
+          if (!pcErr) {
+            const lim = window.kkGetEmployeeLimit(newPlan);
+            if (lim != null && (pc ?? 0) > lim) {
+              throw new Error(
+                `Plan "${window.kkGetSubscriptionPlan(newPlan).label}" allows up to ${lim} employees. You have ${pc}. Remove roster entries or choose Scale.`
+              );
+            }
           }
         }
       }
 
+      const orgUpdate = { name: restaurantName };
+      if (!stripeSubIdForSave) {
+        orgUpdate.subscription_plan = newPlan;
+      }
+
       const { error: orgErr } = await supa
         .from('orgs')
-        .update({ name: restaurantName, subscription_plan: newPlan })
+        .update(orgUpdate)
         .eq('id', window.ORG_ID)
         .select();
       if (orgErr) {
@@ -734,12 +853,44 @@
     });
   }
 
+  function flashBillingToast(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    d.setAttribute('role', 'status');
+    d.style.cssText =
+      'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);max-width:92vw;background:#111827;color:#fff;padding:12px 20px;border-radius:12px;z-index:100050;font-size:13px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,0.25);';
+    document.body.appendChild(d);
+    setTimeout(() => {
+      d.style.opacity = '0';
+      d.style.transition = 'opacity 0.35s ease';
+    }, 2800);
+    setTimeout(() => d.remove(), 3500);
+  }
+
+  function consumeBillingQueryParam() {
+    try {
+      const u = new URLSearchParams(window.location.search);
+      const b = u.get('billing');
+      if (!b) return;
+      const path = window.location.pathname || '/';
+      window.history.replaceState({}, '', path + (window.location.hash || ''));
+      if (b === 'success') {
+        flashBillingToast('Payment successful. Syncing your plan — refreshing…');
+        setTimeout(() => window.location.reload(), 2200);
+      } else if (b === 'cancel') {
+        flashBillingToast('Checkout canceled.');
+      }
+    } catch (_) {}
+  }
+
   window.addEventListener('kk-admin-authenticated', (e) => {
     adminUser = e.detail?.user || null;
     attachProfileClick();
+    consumeBillingQueryParam();
   });
 
   document.addEventListener('DOMContentLoaded', () => {
+    consumeBillingQueryParam();
     if (window.currentAdminUser) {
       adminUser = window.currentAdminUser;
       attachProfileClick();

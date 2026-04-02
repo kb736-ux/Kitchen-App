@@ -136,8 +136,92 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   const [todayShift, setTodayShift] = useState(null);   // full shift row or null
   const [nextShift, setNextShift] = useState(null);     // next upcoming shift row
 
-  // tasks state: my assigned rows from Supabase. Only show them in the app when I have a shift today.
-  const displayedTasks = useMemo(() => (todayShift ? tasks : []), [todayShift, tasks]);
+  const activeShiftWindow = useMemo(() => {
+    if (!todayShift?.shift_date || !todayShift?.start_time || !todayShift?.end_time) return null;
+    const start = new Date(`${todayShift.shift_date}T${String(todayShift.start_time).slice(0, 8)}`);
+    const end = new Date(`${todayShift.shift_date}T${String(todayShift.end_time).slice(0, 8)}`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    if (end <= start) end.setDate(end.getDate() + 1); // overnight shift
+    return { start, end };
+  }, [todayShift]);
+
+  const displayedTasks = useMemo(() => {
+    if (!todayShift) return [];
+    if (!activeShiftWindow) return tasks;
+
+    const todayShiftIds = new Set(
+      [
+        todayShift?.id != null ? String(todayShift.id) : null,
+        ...((todayShift?.related_shift_ids || []).map((id) => String(id))),
+      ].filter(Boolean)
+    );
+
+    /** True if this employee already has at least one task tied to today's shift row(s). */
+    const hasShiftLinkedTask = tasks.some(
+      (t) => t?.shift_id != null && todayShiftIds.has(String(t.shift_id))
+    );
+
+    const filtered = tasks.filter((t) => {
+      const taskShiftId = t?.shift_id != null ? String(t.shift_id) : null;
+      const createdAt = t?.created_at ? new Date(t.created_at) : null;
+      const completedAt = t?.completed_at ? new Date(t.completed_at) : null;
+      const createdOk = createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt : null;
+      const completedOk = completedAt && !Number.isNaN(completedAt.getTime()) ? completedAt : null;
+      const createdYmd = createdOk
+        ? `${createdOk.getFullYear()}-${String(createdOk.getMonth() + 1).padStart(2, '0')}-${String(createdOk.getDate()).padStart(2, '0')}`
+        : null;
+
+      if (taskShiftId && todayShiftIds.has(taskShiftId)) return true;
+
+      // When the manager has linked tasks to this shift in Supabase, only show those
+      // (plus same-day urgent adds). Hides orphan same-calendar-day rows that duplicate
+      // the web "Assign Tasks" list (legacy shift_id null).
+      if (hasShiftLinkedTask) {
+        if (t.is_urgent && !taskShiftId) {
+          if (!createdOk) return false;
+          return createdYmd === todayShift.shift_date;
+        }
+        return false;
+      }
+
+      if (!t.completed) {
+        if (!createdOk) return false;
+        return createdYmd === todayShift.shift_date
+          || (createdOk >= activeShiftWindow.start && createdOk <= activeShiftWindow.end);
+      }
+
+      if (completedOk) {
+        return completedOk >= activeShiftWindow.start && completedOk <= activeShiftWindow.end;
+      }
+      if (createdOk) {
+        return createdYmd === todayShift.shift_date
+          || (createdOk >= activeShiftWindow.start && createdOk <= activeShiftWindow.end);
+      }
+      return false;
+    });
+
+    const normText = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const betterTask = (a, b) => {
+      const aLinked = a?.shift_id != null && todayShiftIds.has(String(a.shift_id));
+      const bLinked = b?.shift_id != null && todayShiftIds.has(String(b.shift_id));
+      if (aLinked !== bLinked) return aLinked ? a : b;
+      if (!!a.completed !== !!b.completed) return a.completed ? b : a;
+      return String(a.id) < String(b.id) ? a : b;
+    };
+    const byNorm = new Map();
+    for (const t of filtered) {
+      const key = normText(t.text);
+      if (!byNorm.has(key)) byNorm.set(key, t);
+      else byNorm.set(key, betterTask(byNorm.get(key), t));
+    }
+    return Array.from(byNorm.values()).sort((a, b) => {
+      const ta = new Date(a.created_at || 0).getTime();
+      const tb = new Date(b.created_at || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }, [todayShift, tasks, activeShiftWindow]);
+
   const homeUrgentForHome = useMemo(() => (todayShift ? homeUrgentTasks : []), [todayShift, homeUrgentTasks]);
 
   const taskStats = useMemo(
@@ -173,6 +257,51 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         .map(v => (v || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
         .filter(Boolean)
     );
+
+  function buildVerifiedIdentity(profileRows = []) {
+    const authEmail = String(email || '').trim().toLowerCase();
+    const emailLocal = authEmail.split('@')[0] || '';
+    const baseNames = [employeeName, defaultEmployeeName, emailLocal]
+      .map((n) => (n || '').trim())
+      .filter(Boolean);
+
+    const verifiedProfiles = (profileRows || []).filter((p) => {
+      const pEmail = String(p?.email || '').trim().toLowerCase();
+      const pEmp = String(p?.employee_name || '').trim().toLowerCase();
+      if (authUserId && p?.user_id && String(p.user_id) === String(authUserId)) return true;
+      if (employeeId && p?.id && String(p.id) === String(employeeId)) return true;
+      if (authEmail && pEmail && pEmail === authEmail) return true;
+      if (employeeName && pEmp && pEmp === String(employeeName).trim().toLowerCase()) return true;
+      if (emailLocal && pEmp && pEmp === emailLocal) return true;
+      return false;
+    });
+
+    const derivedNames = [];
+    verifiedProfiles.forEach((p) => {
+      const first = (p?.first_name || '').trim();
+      const last = (p?.last_name || '').trim();
+      const combined = [first, last].filter(Boolean).join(' ').trim();
+      derivedNames.push(
+        p?.employee_name || '',
+        p?.display_name || '',
+        first,
+        last,
+        combined
+      );
+    });
+
+    const originalNames = Array.from(
+      new Set([...baseNames, ...derivedNames].map((n) => (n || '').trim()).filter(Boolean))
+    );
+
+    return {
+      profileIds: new Set(
+        verifiedProfiles.map((p) => p?.id).filter(Boolean)
+      ),
+      originalNames,
+      lowerNames: new Set(originalNames.map((n) => n.toLowerCase())),
+    };
+  }
 
   async function fetchTaskNotifCount(oid) {
     if (!oid) return;
@@ -490,7 +619,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         void Promise.all([
           fetchTasks(oid),
           fetchTaskNotifCount(oid),
-          fetchTransferRequests(oid),
           fetchProfileData(oid),
           fetchChatUnreadDot(oid),
           fetchScheduleUnreadDot(oid),
@@ -531,7 +659,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       if (state === 'active' && orgId) {
         fetchTasks(orgId);
         fetchTaskNotifCount(orgId);
-        fetchTransferRequests(orgId);
         fetchProfileData(orgId);
         checkTodayShift(orgId);
         fetchChatUnreadDot(orgId);
@@ -575,64 +702,20 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       return;
     }
 
-    const combinedContext = [firstName, lastName].filter(Boolean).join(' ').trim();
-    const combinedProfile = [profileData?.firstName, profileData?.lastName].filter(Boolean).join(' ').trim();
-
-    const nameCandidates = Array.from(
-      new Set(
-        [
-          employeeName,
-          displayName,
-          profileData?.displayName,
-          profileData?.employeeNameFromProfile,
-          defaultEmployeeName,
-          (email || '').split('@')[0],
-          firstName,
-          lastName,
-          combinedContext,
-          profileData?.firstName,
-          profileData?.lastName,
-          combinedProfile,
-        ]
-          .map(n => (n || '').trim().toLowerCase())
-          .filter(Boolean)
-      )
-    );
-
-    /** Original-case strings for loose name matching (web may save tasks as "Kenny" while profile is "Kenny Bae"). */
-    const taskNameCandidates = [
-      employeeName,
-      displayName,
-      profileData?.displayName,
-      profileData?.employeeNameFromProfile,
-      defaultEmployeeName,
-      (email || '').split('@')[0],
-      firstName,
-      lastName,
-      combinedContext,
-      profileData?.firstName,
-      profileData?.lastName,
-      combinedProfile,
-    ].filter((n) => (n || '').trim());
-
     const [{ data: profiles }, { data, error }] = await Promise.all([
-      supabase.from('profiles').select('id, employee_name, display_name, user_id').eq('org_id', oid),
+      supabase.from('profiles').select('id, employee_name, display_name, first_name, last_name, email, user_id').eq('org_id', oid),
       supabase.from('tasks').select('*').eq('org_id', oid).order('created_at', { ascending: true }),
     ]);
 
+    const identity = buildVerifiedIdentity(profiles || []);
+    const nameCandidates = Array.from(identity.lowerNames);
+    const taskNameCandidates = identity.originalNames;
+
     const profileById = {};
-    const myProfileIds = new Set();
+    const myProfileIds = new Set(identity.profileIds);
     (profiles || []).forEach((p) => {
       if (!p?.id) return;
       profileById[p.id] = p;
-      const n1 = (p.employee_name || '').trim().toLowerCase();
-      const n2 = (p.display_name || '').trim().toLowerCase();
-      if (authUserId && p.user_id != null && String(p.user_id) === String(authUserId)) {
-        myProfileIds.add(p.id);
-      }
-      if ((employeeId && p.id === employeeId) || (n1 && nameCandidates.includes(n1)) || (n2 && nameCandidates.includes(n2))) {
-        myProfileIds.add(p.id);
-      }
     });
     if (employeeId) myProfileIds.add(employeeId);
 
@@ -653,7 +736,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       return false;
     };
     const mine = all
-      .filter(t => !isTaskCompleted(t))
       .filter((t) => {
         const assignedId = t.employee_id || t.assigned_to || null;
         if (assignedId && myProfileIds.has(assignedId)) return true;
@@ -678,6 +760,9 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
           completed: isTaskCompleted(t),
           is_urgent: t.is_urgent ?? false,
           status: t.status,
+          created_at: t.created_at || null,
+          completed_at: t.completed_at || null,
+          shift_id: t.shift_id || null,
           employee_name: t.employee_name || profile?.display_name || profile?.employee_name || null,
           employee_id: assignedId,
         };
@@ -723,26 +808,11 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    const combinedFromProfile = [profileData.firstName, profileData.lastName].filter(Boolean).join(' ').trim();
-    const combinedFromContext = [firstName, lastName].filter(Boolean).join(' ').trim();
-    const candidateNames = Array.from(
-      new Set(
-        [
-          employeeName,
-          displayName,
-          defaultEmployeeName,
-          profileData.displayName,
-          profileData.employeeNameFromProfile,
-          combinedFromProfile,
-          combinedFromContext,
-          firstName,
-          lastName,
-          (email || '').split('@')[0],
-        ]
-          .map((n) => (n || '').trim())
-          .filter(Boolean)
-      )
-    );
+    const { data: profileRows } = await supabase
+      .from('profiles')
+      .select('id, employee_name, display_name, first_name, last_name, email, user_id')
+      .eq('org_id', oid);
+    const candidateNames = buildVerifiedIdentity(profileRows || []).originalNames;
 
     const { data: shiftsToday, error: errToday } = await supabase
       .from('shifts')
@@ -757,7 +827,20 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     const todayData =
       (shiftsToday || []).find((s) => shiftRowMatchesEmployee(s, employeeId, candidateNames, authUserId)) || null;
 
-    setTodayShift(todayData);
+    if (todayData?.id && todayData.shift_date && todayData.start_time && todayData.end_time) {
+      const { data: siblingRows } = await supabase
+        .from('shifts')
+        .select('id')
+        .eq('org_id', oid)
+        .eq('shift_date', todayData.shift_date)
+        .eq('start_time', todayData.start_time)
+        .eq('end_time', todayData.end_time)
+        .eq('employee_name', todayData.employee_name || '');
+      const relatedShiftIds = [...new Set((siblingRows || []).map((s) => String(s.id)).filter(Boolean))];
+      setTodayShift({ ...todayData, related_shift_ids: relatedShiftIds });
+    } else {
+      setTodayShift(todayData);
+    }
 
     if (!todayData) {
       const { data: upcoming, error: errUp } = await supabase
@@ -830,17 +913,18 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return { ok: false, message: 'Task not found' };
     const nowCompleted = !task.completed;
+    const completedAt = nowCompleted ? new Date().toISOString() : null;
     setTasks(prev =>
-      prev.map(t => t.id === taskId ? { ...t, completed: nowCompleted, status: nowCompleted ? 'completed' : 'todo' } : t)
+      prev.map(t => t.id === taskId ? { ...t, completed: nowCompleted, status: nowCompleted ? 'completed' : 'todo', completed_at: completedAt } : t)
     );
     const { error } = await supabase
       .from('tasks')
-      .update({ status: nowCompleted ? 'completed' : 'todo', completed_at: nowCompleted ? new Date().toISOString() : null })
+      .update({ status: nowCompleted ? 'completed' : 'todo', completed_at: completedAt })
       .eq('id', taskId);
     if (error) {
       console.warn('[Supabase] toggleTask failed:', error.message);
       setTasks(prev =>
-        prev.map(t => t.id === taskId ? { ...t, completed: !nowCompleted, status: !nowCompleted ? 'completed' : 'todo' } : t)
+        prev.map(t => t.id === taskId ? { ...t, completed: !nowCompleted, status: !nowCompleted ? 'completed' : 'todo', completed_at: task.completed_at ?? null } : t)
       );
       return { ok: false, message: error.message };
     }
@@ -879,6 +963,9 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       completed: false,
       is_urgent: true,
       status: 'todo',
+      created_at: new Date().toISOString(),
+      completed_at: null,
+      shift_id: null,
       employee_name: assignToMe ? (displayName || employeeName) : null,
       employee_id: assignToMe ? employeeId : null,
     };
@@ -901,7 +988,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       setTasks(prev => prev.filter(t => t.id !== optimisticId));
     } else {
       setTasks(prev =>
-        prev.map(t => t.id === optimisticId ? { ...t, id: data.id, employee_name: data.employee_name ?? insertRow.employee_name ?? null, employee_id: data.employee_id || data.assigned_to || insertRow.employee_id || null } : t)
+        prev.map(t => t.id === optimisticId ? { ...t, id: data.id, created_at: data.created_at || t.created_at, completed_at: data.completed_at || null, shift_id: data.shift_id || null, employee_name: data.employee_name ?? insertRow.employee_name ?? null, employee_id: data.employee_id || data.assigned_to || insertRow.employee_id || null } : t)
       );
       if (orgId) fetchTasks(orgId); // refetch so list stays in sync with Supabase
     }
@@ -930,103 +1017,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         prev.map(t => t.id === taskId ? { ...t, employee_name: null, employee_id: null } : t)
       );
     }
-  };
-
-  // ── Task transfer (request → recipient must accept) ─────────────────────────
-  const [transferRequests, setTransferRequests] = useState([]);
-
-  async function fetchTransferRequests(oid) {
-    if (!oid) return;
-    const { data: reqs } = await supabase
-      .from('task_transfer_requests')
-      .select('*')
-      .eq('org_id', oid)
-      .eq('to_employee_name', employeeName)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
-    if (!reqs?.length) {
-      setTransferRequests([]);
-      return;
-    }
-    const taskIds = reqs.map(r => r.task_id);
-    const { data: taskData } = await supabase.from('tasks').select('id, text').in('id', taskIds);
-    const taskMap = {};
-    (taskData || []).forEach(t => { taskMap[t.id] = t.text; });
-    setTransferRequests(reqs.map(r => ({ ...r, task_text: taskMap[r.task_id] || 'Task' })));
-  }
-
-  const requestTaskTransfer = async (taskId, toEmployeeName) => {
-    if (!orgId) return { ok: false, message: 'No organization.' };
-    const task = tasks.find(t => t.id === taskId);
-    const taskText = task?.text || 'A task';
-    const { error } = await supabase.from('task_transfer_requests').insert({
-      org_id: orgId,
-      task_id: taskId,
-      from_employee_name: employeeName,
-      to_employee_name: toEmployeeName,
-      status: 'pending',
-    });
-    if (error) {
-      console.warn('[Supabase] requestTaskTransfer failed:', error.message);
-      return { ok: false, message: error.message || 'Insert failed' };
-    }
-    const { error: notifErr } = await supabase.from('notifications').insert({
-      org_id: orgId,
-      employee_name: toEmployeeName,
-      type: 'task_transfer_request',
-      title: 'Task Transfer Request',
-      body: `${employeeName} wants to transfer "${taskText}" to you. Accept on the Tasks tab.`,
-    });
-    if (notifErr) {
-      console.warn('[Supabase] task transfer notification failed:', notifErr.message);
-      return { ok: false, message: notifErr.message || 'Notification failed' };
-    }
-    return { ok: true };
-  };
-
-  const acceptTaskTransfer = async (requestId) => {
-    const req = transferRequests.find(r => r.id === requestId);
-    if (!req) return;
-    const { error: updateErr } = await supabase
-      .from('tasks')
-      .update({ employee_name: req.to_employee_name })
-      .eq('id', req.task_id);
-    if (updateErr) {
-      console.warn('[Supabase] acceptTaskTransfer failed:', updateErr.message);
-      return;
-    }
-    await supabase
-      .from('task_transfer_requests')
-      .update({ status: 'accepted' })
-      .eq('id', requestId);
-    setTransferRequests(prev => prev.filter(r => r.id !== requestId));
-    const oid = orgId;
-    if (oid) {
-      await fetchTasks(oid);
-      fetchTransferRequests(oid);
-    }
-  };
-
-  const declineTaskTransfer = async (requestId) => {
-    await supabase
-      .from('task_transfer_requests')
-      .update({ status: 'declined' })
-      .eq('id', requestId);
-    setTransferRequests(prev => prev.filter(r => r.id !== requestId));
-  };
-
-  const fetchEmployeesOnShift = async (oid) => {
-    if (!oid) return [];
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const { data } = await supabase
-      .from('shifts')
-      .select('employee_name')
-      .eq('org_id', oid)
-      .eq('shift_date', todayStr)
-      .not('employee_name', 'is', null);
-    const names = [...new Set((data || []).map(s => s.employee_name).filter(Boolean))];
-    return names.filter(n => n.toLowerCase() !== employeeName.toLowerCase());
   };
 
   const session = null; // No auth for MVP — RLS is disabled
@@ -1081,7 +1071,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         void Promise.all([
           fetchTasks(newOrgId),
           fetchTaskNotifCount(newOrgId),
-          fetchTransferRequests(newOrgId),
           fetchProfileData(newOrgId),
           fetchChatUnreadDot(newOrgId),
           fetchScheduleUnreadDot(newOrgId),
@@ -1107,7 +1096,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   const renderCurrentPage = () => {
     if (showTaskDetail && selectedTask) {
       const currentTask = tasks.find(t => t.id === selectedTask.id) || selectedTask;
-      return <TaskDetailPage onBack={handleBackFromTaskDetail} task={currentTask} toggleTask={toggleTask} toggleUrgent={toggleUrgent} orgId={orgId} requestTaskTransfer={requestTaskTransfer} fetchEmployeesOnShift={fetchEmployeesOnShift} />;
+      return <TaskDetailPage onBack={handleBackFromTaskDetail} task={currentTask} toggleTask={toggleTask} toggleUrgent={toggleUrgent} orgId={orgId} />;
     }
     if (showProgress) {
         return <ProgressPage onBack={handleBackFromProgress} tasks={displayedTasks} allTasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} />;
@@ -1144,7 +1133,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       case 'Home':
         return <HomePage orgId={orgId} currentOrgName={currentOrgName} canSwitchOrg={availableOrgs.length > 1} onOpenOrgPicker={() => setOrgPickerVisible(true)} tasks={displayedTasks} urgentTasks={homeUrgentForHome} todayShift={todayShift} nextShift={nextShift} taskStats={taskStats} onProfilePress={handleProfilePress} profileData={profileData} onTasksPress={() => setActiveTab('Tasks')} onSchedulePress={() => setActiveTab('Schedule')} addUrgentTask={addUrgentTask} takeUrgentTask={takeUrgentTask} onUrgentTaskPress={prioritizeTask} />;
       case 'Tasks':
-        return <TasksPage onProgressPress={handleProgressPress} tasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} todayIsShift={!!todayShift} toggleUrgent={toggleUrgent} addUrgentTask={addUrgentTask} onRefresh={async () => { if (orgId) { await fetchTasks(orgId); await fetchTransferRequests(orgId); } }} transferRequests={transferRequests} acceptTaskTransfer={acceptTaskTransfer} declineTaskTransfer={declineTaskTransfer} />;
+        return <TasksPage onProgressPress={handleProgressPress} tasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} todayIsShift={!!todayShift} toggleUrgent={toggleUrgent} addUrgentTask={addUrgentTask} onRefresh={async () => { if (orgId) await fetchTasks(orgId); }} />;
       case 'Schedule':
         return <SchedulePage onOpenShiftsPress={handleOpenShiftsPress} orgId={orgId} profileData={profileData} />;
       case 'Recipes':

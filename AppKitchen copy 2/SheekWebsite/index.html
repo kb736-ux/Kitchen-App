@@ -22,11 +22,12 @@
       <nav class="nav-desktop" aria-label="Primary">
         <a href="#features">Features</a>
         <a href="#pricing">Pricing</a>
+        <a href="onboard/index.html">Get started</a>
         <a href="#contact">Contact</a>
       </nav>
       <div class="header-actions">
-        <a class="btn btn-ghost" data-sheek-dashboard href="#">Log in</a>
-        <a class="btn btn-primary" data-sheek-dashboard href="#">Onboard</a>
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+        <a class="btn btn-primary" href="onboard/index.html">Onboard</a>
         <button type="button" class="menu-toggle" aria-expanded="false" aria-label="Open menu">
           <span></span><span></span><span></span>
         </button>
@@ -35,9 +36,10 @@
     <nav class="nav-mobile" hidden>
       <a href="#features">Features</a>
       <a href="#pricing">Pricing</a>
+      <a href="onboard/index.html">Get started</a>
       <a href="#contact">Contact</a>
-      <a data-sheek-dashboard href="#">Log in</a>
-      <a class="btn btn-primary nav-mobile-cta" data-sheek-dashboard href="#">Onboard</a>
+      <a data-sheek-login href="#">Log in</a>
+      <a class="btn btn-primary nav-mobile-cta" href="onboard/index.html">Onboard</a>
     </nav>
   </header>
 
@@ -49,10 +51,11 @@
           <h1>Your team, schedules, and kitchen — <em>aligned</em>.</h1>
           <p class="lead">
             Sheek is the operations hub for managers and staff: dashboard, scheduling, employees,
-            recipes, inventory signals, and team chat — tied to your data in Supabase.
+            recipes, inventory signals, and team chat — tied to your restaurant’s data.
           </p>
           <div class="hero-cta">
-            <a class="btn btn-primary btn-lg" data-sheek-dashboard href="#">Get started</a>
+            <a class="btn btn-primary btn-lg" href="onboard/index.html">Get started</a>
+            <a class="btn btn-outline btn-lg" data-sheek-login href="#">Log in</a>
           </div>
           <p class="hero-note">Web dashboard for managers · Mobile app for your crew</p>
         </div>
@@ -111,24 +114,24 @@
             <p class="price-tag">Up to <strong>20</strong> employees</p>
             <p class="price-tag"><strong>$30/mo</strong></p>
             <p class="price-desc">Small teams, one location, full product access.</p>
-            <a class="btn btn-outline" data-sheek-dashboard href="#">Start with Starter</a>
+            <a class="btn btn-outline" data-sheek-onboard data-plan="starter" href="onboard/index.html?plan=starter">Start with Starter</a>
           </article>
           <article class="price-card">
             <h3>Growth</h3>
             <p class="price-tag"><strong>21–40</strong> employees</p>
             <p class="price-tag"><strong>$55/mo</strong></p>
             <p class="price-desc">Busier operations with more roles and shifts to coordinate.</p>
-            <a class="btn btn-primary" data-sheek-dashboard href="#">Choose Growth</a>
+            <a class="btn btn-primary" data-sheek-onboard data-plan="growth" href="#">Choose Growth</a>
           </article>
           <article class="price-card">
             <h3>Scale</h3>
             <p class="price-tag"><strong>41+</strong> employees</p>
             <p class="price-tag"><strong>$90/mo</strong></p>
             <p class="price-desc">Large crews and multi-shift depth — unlimited cap in-app.</p>
-            <a class="btn btn-outline" data-sheek-dashboard href="#">Choose Scale</a>
+            <a class="btn btn-outline" data-sheek-onboard data-plan="scale" href="onboard/index.html?plan=scale">Choose Scale</a>
           </article>
         </div>
-        <p class="pricing-footnote">Connect Stripe or your billing provider when you’re ready — plans are enforced in the app today.</p>
+        <p class="pricing-footnote">Paid plans are set up during onboard with Stripe Checkout. Tier limits are enforced in the app.</p>
       </div>
     </section>
 
@@ -138,7 +141,7 @@
           <h2>Ready to try Sheek?</h2>
           <p>Open the manager dashboard, create a restaurant, and invite your team.</p>
         </div>
-        <a class="btn btn-light btn-lg" data-sheek-dashboard href="#">Open Sheek</a>
+        <a class="btn btn-light btn-lg" href="onboarding-guide.html">Open setup guide</a>
       </div>
     </section>
   </main>
@@ -148,7 +151,7 @@
       <div class="footer-brand">
         <i class="fas fa-utensils logo-icon" aria-hidden="true"></i> Sheek
       </div>
-      <p class="footer-copy">&copy; <span id="y"></span> Sheek. Restaurant operations, simplified.</p>
+      <p class="footer-copy">&copy; <span id="y"></span> Sheek. <a href="onboard/index.html">Get started</a> · <a href="onboarding-guide.html">Setup guide</a></p>
     </div>
   </footer>
 

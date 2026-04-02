@@ -180,6 +180,21 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
+.shift-details-past-banner {
+    margin: 0 0 1rem 0;
+    padding: 0.75rem 1rem;
+    background: #edf2f7;
+    border-radius: 8px;
+    color: #4a5568;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.shift-details-past-banner i {
+    color: #718096;
+    margin-right: 0.35rem;
+}
+
 /* Position-specific colors */
 .shift-card.line-cook {
     border-left-color: #e53e3e;
@@ -1102,4 +1117,37 @@
 .calendar-day-hours {
     color: #718096;
     font-size: 0.85rem;
+}
+
+/* Assign shift — repeat / recurrence */
+.assign-shift-repeat-block {
+    margin-top: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+}
+.assign-shift-repeat-check {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: #2d3748;
+    cursor: pointer;
+}
+.assign-shift-repeat-check input {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+}
+.assign-shift-repeat-options {
+    margin-top: 0.75rem;
+    padding: 0.75rem 0 0.25rem 0.85rem;
+    border-left: 3px solid #48bb78;
+    background: #f7fafc;
+    border-radius: 0 8px 8px 0;
+}
+.assign-shift-repeat-hint {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    color: #718096;
+    line-height: 1.35;
 }

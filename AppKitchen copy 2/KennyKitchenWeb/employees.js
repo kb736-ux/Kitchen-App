@@ -53,6 +53,7 @@ async function loadEmployeePositionsFromSupabase() {
     window._employeeNameToId = {};
     window._profileNameToId = {};
     window._displayNameToCanonicalEmployeeName = {};
+    window._employeeIdToCanonicalName = {};
     _employeeDisplayByName = {};
     (data || []).forEach(r => {
         window._employeeNameToId[r.employee_name] = r.id;
@@ -70,6 +71,7 @@ async function loadEmployeePositionsFromSupabase() {
             if (name) {
                 window._profileNameToId[name] = p.id;
                 window._employeeNameToId[name] = p.id;
+                window._employeeIdToCanonicalName[p.id] = name;
             }
             if (display) {
                 window._profileNameToId[display] = p.id;
@@ -130,7 +132,11 @@ window.getEmployeeIdFromName = function(name) {
 };
 
 window.getEmployeeNameFromId = function(id) {
-    if (!id || !window._employeeNameToId) return null;
+    if (!id) return null;
+    if (window._employeeIdToCanonicalName && window._employeeIdToCanonicalName[id]) {
+        return window._employeeIdToCanonicalName[id];
+    }
+    if (!window._employeeNameToId) return null;
     for (const [key, val] of Object.entries(window._employeeNameToId)) {
         if (val === id) return key;
     }
@@ -397,7 +403,6 @@ function getAllPositionNames() {
 
 // ── Employees Page - request actions and create modals ────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-    setupEmployeeRequestActions();
     setupEmployeeModals();
     setupEditPositionsModal();
     setupPositionClicks();
@@ -422,61 +427,211 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof setupNotificationBell === 'function') {
         setupNotificationBell();
     }
+    if (window.supabaseClient && window.ORG_ID) {
+        loadEmployeeShiftRequestsCard();
+    }
 });
-
-function setupEmployeeRequestActions() {
-    const approveButtons = document.querySelectorAll('.employees-card + .notifications-card .btn-approve, .notifications-card .btn-approve');
-    const denyButtons = document.querySelectorAll('.employees-card + .notifications-card .btn-deny, .notifications-card .btn-deny');
-
-    // Use notifications-card within employees page
-    const card = document.querySelector('.dashboard-grid .notifications-card');
-    if (!card) return;
-
-    card.querySelectorAll('.btn-approve').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            handleEmployeeRequestAction(this, 'approve');
-        });
-    });
-    card.querySelectorAll('.btn-deny').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            handleEmployeeRequestAction(this, 'deny');
-        });
-    });
-}
 
 // Store approved drop requests (shared with script.js)
 if (typeof approvedDrops === 'undefined') {
     window.approvedDrops = {};
 }
 
-function handleEmployeeRequestAction(button, action) {
-    const notificationItem = button.closest('.notification-item');
-    if (!notificationItem) return;
 
-    const notificationContent = notificationItem.querySelector('.notification-content p')?.textContent || '';
-    
-    // Parse drop request if approved
-    if (action === 'approve' && notificationContent.includes('to drop')) {
-        parseAndStoreDropRequest(notificationContent);
-    }
-    
-    button.style.transform = 'scale(0.95)';
-    setTimeout(() => { button.style.transform = 'scale(1)'; }, 150);
-
-    setTimeout(() => {
-        notificationItem.style.transition = 'all 0.3s ease';
-        notificationItem.style.transform = 'translateX(-100%)';
-        notificationItem.style.opacity = '0';
-        setTimeout(() => {
-            notificationItem.remove();
-            updateEmployeesRequestBadge();
-        }, 300);
-        const actionText = action === 'approve' ? 'approved' : 'denied';
-        showEmployeeToast(`Request ${actionText} successfully!`, action === 'approve' ? 'success' : 'error');
-    }, 500);
+function normalizeEmployeesName(value) {
+    return String(value || '').trim().toLowerCase();
 }
+
+function employeesFormatTimeLabel(t) {
+    if (!t) return '';
+    const [h, m] = String(t).split(':');
+    const hr = parseInt(h, 10);
+    if (Number.isNaN(hr)) return String(t);
+    return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+}
+
+async function buildEmployeesProfileDisplayLabelMap() {
+    const labelByKey = new Map();
+    if (!window.supabaseClient || !window.ORG_ID) return labelByKey;
+    const { data: profiles } = await window.supabaseClient
+        .from('profiles')
+        .select('employee_name, display_name, first_name, last_name')
+        .eq('org_id', window.ORG_ID);
+    (profiles || []).forEach((p) => {
+        const fn = (p.first_name || '').trim();
+        const ln = (p.last_name || '').trim();
+        const label = [fn, ln].filter(Boolean).join(' ')
+            || (p.display_name || '').trim()
+            || (p.employee_name || '').trim();
+        if (!label) return;
+        const emp = normalizeEmployeesName(p.employee_name);
+        const display = normalizeEmployeesName(p.display_name);
+        const first = normalizeEmployeesName(fn);
+        if (emp) labelByKey.set(emp, label);
+        if (display) labelByKey.set(display, label);
+        if (first && !labelByKey.has(first)) labelByKey.set(first, label);
+    });
+    return labelByKey;
+}
+
+function employeesDisplayLabel(labelMap, rawName) {
+    const raw = String(rawName || '').trim();
+    if (!raw) return '';
+    return labelMap.get(normalizeEmployeesName(raw)) || raw;
+}
+
+async function loadEmployeeShiftRequestsCard() {
+    const listEl = document.getElementById('employees-notification-list');
+    const badgeEl = document.getElementById('employees-requests-badge');
+    if (!listEl || !window.supabaseClient || !window.ORG_ID) return;
+
+    listEl.innerHTML = '<div class="notif-empty-state">Loading shift requests...</div>';
+
+    const { data: requests, error } = await window.supabaseClient
+        .from('shift_requests')
+        .select('*')
+        .eq('org_id', window.ORG_ID)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        listEl.innerHTML = `<div class="notif-empty-state">Could not load shift requests: ${escapeEmployeesHtml(error.message || 'Unknown error')}</div>`;
+        if (badgeEl) badgeEl.style.display = 'none';
+        return;
+    }
+
+    if (!requests || requests.length === 0) {
+        listEl.innerHTML = '<div class="notif-empty-state"><i class="fas fa-check-circle"></i> No pending requests. Manage shift requests on the Scheduling page.</div>';
+        if (badgeEl) badgeEl.style.display = 'none';
+        return;
+    }
+
+    const shiftIds = [...new Set(requests.map(r => r.shift_id).filter(Boolean))];
+    let shiftsMap = {};
+    if (shiftIds.length > 0) {
+        const { data: shifts } = await window.supabaseClient
+            .from('shifts')
+            .select('id, shift_date, start_time, end_time, position, employee_name')
+            .in('id', shiftIds);
+        (shifts || []).forEach((s) => { shiftsMap[s.id] = s; });
+    }
+    const nameMap = await buildEmployeesProfileDisplayLabelMap();
+
+    listEl.innerHTML = requests.map((req) => {
+        const shift = shiftsMap[req.shift_id] || {};
+        const requester = employeesDisplayLabel(nameMap, req.employee_name) || req.employee_name || 'Unknown';
+        const target = employeesDisplayLabel(nameMap, req.target_employee) || req.target_employee || '';
+        const typeLabel = req.request_type === 'time_off' ? 'Time Off' : 'Transfer';
+        const shiftDate = shift.shift_date
+            ? new Date(shift.shift_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+            : (req.note || 'See note');
+        const shiftTime = shift.start_time ? `${employeesFormatTimeLabel(shift.start_time)} – ${employeesFormatTimeLabel(shift.end_time)}` : '';
+        return `
+            <div class="shift-request-card">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px;max-width:100%;">
+                    <div style="min-width:0;">
+                        <span style="font-weight:700;font-size:15px;color:#2d3748;">${escapeEmployeesHtml(requester)}</span>
+                        <span style="background:${req.request_type === 'time_off' ? '#fff5eb' : '#ebf8ff'};color:${req.request_type === 'time_off' ? '#c05621' : '#2b6cb0'};font-size:12px;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:8px;">${typeLabel}</span>
+                    </div>
+                </div>
+                <div class="shift-request-shift-block" style="background:#f7fafc;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;color:#4a5568;">
+                    <i class="fas fa-calendar-day" style="color:#4CAF50;margin-right:6px;"></i>
+                    <strong>${shiftDate}</strong>${shiftTime ? ' · ' + shiftTime : ''}
+                    ${shift.position ? `<span style="margin-left:8px;background:#e8f5e9;color:#276749;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeEmployeesHtml(shift.position)}</span>` : ''}
+                </div>
+                ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;max-width:100%;overflow-wrap:anywhere;">"${escapeEmployeesHtml(req.note)}"</p>` : ''}
+                ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;max-width:100%;overflow-wrap:anywhere;">Transfer to: <strong>${escapeEmployeesHtml(target)}</strong></p>` : ''}
+                <div class="shift-request-actions">
+                    <button type="button" onclick="approveEmployeeShiftRequest('${req.id}','${req.shift_id || ''}','${escapeEmployeesHtml(req.employee_name || '')}','${escapeEmployeesHtml(shift.position || '')}','${req.request_type}','${escapeEmployeesHtml(req.target_employee || '')}')"
+                        style="background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
+                        <i class="fas fa-check"></i> Approve
+                    </button>
+                    <button type="button" onclick="denyEmployeeShiftRequest('${req.id}','${escapeEmployeesHtml(req.employee_name || '')}')"
+                        style="background:#fff0f0;color:#e53e3e;border:1.5px solid #fed7d7;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
+                        <i class="fas fa-times"></i> Deny
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    if (badgeEl) {
+        badgeEl.textContent = String(requests.length);
+        badgeEl.style.display = 'inline-flex';
+    }
+}
+
+window.denyEmployeeShiftRequest = async function(requestId, employeeName) {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+    const { error } = await window.supabaseClient
+        .from('shift_requests')
+        .update({ status: 'denied' })
+        .eq('id', requestId);
+    if (error) {
+        showEmployeeToast(`Could not deny request: ${error.message}`, 'error');
+        return;
+    }
+    await loadEmployeeShiftRequestsCard();
+    showEmployeeToast(`Denied request for ${escapeEmployeesHtml(getEmployeeDisplayName(employeeName) || employeeName)}.`, 'error');
+};
+
+window.approveEmployeeShiftRequest = async function(requestId, shiftId, employeeName, position, requestType, targetEmployee) {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+    try {
+        if (requestType === 'transfer' && targetEmployee) {
+            let previousEmployeeName = '';
+            let shiftDate = '';
+            if (shiftId) {
+                const { data: beforeShift } = await window.supabaseClient
+                    .from('shifts')
+                    .select('employee_name, shift_date')
+                    .eq('id', shiftId)
+                    .maybeSingle();
+                previousEmployeeName = (beforeShift?.employee_name || '').trim();
+                shiftDate = (beforeShift?.shift_date || '').trim();
+            }
+            const targetId = typeof window.getEmployeeIdFromName === 'function'
+                ? window.getEmployeeIdFromName(targetEmployee) : null;
+            const { error: shiftErr } = await window.supabaseClient
+                .from('shifts')
+                .update({ employee_name: targetEmployee, employee_id: targetId })
+                .eq('id', shiftId);
+            if (shiftErr) throw shiftErr;
+            if (typeof window.transferTasksForShift === 'function') {
+                const tr = await window.transferTasksForShift(shiftId, targetEmployee, targetId, {
+                    previousEmployeeName,
+                    shiftDate,
+                });
+                if (!tr.ok && tr.error) {
+                    console.warn('[Employees] transferTasksForShift:', tr.error);
+                }
+            }
+            const { error: reqErr } = await window.supabaseClient
+                .from('shift_requests')
+                .update({ status: 'approved' })
+                .eq('id', requestId);
+            if (reqErr) throw reqErr;
+            showEmployeeToast(`Transfer approved — shift reassigned to ${employeesDisplayLabel(await buildEmployeesProfileDisplayLabelMap(), targetEmployee) || targetEmployee}.`, 'success');
+        } else {
+            if (shiftId) {
+                const { error: shiftErr } = await window.supabaseClient
+                    .from('shifts')
+                    .delete()
+                    .eq('id', shiftId);
+                if (shiftErr) throw shiftErr;
+            }
+            const { error: reqErr } = await window.supabaseClient
+                .from('shift_requests')
+                .update({ status: 'approved' })
+                .eq('id', requestId);
+            if (reqErr) throw reqErr;
+            showEmployeeToast('Time off approved.', 'success');
+        }
+        await loadEmployeeShiftRequestsCard();
+    } catch (e) {
+        showEmployeeToast(e?.message || 'Could not approve request.', 'error');
+    }
+};
 
 // Parse drop request text and store approved dates (same as script.js)
 function parseAndStoreDropRequest(text) {
@@ -513,7 +668,7 @@ function updateEmployeesRequestBadge() {
     const requestsCard = document.querySelector('.dashboard-grid .notifications-card');
     if (!requestsCard) return;
 
-    const notificationItems = requestsCard.querySelectorAll('.notification-item');
+    const notificationItems = requestsCard.querySelectorAll('.shift-request-card');
     const count = notificationItems.length;
 
     const cardBadge = requestsCard.querySelector('.card-badge');

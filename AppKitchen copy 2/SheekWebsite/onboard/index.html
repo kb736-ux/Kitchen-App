@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding — Sheek</title>
+  <meta name="description" content="Create your Sheek manager account: enter your name and work email." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="onboard-wizard-body">
+  <header class="site-header onboard-wizard-header">
+    <div class="wrap header-inner">
+      <a href="../index.html" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="../index.html#features">Features</a>
+        <a href="../index.html#pricing">Pricing</a>
+        <a href="index.html" aria-current="page">Onboard</a>
+        <a href="../onboarding-guide.html">Setup guide</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost" data-sheek-login href="#">Log in</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="onboard-wizard-main">
+    <div class="wrap onboard-wizard-inner">
+      <p class="onboard-step-pill">Step 1 of 3</p>
+      <h1 class="onboard-wizard-title">Manager details</h1>
+      <p class="onboard-wizard-lead">Enter your name and work email. Next you’ll name your restaurant and choose a plan.</p>
+
+      <div class="onboarding-lead-card onboard-wizard-card">
+        <form id="onboard-step1-form" class="onboarding-lead-form">
+          <div class="onboarding-field-row">
+            <div class="onboarding-field">
+              <label for="ob-first">First name</label>
+              <input id="ob-first" name="manager_first" type="text" autocomplete="given-name" placeholder="John" required />
+            </div>
+            <div class="onboarding-field">
+              <label for="ob-last">Last name</label>
+              <input id="ob-last" name="manager_last" type="text" autocomplete="family-name" placeholder="Doe" required />
+            </div>
+          </div>
+          <div class="onboarding-field onboarding-field-full">
+            <label for="ob-email">Work email</label>
+            <input id="ob-email" name="manager_email" type="email" autocomplete="email" inputmode="email" placeholder="you@restaurant.com" required />
+          </div>
+          <p id="ob-err" class="onboarding-lead-error" role="alert" hidden></p>
+          <button type="submit" class="btn btn-primary onboarding-lead-submit">Continue</button>
+        </form>
+      </div>
+      <p class="onboard-wizard-foot"><a href="../index.html">← Back to home</a></p>
+    </div>
+  </main>
+
+  <script src="../onboard-config.js"></script>
+  <script src="../site-config.js"></script>
+  <script src="onboard.js"></script>
+  <script>
+    (function () {
+      document.addEventListener("DOMContentLoaded", function () {
+        try {
+          var q = new URLSearchParams(window.location.search || "");
+          var pl = String(q.get("plan") || "").toLowerCase().trim();
+          if (pl === "starter" || pl === "growth" || pl === "scale") {
+            window.sheekOnboard.save({ pref_plan: pl });
+          }
+        } catch (_) {}
+
+        var form = document.getElementById("onboard-step1-form");
+        var errEl = document.getElementById("ob-err");
+        if (!form) return;
+
+        function showErr(msg) {
+          if (!errEl) return;
+          if (!msg) {
+            errEl.textContent = "";
+            errEl.setAttribute("hidden", "");
+            return;
+          }
+          errEl.textContent = msg;
+          errEl.removeAttribute("hidden");
+        }
+
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          showErr("");
+          if (typeof form.reportValidity === "function" && !form.reportValidity()) return;
+
+          var fn = String(document.getElementById("ob-first").value || "").trim();
+          var ln = String(document.getElementById("ob-last").value || "").trim();
+          var em = String(document.getElementById("ob-email").value || "").trim();
+          if (!fn || !ln) {
+            showErr("Please enter your first and last name.");
+            return;
+          }
+          if (!em) {
+            showErr("Please enter your work email.");
+            return;
+          }
+
+          window.sheekOnboard.save({
+            first_name: fn,
+            last_name: ln,
+            email: em,
+          });
+          window.location.href = "restaurant.html";
+        });
+      });
+    })();
+  </script>
+  <script src="../main.js"></script>
+</body>
+</html>
