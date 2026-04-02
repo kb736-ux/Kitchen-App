@@ -26,12 +26,13 @@ npx --yes serve .
 
 1. **Marketing site:** New site from Git → branch `main` →  
    **Base directory:** `AppKitchen copy 2/SheekWebsite`  
-   **Publish directory:** `.`  
+   **Publish directory:** `.` (**only** a dot — paths are relative to base; do **not** repeat `AppKitchen copy 2/…` here or you get a Netlify 404.)  
+   Leave **Package directory** and **Functions directory** empty unless you use them.  
    **Domain:** `sheekapp.com` (and `www` → optional redirect to apex).
 
 2. **Manager dashboard:** **Add another site** → same repository and branch →  
    **Base directory:** `AppKitchen copy 2/KennyKitchenWeb`  
-   **Publish directory:** `.`  
+   **Publish directory:** `.` (same rule — relative to base only)  
    **Domain:** `app.sheekapp.com`
 
 3. **DNS** (registrar or Netlify DNS):  
