@@ -1,5 +1,0 @@
-# Marketing site (sheekapp.com) — static HTML in SheekWebsite.
-# Without this, Netlify publishes repo root and has no index.html → “Page not found”.
-[build]
-  base = "AppKitchen copy 2/SheekWebsite"
-  publish = "."

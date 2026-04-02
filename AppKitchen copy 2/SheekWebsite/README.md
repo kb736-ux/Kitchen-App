@@ -20,11 +20,29 @@ npx --yes serve .
 
 ## Deploy
 
-1. **Marketing:** Deploy this folder to your host and attach the **apex** domain `sheekapp.com` (and `www` if you want — redirect one to the other).
-2. **App:** Deploy `KennyKitchenWeb/` as a **second** site on the same host (second Netlify/Vercel project) and set hostname **`app.sheekapp.com`**.
-3. **DNS** (at your registrar):  
-   - `A` / `CNAME` for `@` (and `www`) → marketing host  
-   - `CNAME` **`app`** → app project (e.g. `your-app.netlify.app`)
+### Netlify (recommended): two sites, same repo
+
+**Important:** There is **no** `netlify.toml` at the **repository root**. A root file with `base = …` makes **every** Netlify site publish the same folder (you’d see a red “Overridden by netlify.toml” warning). Each site sets **Base directory** in the Netlify UI only.
+
+1. **Marketing site:** New site from Git → branch `main` →  
+   **Base directory:** `AppKitchen copy 2/SheekWebsite`  
+   **Publish directory:** `.`  
+   **Domain:** `sheekapp.com` (and `www` → optional redirect to apex).
+
+2. **Manager dashboard:** **Add another site** → same repository and branch →  
+   **Base directory:** `AppKitchen copy 2/KennyKitchenWeb`  
+   **Publish directory:** `.`  
+   **Domain:** `app.sheekapp.com`
+
+3. **DNS** (registrar or Netlify DNS):  
+   - Apex / `www` → marketing Netlify site  
+   - Host **`app`** → CNAME to the **dashboard** site’s Netlify hostname (e.g. `sheek-app.netlify.app`), not the marketing site.
+
+### Other hosts
+
+1. **Marketing:** Deploy `SheekWebsite` and attach `sheekapp.com`.  
+2. **App:** Deploy `KennyKitchenWeb` as a **separate** deployment and attach **`app.sheekapp.com`**.  
+3. Same DNS split: apex/www → marketing, `app` → manager host.
 
 ## Supabase Auth (when you use magic links / redirects)
 

@@ -184,7 +184,8 @@ Deno.serve(async (req) => {
   const body = await req.text();
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    // Supabase Edge / Deno uses SubtleCrypto — sync constructEvent fails; use async API.
+    event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
   } catch (e) {
     console.error("[stripe-webhook] signature", e);
     return new Response(JSON.stringify({ error: "Invalid signature" }), {

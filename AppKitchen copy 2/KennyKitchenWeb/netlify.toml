@@ -1,0 +1,7 @@
+# Manager dashboard — separate Netlify site from marketing.
+# In Netlify UI set Base directory to: AppKitchen copy 2/KennyKitchenWeb
+# (No repo-root netlify.toml — it forced every site to publish SheekWebsite.)
+# Custom domain: app.sheekapp.com
+
+[build]
+  publish = "."

@@ -1,0 +1,5 @@
+# Used when this folder is the Netlify "Base directory" (marketing site only).
+# Do not put base = ... here — set Base directory in Netlify UI to:
+#   AppKitchen copy 2/SheekWebsite
+[build]
+  publish = "."
