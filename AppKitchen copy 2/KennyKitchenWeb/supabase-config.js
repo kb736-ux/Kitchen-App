@@ -26,7 +26,14 @@ window.EMPLOYEE_IDS = {
 
 (function () {
   const { createClient } = window.supabase;
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+    },
+  });
 
   window.supabaseClient = client;
   window.ORG_ID = ORG_ID || localStorage.getItem('kk_org_id') || null;

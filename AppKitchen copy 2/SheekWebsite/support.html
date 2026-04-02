@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Help &amp; support — Sheek</title>
+  <meta name="description" content="Contact Sheek support for help with the mobile app or manager dashboard." />
+  <link rel="canonical" href="https://sheekapp.com/support.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <!--
+    App Store Support URL (after deploy): https://sheekapp.com/support.html
+    Replace SUPPORT_EMAIL below with the inbox where you want messages (one place).
+  -->
+  <script>
+    window.SHEEK_SUPPORT_EMAIL = 'support@sheekapp.com';
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="https://sheekapp.com/" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="https://sheekapp.com/">Home</a>
+        <a href="onboarding-guide.html">Setup guide</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-primary" href="#" id="support-mailto-btn">Email support</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="section" style="padding-top: 3rem; padding-bottom: 4rem;">
+    <div class="wrap" style="max-width: 640px;">
+      <h1 class="section-title" style="text-align: left; margin-bottom: 0.5rem;">Help &amp; support</h1>
+      <p class="section-sub" style="text-align: left; margin-bottom: 2rem;">
+        Questions about Sheek, your account, or your restaurant’s setup? Send us an email — we read every message.
+      </p>
+
+      <div class="glass-card" style="padding: 1.5rem; border-radius: 16px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); margin-bottom: 1.5rem;">
+        <p style="margin: 0 0 1rem; color: var(--text-muted); font-size: 0.95rem;">
+          <strong style="color: #e2e8f0;">Staff using the mobile app:</strong> you need an invite from your manager. If you can’t sign in, ask them to resend your invite or check that you’re using the same email they added.
+        </p>
+        <p style="margin: 0; color: var(--text-muted); font-size: 0.95rem;">
+          <strong style="color: #e2e8f0;">Managers:</strong> for dashboard access and billing, include your restaurant name and the email on your account so we can find you quickly.
+        </p>
+      </div>
+
+      <p style="margin-bottom: 1rem;">
+        <a class="btn btn-primary btn-lg" href="#" id="support-mailto-hero">Open email to support</a>
+      </p>
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.25rem;">Or copy our address:</p>
+      <p style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+        <code id="support-email-display" style="font-size: 1rem; padding: 0.35rem 0.6rem; border-radius: 8px; background: rgba(0,0,0,0.25); color: #e2e8f0;"></code>
+        <button type="button" class="btn btn-outline" id="copy-email-btn" style="font-size: 0.9rem;">Copy</button>
+      </p>
+      <p id="copy-toast" role="status" aria-live="polite" style="margin-top: 0.75rem; font-size: 0.9rem; color: #4ade80; min-height: 1.25em;"></p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i> Sheek
+      </div>
+      <p class="footer-copy">&copy; <span id="y"></span> Sheek. <a href="https://sheekapp.com/">Home</a> · <a href="onboarding-guide.html">Setup guide</a></p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var email = (window.SHEEK_SUPPORT_EMAIL || 'support@sheekapp.com').trim();
+      var subject = encodeURIComponent('Sheek support request');
+      var body = encodeURIComponent(
+        'Hi Sheek team,\n\n' +
+        '— What do you need help with?\n\n\n' +
+        '— App: mobile / manager web (delete one)\n' +
+        '— Restaurant or account email (if applicable):\n\n\n' +
+        'Thanks,\n'
+      );
+      var href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
+
+      document.getElementById('support-email-display').textContent = email;
+      var y = document.getElementById('y');
+      if (y) y.textContent = new Date().getFullYear();
+
+      function wire(id) {
+        var el = document.getElementById(id);
+        if (el) el.setAttribute('href', href);
+      }
+      wire('support-mailto-btn');
+      wire('support-mailto-hero');
+
+      document.getElementById('copy-email-btn').addEventListener('click', function () {
+        var toast = document.getElementById('copy-toast');
+        function ok() {
+          if (toast) toast.textContent = 'Copied to clipboard.';
+        }
+        function fail() {
+          if (toast) toast.textContent = 'Select the address above and copy manually.';
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(email).then(ok).catch(fail);
+        } else {
+          fail();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

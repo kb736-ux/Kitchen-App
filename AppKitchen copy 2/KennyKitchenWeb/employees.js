@@ -1461,6 +1461,7 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
             org: window.ORG_ID || '',
             name: employeeName,
             manager: isManager ? '1' : '0',
+            email: trimmed,
         });
         const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
         const { error } = await window.supabaseClient.auth.signInWithOtp({

@@ -6,6 +6,26 @@
   <title>Sheek - Employee Setup</title>
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .onboard-step { margin-top: 16px; }
+    .onboard-step[hidden] { display: none !important; }
+    .onboard-label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .onboard-input {
+      width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+      font-size: 15px; font-family: inherit;
+    }
+    .onboard-input:focus { outline: none; border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2); }
+    .onboard-btn {
+      width: 100%; margin-top: 12px; padding: 12px 14px; border: none; border-radius: 10px;
+      background: #16a34a; color: #fff; font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer;
+    }
+    .onboard-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .onboard-btn-secondary { background: #f3f4f6; color: #111827; }
+    .onboard-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: #9ca3af; font-size: 12px; }
+    .onboard-divider::before, .onboard-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
+    .onboard-hint { font-size: 12px; color: #6b7280; margin-top: 8px; line-height: 1.4; }
+    .onboard-err { font-size: 13px; color: #b91c1c; margin-top: 8px; }
+  </style>
 </head>
 <body style="background:#0f172a;margin:0;font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;">
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -19,8 +39,68 @@
           <div id="onboard-subtitle" style="font-size:13px;color:#6b7280;margin-top:2px;">Finishing your account setup…</div>
         </div>
       </div>
+
       <div id="onboard-body" style="font-size:14px;color:#4b5563;line-height:1.5;">
-        <p>Checking your invite and linking you to the restaurant. This only takes a moment.</p>
+        <p id="onboard-body-intro">Confirm your email or phone, create a password, and we’ll link you to your restaurant.</p>
+      </div>
+
+      <!-- Step 1: not signed in -->
+      <div id="step-unauthed" class="onboard-step" hidden>
+        <form id="form-send-link" novalidate>
+          <label class="onboard-label" for="ob-email">Work email</label>
+          <input class="onboard-input" id="ob-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+          <button type="submit" class="onboard-btn" id="btn-send-link">Email me a sign-in link</button>
+          <p class="onboard-hint">We’ll email you a link to confirm this address. Use the same email your manager invited.</p>
+          <p id="form-send-link-err" class="onboard-err" hidden></p>
+        </form>
+
+        <div class="onboard-divider">or mobile</div>
+
+        <form id="form-send-sms" novalidate>
+          <div id="sms-step-request">
+            <label class="onboard-label" for="ob-phone">Mobile number</label>
+            <input class="onboard-input" id="ob-phone" name="phone" type="tel" autocomplete="tel" placeholder="+1 555 123 4567" inputmode="tel">
+            <button type="submit" class="onboard-btn onboard-btn-secondary" id="btn-send-sms">Text me a code</button>
+            <p class="onboard-hint">Include country code (e.g. +1). SMS must be enabled for your project in Supabase.</p>
+          </div>
+          <div id="sms-step-verify" hidden>
+            <label class="onboard-label" for="ob-sms-code">6-digit code</label>
+            <input class="onboard-input" id="ob-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456">
+            <button type="button" class="onboard-btn" id="btn-verify-sms">Verify &amp; continue</button>
+            <p class="onboard-hint">Enter the code we texted you.</p>
+          </div>
+          <p id="form-send-sms-err" class="onboard-err" hidden></p>
+        </form>
+
+        <div class="onboard-divider">already have a password?</div>
+
+        <form id="form-signin" novalidate>
+          <label class="onboard-label" for="ob-signin-email">Email</label>
+          <input class="onboard-input" id="ob-signin-email" type="email" autocomplete="email" required>
+          <label class="onboard-label" for="ob-signin-password" style="margin-top:10px;">Password</label>
+          <input class="onboard-input" id="ob-signin-password" type="password" autocomplete="current-password" required>
+          <button type="submit" class="onboard-btn" id="btn-signin">Sign in</button>
+          <p id="form-signin-err" class="onboard-err" hidden></p>
+        </form>
+      </div>
+
+      <!-- Step 2: signed in, set password -->
+      <div id="step-password" class="onboard-step" hidden>
+        <p class="onboard-hint" id="pw-signed-in-as" style="margin-bottom:12px;"></p>
+        <form id="form-password" novalidate>
+          <label class="onboard-label" for="ob-password">Create password</label>
+          <input class="onboard-input" id="ob-password" type="password" autocomplete="new-password" minlength="8" required>
+          <label class="onboard-label" for="ob-password2" style="margin-top:10px;">Confirm password</label>
+          <input class="onboard-input" id="ob-password2" type="password" autocomplete="new-password" minlength="8" required>
+          <button type="submit" class="onboard-btn" id="btn-password">Save password &amp; finish</button>
+          <p id="form-password-err" class="onboard-err" hidden></p>
+        </form>
+      </div>
+
+      <!-- Done -->
+      <div id="step-done" class="onboard-step" hidden>
+        <p id="step-done-message" style="color:#4b5563;"></p>
+        <a id="step-done-link" href="index.html" class="onboard-btn" style="display:inline-block;text-align:center;text-decoration:none;margin-top:16px;">Open Sheek</a>
       </div>
     </div>
   </div>
@@ -30,4 +110,3 @@
   <script src="employeeOnboard.js"></script>
 </body>
 </html>
-
