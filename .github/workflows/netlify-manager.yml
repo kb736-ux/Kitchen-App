@@ -1,0 +1,23 @@
+# Deploy KennyKitchenWeb when Netlify UI won't let you clear autofill (base/publish/package).
+# Setup: repo secrets NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID_MANAGER (see SheekWebsite README).
+# Optional: unlink Git on that Netlify site so only this workflow publishes the manager app.
+name: Netlify — manager (KennyKitchenWeb)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "AppKitchen copy 2/KennyKitchenWeb/**"
+      - ".github/workflows/netlify-manager.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Netlify
+        run: npx --yes netlify-cli deploy --prod --dir="AppKitchen copy 2/KennyKitchenWeb"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID_MANAGER }}

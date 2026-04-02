@@ -24,7 +24,7 @@ npx --yes serve .
 
 **No `netlify.toml` at the repository root** (a root `base = …` forces every site to the same app).
 
-Each app folder has its **own** `netlify.toml` with only `publish = "."` — that **`.`** means “this folder,” and it is only correct when Netlify’s **Base directory** is already set to that folder (see below).
+**Marketing** folder includes a small `netlify.toml` (`publish = "."`) so it pairs with **Base** in the UI (see below). **Manager** (`KennyKitchenWeb`) can be deployed via **GitHub Actions** instead if the Netlify UI keeps autofilling broken paths (see “If Netlify won’t let you clear autofill”).
 
 ### Netlify UI (both sites)
 
@@ -48,7 +48,20 @@ After you save, Netlify may show **Base** as `/` on the summary screen when it m
 
 If you instead leave **Base** empty and only set **Publish** to a long path, Netlify can treat `publish = "."` in `netlify.toml` as the **repo root** and you get a **404** — so use **Base + Publish `.`** together.
 
-3. **DNS** (registrar or Netlify DNS):  
+### If Netlify won’t let you clear autofill (Package / Publish / Functions)
+
+Some browsers or Netlify UI versions **refill** fields and won’t save empty values. Use **GitHub Actions** to deploy the manager app and **ignore** the broken UI for that site.
+
+1. **Netlify** → **User settings** → **Applications** → create a **personal access token** (or use a team token with deploy access).
+2. **Netlify** → your **manager** site → **Site configuration** → **General** → copy **Site ID** (API ID).
+3. **GitHub** → repo **Settings** → **Secrets and variables** → **Actions** → add:
+   - `NETLIFY_AUTH_TOKEN` — the token from step 1  
+   - `NETLIFY_SITE_ID_MANAGER` — the Site ID from step 2  
+4. Push to `main` (or merge a PR). Workflow **`.github/workflows/netlify-manager.yml`** runs `netlify deploy --prod --dir="AppKitchen copy 2/KennyKitchenWeb"` — no base/publish UI needed for that deploy.
+
+**Avoid two deploys fighting:** for the **manager** site only, either **unlink** the Git repo in Netlify (**Build & deploy → Continuous deployment → Manage repository → Unlink**), or set a **Stop builds** / ignore pattern if you use it — otherwise Git-triggered Netlify builds may still run with bad UI settings alongside the good Action deploy.
+
+**DNS** (registrar or Netlify DNS):  
    - Apex / `www` → marketing Netlify site  
    - Host **`app`** → CNAME to the **dashboard** site’s Netlify hostname (e.g. `sheek-app.netlify.app`), not the marketing site.
 

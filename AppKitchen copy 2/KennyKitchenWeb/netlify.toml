@@ -1,4 +1,0 @@
-# Used when Netlify "Base directory" = AppKitchen copy 2/KennyKitchenWeb
-# and "Publish directory" = .  (publish "." is relative to that base.)
-[build]
-  publish = "."
