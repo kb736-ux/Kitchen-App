@@ -22,17 +22,18 @@ npx --yes serve .
 
 ### Netlify (recommended): two sites, same repo
 
-**Important:** There is **no** `netlify.toml` at the **repository root**. A root file with `base = …` makes **every** Netlify site publish the same folder (you’d see a red “Overridden by netlify.toml” warning). Each site sets **Base directory** in the Netlify UI only.
+**Do not commit `netlify.toml` for these sites** (no root file, no file under `SheekWebsite` / `KennyKitchenWeb`). A `publish = "."` in `netlify.toml` is resolved from the **repo root**, so Netlify publishes the wrong folder and you’ll see **“Overridden by netlify.toml”** plus a **404**. Configure everything in the Netlify UI.
 
-1. **Marketing site:** New site from Git → branch `main` →  
-   **Base directory:** `AppKitchen copy 2/SheekWebsite`  
-   **Publish directory:** `.` (**only** a dot — paths are relative to base; do **not** repeat `AppKitchen copy 2/…` here or you get a Netlify 404.)  
-   Leave **Package directory** and **Functions directory** empty unless you use them.  
-   **Domain:** `sheekapp.com` (and `www` → optional redirect to apex).
+For **each** site, use paths from the **repository root** (leave **Base directory** empty):
 
-2. **Manager dashboard:** **Add another site** → same repository and branch →  
-   **Base directory:** `AppKitchen copy 2/KennyKitchenWeb`  
-   **Publish directory:** `.` (same rule — relative to base only)  
+1. **Marketing (`sheekapp.com`):**  
+   **Publish directory:** `AppKitchen copy 2/SheekWebsite`  
+   **Build command:** (empty) · **Functions:** (empty)  
+   **Domain:** `sheekapp.com` (and `www` if you want).
+
+2. **Manager (`app.sheekapp.com`):**  
+   **Publish directory:** `AppKitchen copy 2/KennyKitchenWeb`  
+   **Build command:** (empty) · **Functions:** (empty)  
    **Domain:** `app.sheekapp.com`
 
 3. **DNS** (registrar or Netlify DNS):  
