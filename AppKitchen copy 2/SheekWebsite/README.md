@@ -22,19 +22,31 @@ npx --yes serve .
 
 ### Netlify (recommended): two sites, same repo
 
-**Do not commit `netlify.toml` for these sites** (no root file, no file under `SheekWebsite` / `KennyKitchenWeb`). A `publish = "."` in `netlify.toml` is resolved from the **repo root**, so Netlify publishes the wrong folder and you’ll see **“Overridden by netlify.toml”** plus a **404**. Configure everything in the Netlify UI.
+**No `netlify.toml` at the repository root** (a root `base = …` forces every site to the same app).
 
-For **each** site, use paths from the **repository root** (leave **Base directory** empty):
+Each app folder has its **own** `netlify.toml` with only `publish = "."` — that **`.`** means “this folder,” and it is only correct when Netlify’s **Base directory** is already set to that folder (see below).
 
-1. **Marketing (`sheekapp.com`):**  
-   **Publish directory:** `AppKitchen copy 2/SheekWebsite`  
-   **Build command:** (empty) · **Functions:** (empty)  
-   **Domain:** `sheekapp.com` (and `www` if you want).
+### Netlify UI (both sites)
 
-2. **Manager (`app.sheekapp.com`):**  
-   **Publish directory:** `AppKitchen copy 2/KennyKitchenWeb`  
-   **Build command:** (empty) · **Functions:** (empty)  
-   **Domain:** `app.sheekapp.com`
+Use the **same pattern** for marketing and manager:
+
+| Field | Value |
+|--------|--------|
+| **Base directory** | Full path to **that** app (see below) |
+| **Publish directory** | `.` (one dot) |
+| **Build command** | (empty) |
+| **Package directory** | (empty) |
+| **Functions directory** | (empty) — clear `netlify/functions` if it was set |
+
+**Marketing (`sheekapp.com`):**  
+**Base directory:** `AppKitchen copy 2/SheekWebsite`
+
+**Manager (`app.sheekapp.com`):**  
+**Base directory:** `AppKitchen copy 2/KennyKitchenWeb`
+
+After you save, Netlify may show **Base** as `/` on the summary screen when it means “no extra prefix”; what matters is the **Configure** screen shows the **full path** above and **Publish** = `.`.
+
+If you instead leave **Base** empty and only set **Publish** to a long path, Netlify can treat `publish = "."` in `netlify.toml` as the **repo root** and you get a **404** — so use **Base + Publish `.`** together.
 
 3. **DNS** (registrar or Netlify DNS):  
    - Apex / `www` → marketing Netlify site  
