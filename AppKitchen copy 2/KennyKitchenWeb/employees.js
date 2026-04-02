@@ -1,17 +1,103 @@
-// Store position responsibilities
-const positionResponsibilities = {
-    'Server': 'Take orders, serve food, handle customer service, process payments',
-    'Line Cook': 'Prepare and cook food items, maintain kitchen stations, follow recipes',
-    'Dishwasher': 'Wash dishes, clean kitchen equipment, maintain cleanliness standards',
-    'Dessert': 'Prepare desserts, maintain dessert station, plate desserts',
-    'Hot Foods': 'Prepare hot food items, maintain temperature standards, coordinate with line cooks',
-    'Cold Foods': 'Prepare cold food items, salads, maintain cold storage',
-    'MOD': 'Manage operations, handle issues, coordinate staff, ensure quality',
-    'Expo': 'Expedite orders, coordinate between kitchen and servers, ensure timing',
-    'Dish': 'Wash dishes, maintain dish station, support kitchen operations',
-    'Prep': 'Prepare ingredients, chop vegetables, prep stations, support kitchen',
-    'FOH Manager': 'Manage front of house, coordinate servers, handle customer issues'
+// Optional icons when a position name matches (custom positions use briefcase).
+const POSITION_ICON_BY_NAME = {
+    Server: 'fa-utensils',
+    'Line Cook': 'fa-fire',
+    Dishwasher: 'fa-spray-can',
+    Dessert: 'fa-cookie-bite',
+    'Hot Foods': 'fa-thermometer-half',
+    'Cold Foods': 'fa-snowflake',
+    MOD: 'fa-user-shield',
+    Expo: 'fa-clipboard-check',
+    Dish: 'fa-drumstick-bite',
+    Prep: 'fa-cut',
+    'FOH Manager': 'fa-user-tie',
 };
+
+function iconClassForPositionName(name) {
+    const n = String(name || '').trim();
+    return POSITION_ICON_BY_NAME[n] || 'fa-briefcase';
+}
+
+function positionCardExists(positionName) {
+    const want = String(positionName || '').trim();
+    if (!want) return false;
+    return Array.from(document.querySelectorAll('.position-item[data-position]')).some(
+        (el) => (el.dataset.position || '').trim() === want,
+    );
+}
+
+/** Append a position card if missing; used for user-created positions and for names found in Supabase. */
+/** User-created position names with no employees yet (survive refresh; keyed per org). */
+function getExtraPositionNamesForOrg() {
+    if (!window.ORG_ID) return [];
+    try {
+        const raw = sessionStorage.getItem(`kk_extra_positions_v1_${window.ORG_ID}`);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.map((s) => String(s || '').trim()).filter(Boolean) : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function addExtraPositionName(name) {
+    const n = String(name || '').trim();
+    if (!n || !window.ORG_ID) return;
+    const cur = new Set(getExtraPositionNamesForOrg());
+    cur.add(n);
+    sessionStorage.setItem(`kk_extra_positions_v1_${window.ORG_ID}`, JSON.stringify([...cur]));
+}
+
+function collectAllKnownPositionLabels() {
+    const labels = new Set(getExtraPositionNamesForOrg());
+    const posData = getEmployeePositions();
+    Object.values(posData || {}).forEach((arr) => {
+        (arr || []).forEach((p) => {
+            const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
+            if (label) labels.add(label);
+        });
+    });
+    return labels;
+}
+
+function appendPositionCard(positionName, opts) {
+    const animate = opts && opts.animate !== false;
+    const name = String(positionName || '').trim();
+    if (!name || positionCardExists(name)) return;
+
+    const positionsList = document.querySelector('.positions-list');
+    if (!positionsList) return;
+
+    const positionItem = document.createElement('div');
+    positionItem.className = 'position-item';
+    positionItem.dataset.position = name;
+    positionItem.dataset.employees = '[]';
+    const icon = iconClassForPositionName(name);
+    positionItem.innerHTML = `
+            <div class="position-icon">
+                <i class="fas ${icon}"></i>
+            </div>
+            <div class="position-info">
+                <span class="position-name">${escapeEmployeesHtml(name)}</span>
+                <span class="position-count">0 employees capable</span>
+            </div>
+        `;
+
+    positionItem.addEventListener('click', () => openPositionDetail(name));
+
+    positionsList.appendChild(positionItem);
+    if (animate) {
+        positionItem.style.opacity = '0';
+        positionItem.style.transform = 'translateY(10px)';
+        requestAnimationFrame(() => {
+            positionItem.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+            positionItem.style.opacity = '1';
+            positionItem.style.transform = 'translateY(0)';
+        });
+    }
+}
+
+// Responsibility text per position (filled when user creates/edits a position; no default org positions).
+const positionResponsibilities = {};
 
 // ── Employee → Positions (Supabase) ───────────────────────────────────────────
 // Structure: { "Rohan": ["Server", "Bartend"], "Kenny": ["Server"], ... }
@@ -937,9 +1023,22 @@ function updatePositionsFromEmployees() {
     const positionMap = {};
     Object.entries(posData).forEach(([empName, positions]) => {
         (positions || []).forEach(pos => {
-            if (!positionMap[pos]) positionMap[pos] = [];
-            if (!positionMap[pos].includes(empName)) positionMap[pos].push(empName);
+            const label = typeof pos === 'string' ? pos.trim() : String(pos?.name || '').trim();
+            if (!label) return;
+            if (!positionMap[label]) positionMap[label] = [];
+            if (!positionMap[label].includes(empName)) positionMap[label].push(empName);
         });
+    });
+
+    // Rebuild list from DB + sessionStorage extras only (ignores stale HTML from browser cache).
+    const needed = new Set(Object.keys(positionMap));
+    getExtraPositionNamesForOrg().forEach((n) => needed.add(n));
+
+    const list = document.querySelector('.positions-list');
+    if (list) list.innerHTML = '';
+
+    [...needed].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).forEach((name) => {
+        appendPositionCard(name, { animate: false });
     });
 
     // Update each position card
@@ -1205,48 +1304,14 @@ function handleCreatePositionSubmit() {
         return;
     }
 
-    // Store responsibilities
-    positionResponsibilities[positionName] = responsibilities;
-
-    // Add position to the positions list
-    const positionsList = document.querySelector('.positions-list');
-    if (positionsList) {
-        const positionItem = document.createElement('div');
-        positionItem.className = 'position-item';
-        positionItem.dataset.position = positionName;
-        positionItem.dataset.employees = '[]';
-        positionItem.innerHTML = `
-            <div class="position-icon">
-                <i class="fas fa-briefcase"></i>
-            </div>
-            <div class="position-info">
-                <span class="position-name">${escapeEmployeesHtml(positionName)}</span>
-                <span class="position-count">0 employees capable</span>
-            </div>
-        `;
-        
-        // Add click handler
-        positionItem.addEventListener('click', () => openPositionDetail(positionName));
-        
-        positionsList.appendChild(positionItem);
-        positionItem.style.opacity = '0';
-        positionItem.style.transform = 'translateY(10px)';
-        requestAnimationFrame(() => {
-            positionItem.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
-            positionItem.style.opacity = '1';
-            positionItem.style.transform = 'translateY(0)';
-        });
-
-        // Update total count
-        const badge = document.querySelector('.positions-card .card-badge');
-        if (badge) {
-            const currentCount = parseInt(badge.textContent) || 0;
-            badge.textContent = `${currentCount + 1} Total`;
-        }
-        
-        // Update positions to reflect current employees
-        updatePositionsFromEmployees();
+    if (collectAllKnownPositionLabels().has(positionName)) {
+        showEmployeeToast('A position with that name already exists.', 'error');
+        return;
     }
+
+    positionResponsibilities[positionName] = responsibilities;
+    addExtraPositionName(positionName);
+    updatePositionsFromEmployees();
 
     const modal = document.getElementById('create-position-modal');
     closeEmployeesModal(modal);

@@ -1454,11 +1454,11 @@ async function populatePositionSelect() {
             .select('positions')
             .eq('org_id', window.ORG_ID);
         (data || []).forEach(r => {
-            (r.positions || []).forEach(p => positions.add(typeof p === 'string' ? p : p?.name || ''));
+            (r.positions || []).forEach(p => {
+                const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
+                if (label) positions.add(label);
+            });
         });
-    }
-    if (positions.size === 0) {
-        ['Line Cook', 'Server', 'Dish', 'Prep', 'FOH Manager'].forEach(p => positions.add(p));
     }
 
     const opts = '<option value="">Select Position</option>' + [...positions].sort().map(p => {
