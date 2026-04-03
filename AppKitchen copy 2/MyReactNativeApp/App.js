@@ -802,6 +802,16 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     setHomeUrgentTasks(urgentAll);
   }
 
+  /** Parse shift start/end as local Date; extend end to next calendar day if overnight. */
+  function shiftTimeBounds(s) {
+    if (!s?.shift_date || !s?.start_time || !s?.end_time) return null;
+    const start = new Date(`${s.shift_date}T${String(s.start_time).slice(0, 8)}`);
+    const end = new Date(`${s.shift_date}T${String(s.end_time).slice(0, 8)}`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    if (end <= start) end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
   // ── Fetch today's shift + next upcoming shift for this employee ───────────
   async function checkTodayShift(oid) {
     if (!oid) return;
@@ -824,8 +834,22 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       console.warn('[Shifts] today query:', errToday.message);
     }
 
-    const todayData =
-      (shiftsToday || []).find((s) => shiftRowMatchesEmployee(s, employeeId, candidateNames, authUserId)) || null;
+    const myToday = (shiftsToday || []).filter((s) =>
+      shiftRowMatchesEmployee(s, employeeId, candidateNames, authUserId)
+    );
+    const nowMs = Date.now();
+    const stillRelevant = myToday.filter((s) => {
+      const b = shiftTimeBounds(s);
+      if (!b) return false;
+      return nowMs < b.end.getTime();
+    });
+    stillRelevant.sort((a, b) => {
+      const ba = shiftTimeBounds(a);
+      const bb = shiftTimeBounds(b);
+      if (!ba || !bb) return 0;
+      return ba.start.getTime() - bb.start.getTime();
+    });
+    const todayData = stillRelevant[0] || null;
 
     if (todayData?.id && todayData.shift_date && todayData.start_time && todayData.end_time) {
       const { data: siblingRows } = await supabase

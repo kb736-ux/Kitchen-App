@@ -50,6 +50,13 @@ function resolveEmployeeDisplayLabel(labelMap, raw) {
   return labelMap.get(key) || (raw || '').trim();
 }
 
+/** Web scheduling uses "Select Position" as dropdown placeholder; don't show that as a real role. */
+function displayShiftPosition(pos) {
+  const p = String(pos || '').trim();
+  if (!p || /^select position$/i.test(p)) return 'Staff';
+  return p;
+}
+
 const HomePage = ({
   orgId,
   currentOrgName = '',
@@ -552,7 +559,7 @@ const HomePage = ({
               </View>
             </View>
             <View style={styles.shiftBadge}>
-              <Text style={styles.shiftBadgeText}>{todayShift.position || 'Staff'}</Text>
+              <Text style={styles.shiftBadgeText}>{displayShiftPosition(todayShift.position)}</Text>
             </View>
           </View>
         ) : nextShift ? (
@@ -573,7 +580,7 @@ const HomePage = ({
             </View>
             <View style={[styles.shiftBadge, { backgroundColor: '#ebf8ff' }]}>
               <Text style={[styles.shiftBadgeText, { color: '#2b6cb0' }]}>
-                {nextShift.position || 'Staff'}
+                {displayShiftPosition(nextShift.position)}
               </Text>
             </View>
           </View>

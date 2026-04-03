@@ -31,7 +31,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sheekapp.sheek"
+      "bundleIdentifier": "com.sheekapp.sheek",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.sheekapp.sheek",
@@ -39,10 +42,19 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2a93b4db-57c4-440e-a62e-9e3b0711d4d2"
+      }
+    },
+    "owner": "sheekapp"
   }
 }
