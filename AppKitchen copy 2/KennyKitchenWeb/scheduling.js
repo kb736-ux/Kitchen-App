@@ -1141,8 +1141,8 @@ function setupModalHandlers() {
     // Update employee dropdown when day changes
     const daySelect = document.getElementById('day-select');
     if (daySelect) {
-        daySelect.addEventListener('change', () => {
-            updateEmployeeDropdownForDay();
+        daySelect.addEventListener('change', async () => {
+            await updateEmployeeDropdownForDay();
             updateAssignShiftConfirmState();
         });
     }
@@ -1431,7 +1431,7 @@ async function populateEmployeeSelectFromOrg() {
         const displayText = labelMap.get(nk) || n;
         return `<option value="${val}">${escapeHtml(displayText)}</option>`;
     }).join('');
-    updateEmployeeDropdownForDay();
+    await updateEmployeeDropdownForDay();
     await populatePositionSelect();
 }
 
@@ -1471,16 +1471,21 @@ async function populatePositionSelect() {
 async function updateEmployeeDropdownForDay() {
     const daySelect = document.getElementById('day-select');
     const employeeSelect = document.getElementById('employee-select');
+    console.log('[TimeOff-Dropdown] daySelect:', !!daySelect, 'employeeSelect:', !!employeeSelect);
     if (!daySelect || !employeeSelect) return;
     
     const selectedDay = daySelect.value;
     const selectedDate = getDateForDay(selectedDay);
+    console.log('[TimeOff-Dropdown] selectedDay:', selectedDay, 'selectedDate:', selectedDate);
     if (!selectedDate) return;
     
     let timeOffRows = [];
     try {
         timeOffRows = await fetchApprovedTimeOffRequestsForOrg();
-    } catch(e) {}
+    } catch(e) {
+        console.warn('[TimeOff-Dropdown] fetch error:', e);
+    }
+    console.log('[TimeOff-Dropdown] timeOffRows:', JSON.stringify(timeOffRows));
     
     // Update each option to show drop status and hide if on time off
     Array.from(employeeSelect.options).forEach(option => {
@@ -1488,14 +1493,31 @@ async function updateEmployeeDropdownForDay() {
         
         const cleanText = option.textContent.replace(' (Approved Drop)', '').trim();
         const fallbackName = getEmployeeDisplayName(option.value);
+        const firstName = cleanText.split(' ')[0];
         
-        const hasTimeOff = employeeCoveredByTimeOffRows(timeOffRows, cleanText, selectedDate) || 
-                           employeeCoveredByTimeOffRows(timeOffRows, fallbackName, selectedDate) ||
-                           employeeCoveredByTimeOffRows(timeOffRows, option.value, selectedDate);
+        // Check multiple name variations against every time-off row
+        let hasTimeOff = false;
+        for (const row of timeOffRows) {
+            const rowName = (row.employee_name || '').trim();
+            const s = row.time_off_start_date;
+            const e = row.time_off_end_date || s;
+            if (!s || !e) continue;
+            if (selectedDate < s || selectedDate > e) continue;
+            
+            // Check all possible name matches
+            if (employeeNameFuzzyMatch(rowName, cleanText) ||
+                employeeNameFuzzyMatch(rowName, fallbackName) ||
+                employeeNameFuzzyMatch(rowName, option.value) ||
+                employeeNameFuzzyMatch(rowName, firstName)) {
+                hasTimeOff = true;
+                console.log('[TimeOff-Dropdown] HIDING', cleanText, '- matched time off row:', rowName, s, '-', e);
+                break;
+            }
+        }
                            
         const hasDrop = isEmployeeDropping(cleanText, selectedDate) || 
                         isEmployeeDropping(fallbackName, selectedDate) ||
-                        isEmployeeDropping(cleanText.split(' ')[0], selectedDate);
+                        isEmployeeDropping(firstName, selectedDate);
         
         if (hasTimeOff) {
             option.style.display = 'none';
@@ -1516,7 +1538,7 @@ async function updateEmployeeDropdownForDay() {
     });
 }
 
-function openModal(modalId, preselectedDay = null) {
+async function openModal(modalId, preselectedDay = null) {
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.classList.add('active');
@@ -1533,7 +1555,7 @@ function openModal(modalId, preselectedDay = null) {
                     daySelectGroup.style.display = 'none';
                 }
                 // Update employee dropdown for this day
-                updateEmployeeDropdownForDay();
+                await updateEmployeeDropdownForDay();
             }
             updateAssignShiftConfirmState();
         } else if (modalId === 'assign-shift-modal') {
@@ -1543,7 +1565,7 @@ function openModal(modalId, preselectedDay = null) {
                 daySelectGroup.style.display = 'block';
             }
             // Update employee dropdown for default day
-            updateEmployeeDropdownForDay();
+            await updateEmployeeDropdownForDay();
             updateAssignShiftConfirmState();
         }
         
