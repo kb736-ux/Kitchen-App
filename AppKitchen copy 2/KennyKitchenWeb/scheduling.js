@@ -419,47 +419,32 @@ async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, sta
 /** One fetch for assign-shift recurrence (was N×260 round-trips and froze the UI). */
 async function fetchApprovedTimeOffRequestsForOrg() {
     if (!window.supabaseClient || !window.ORG_ID) return [];
-    const [reqRes, profRes] = await Promise.all([
+    const [reqRes, labelMap] = await Promise.all([
         window.supabaseClient
             .from('shift_requests')
             .select('employee_name, time_off_start_date, time_off_end_date')
             .eq('org_id', window.ORG_ID)
             .eq('status', 'approved')
             .eq('request_type', 'time_off'),
-        window.supabaseClient
-            .from('profiles')
-            .select('employee_name, display_name, first_name, last_name, email')
-            .eq('org_id', window.ORG_ID),
+        buildProfileDisplayLabelMap(),
     ]);
     if (reqRes.error || !reqRes.data?.length) return [];
-    const profiles = profRes.data || [];
     
-    // Build a lookup: from any name variant → all known names for that person
-    const nameAliases = new Map(); // lowercased key → Set of all name variants
-    profiles.forEach(p => {
-        const variants = new Set();
-        const en = (p.employee_name || '').trim();
-        const dn = (p.display_name || '').trim();
-        const fn = (p.first_name || '').trim();
-        const ln = (p.last_name || '').trim();
-        const full = [fn, ln].filter(Boolean).join(' ');
-        const emailLocal = ((p.email || '').split('@')[0] || '').trim();
-        [en, dn, fn, full, emailLocal].forEach(v => { if (v) variants.add(v); });
-        
-        // Map each variant key to the full set
-        variants.forEach(v => {
-            const k = v.toLowerCase();
-            if (!nameAliases.has(k)) nameAliases.set(k, new Set());
-            variants.forEach(vv => nameAliases.get(k).add(vv));
-        });
-    });
-    
-    // Enrich each time-off row with all name variants
     return reqRes.data.map(r => {
         const storedName = (r.employee_name || '').trim();
-        const storedKey = storedName.toLowerCase();
-        const aliases = nameAliases.get(storedKey);
-        const allNames = aliases ? [...aliases] : [storedName];
+        // Resolve stored name (e.g. "kennyisb4e") to display label (e.g. "Rohan Kumar")
+        // using the same profile lookup the shift request cards use
+        const displayLabel = getEmployeeDisplayLabelFromMap(labelMap, storedName);
+        const allNames = [storedName];
+        if (displayLabel && displayLabel !== storedName) {
+            allNames.push(displayLabel);
+            // Also add first name
+            const firstName = displayLabel.split(' ')[0];
+            if (firstName && !allNames.includes(firstName)) allNames.push(firstName);
+        }
+        
+        console.log('[TimeOff] Row:', storedName, '→ resolved:', displayLabel, '| allNames:', allNames);
+        
         return {
             employee_name: storedName,
             all_names: allNames,
