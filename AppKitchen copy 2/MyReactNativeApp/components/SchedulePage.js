@@ -139,7 +139,7 @@ function groupRepeatingShifts(rows) {
   return groups.sort((a, b) => (a.shift?.shift_date || '').localeCompare(b.shift?.shift_date || ''));
 }
 
-const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
+const SchedulePage = ({ orgId, profileData = {} }) => {
   const {
     employeeName,
     displayName,
@@ -242,7 +242,10 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
       .eq('employee_name', employeeName)
       .order('created_at', { ascending: false })
       .limit(30);
-    if (!error) setNotifications(data || []);
+    if (!error) {
+      // Open-shift alerts are disabled in-app for now (manager web may still create these rows).
+      setNotifications((data || []).filter((n) => n.type !== 'open_shift'));
+    }
   }
 
   async function markAllRead() {
@@ -924,10 +927,6 @@ const SchedulePage = ({ onOpenShiftsPress, orgId, profileData = {} }) => {
 
         {/* Bottom Buttons */}
         <View style={styles.bottomButtons}>
-          <TouchableOpacity style={styles.bottomButton} onPress={onOpenShiftsPress}>
-            <Ionicons name="calendar-outline" size={18} color="#4a5568" style={styles.btnIcon} />
-            <Text style={styles.bottomButtonText}>Open Shifts</Text>
-          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.bottomButton, styles.requestButton]}
             onPress={() => { setModalMonth(new Date()); setShowTimeOffModal(true); }}

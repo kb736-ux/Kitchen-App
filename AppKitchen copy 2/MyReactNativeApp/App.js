@@ -12,7 +12,6 @@ import SchedulePage from './components/SchedulePage';
 import RecipesPage from './components/RecipesPage';
 import ProgressPage from './components/ProgressPage';
 import TaskDetailPage from './components/TaskDetailPage';
-import OpenShiftsPage from './components/OpenShiftsPage';
 import CalendarPage from './components/CalendarPage';
 import ChatPage from './components/ChatPage';
 import ProfilePage from './components/ProfilePage';
@@ -103,7 +102,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   const [showProgress, setShowProgress] = useState(false);
   const [showTaskDetail, setShowTaskDetail] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
-  const [showOpenShifts, setShowOpenShifts] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
 
   const { employeeName, displayName, defaultEmployeeName, employeeId, authUserId, email, firstName, lastName, authLoading } = useEmployee();
@@ -527,7 +525,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
 
   async function markScheduleNotifsRead(oid) {
     if (!oid) return;
-    const scheduleTypes = ['shift_assigned', 'open_shift', 'request_approved', 'request_denied', 'shift_request'];
+    const scheduleTypes = ['shift_assigned', 'request_approved', 'request_denied', 'shift_request'];
     let query = supabase
       .from('notifications')
       .select('id')
@@ -547,7 +545,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
 
   async function fetchScheduleUnreadDot(oid) {
     if (!oid) return;
-    const scheduleTypes = ['shift_assigned', 'open_shift', 'request_approved', 'request_denied', 'shift_request'];
+    const scheduleTypes = ['shift_assigned', 'request_approved', 'request_denied', 'shift_request'];
     let query = supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
@@ -1055,9 +1053,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   };
   const handleBackFromTaskDetail = () => { setShowTaskDetail(false); setSelectedTask(null); };
 
-  const handleOpenShiftsPress = () => setShowOpenShifts(true);
-  const handleBackFromOpenShifts = () => setShowOpenShifts(false);
-
   const handleCalendarPress = () => setShowCalendar(true);
   const handleBackFromCalendar = () => setShowCalendar(false);
 
@@ -1125,9 +1120,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     if (showProgress) {
         return <ProgressPage onBack={handleBackFromProgress} tasks={displayedTasks} allTasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} />;
     }
-    if (showOpenShifts) {
-      return <OpenShiftsPage onBack={handleBackFromOpenShifts} orgId={orgId} />;
-    }
     if (showCalendar) {
       return <CalendarPage onBack={handleBackFromCalendar} orgId={orgId} />;
     }
@@ -1159,7 +1151,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       case 'Tasks':
         return <TasksPage onProgressPress={handleProgressPress} tasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} todayIsShift={!!todayShift} toggleUrgent={toggleUrgent} addUrgentTask={addUrgentTask} onRefresh={async () => { if (orgId) await fetchTasks(orgId); }} />;
       case 'Schedule':
-        return <SchedulePage onOpenShiftsPress={handleOpenShiftsPress} orgId={orgId} profileData={profileData} />;
+        return <SchedulePage orgId={orgId} profileData={profileData} />;
       case 'Recipes':
         return <RecipesPage orgId={orgId} />;
       case 'Chat':
@@ -1185,10 +1177,10 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      <View style={[styles.content, (showProgress || showTaskDetail || showOpenShifts || showCalendar || showProfile) && styles.contentFullScreen]}>
+      <View style={[styles.content, (showProgress || showTaskDetail || showCalendar || showProfile) && styles.contentFullScreen]}>
         {renderCurrentPage()}
       </View>
-      {!showProgress && !showTaskDetail && !showOpenShifts && !showCalendar && !showProfile && (
+      {!showProgress && !showTaskDetail && !showCalendar && !showProfile && (
         <View style={styles.bottomNav}>
           {['Home', 'Tasks', 'Schedule', 'Recipes', 'Chat'].map((tab) => (
             <TouchableOpacity

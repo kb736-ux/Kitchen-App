@@ -514,6 +514,41 @@ function showNotificationToast(message, type = 'success') {
     }, 3000);
 }
 
+function progressAssigneeKey(name) {
+    return (name || '').trim().toLowerCase();
+}
+
+/** Kitchen Progress: one row per assignee — their earliest open task (by time, then id). */
+function pickNextKitchenTasksPerAssignee(openTasks) {
+    const byKey = new Map();
+    (openTasks || []).forEach((t) => {
+        const assignee = (t.assignee || '').trim();
+        if (!assignee || assignee === 'Unassigned') return;
+        const key = progressAssigneeKey(assignee);
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(t);
+    });
+    const picks = [];
+    byKey.forEach((list) => {
+        list.sort((a, b) => {
+            const taRaw = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tbRaw = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            const ta = Number.isFinite(taRaw) ? taRaw : 0;
+            const tb = Number.isFinite(tbRaw) ? tbRaw : 0;
+            if (ta !== tb) return ta - tb;
+            const ida = a.supabase_id != null ? Number(a.supabase_id) : 0;
+            const idb = b.supabase_id != null ? Number(b.supabase_id) : 0;
+            if (ida !== idb) return ida - idb;
+            return String(a.description || '').localeCompare(String(b.description || ''), undefined, { sensitivity: 'base' });
+        });
+        picks.push(list[0]);
+    });
+    picks.sort((a, b) =>
+        (a.assignee || '').localeCompare(b.assignee || '', undefined, { sensitivity: 'base' })
+    );
+    return picks;
+}
+
 // Load stored tasks from scheduling page
 function loadStoredTasks() {
     // First, try to load from localStorage
@@ -534,13 +569,26 @@ function loadStoredTasks() {
     const progressList = document.querySelector('.progress-list');
     const emptyMsg = document.getElementById('progress-list-empty-msg');
     
-    // Show all assigned incomplete tasks for managers (do not require a matching shift row — that hid tasks when "0 on shift").
-    const tasksToShow = window.kitchenTasks.filter(t => {
+    const openAssigned = window.kitchenTasks.filter(t => {
         const assignee = (t.assignee || '').trim();
         if (!assignee || assignee === 'Unassigned') return false;
         if (t.completed) return false;
+        
+        if (window.todayShiftNames) {
+            const assigneeLower = assignee.toLowerCase();
+            let isOnShift = false;
+            for (const shiftName of window.todayShiftNames) {
+                if (shiftName.toLowerCase() === assigneeLower) {
+                    isOnShift = true;
+                    break;
+                }
+            }
+            if (!isOnShift) return false;
+        }
+        
         return true;
     });
+    const tasksToShow = pickNextKitchenTasksPerAssignee(openAssigned);
     
     if (progressList) {
         const existingItems = progressList.querySelectorAll('.progress-item');
@@ -553,7 +601,7 @@ function loadStoredTasks() {
         
         tasksToShow.forEach(task => {
             if (typeof window.createTaskItem === 'function') {
-                window.createTaskItem(progressList, task.assignee, task.description);
+                window.createTaskItem(progressList, task.assignee, task.description, task.supabase_id);
             } else {
                         // Fallback: create task item (will be updated by updateTaskItemDisplay)
                         const taskItem = document.createElement('div');
@@ -561,6 +609,7 @@ function loadStoredTasks() {
                         taskItem.dataset.employeeName = task.assignee;
                         taskItem.dataset.taskDescription = task.description;
                         taskItem.dataset.completed = 'false';
+                        if (task.supabase_id != null) taskItem.dataset.supabaseId = String(task.supabase_id);
                         
                         const currentUser = getCurrentUser();
                         const isAssignedToCurrentUser = currentUser && currentUser.toLowerCase() === task.assignee.toLowerCase();
@@ -904,27 +953,9 @@ if (typeof window.removeTask === 'undefined') {
             }
         }
         
-        // Remove from progress list on home page
-        const progressList = document.querySelector('.progress-list');
-        if (progressList) {
-            progressList.querySelectorAll('.progress-item').forEach(item => {
-                const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
-                const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
-                
-                if (assignee === employeeName && desc === taskDescription) {
-                    // Animate out
-                    item.style.transition = 'all 0.3s ease';
-                    item.style.opacity = '0';
-                    item.style.transform = 'translateX(-20px)';
-                    setTimeout(() => {
-                        item.remove();
-                        // Update shift card indicators if on scheduling page
-                        if (typeof updateEmployeeShiftCards === 'function') {
-                            updateEmployeeShiftCards(employeeName);
-                        }
-                    }, 300);
-                }
-            });
+        if (typeof loadStoredTasks === 'function') loadStoredTasks();
+        if (typeof updateEmployeeShiftCards === 'function') {
+            updateEmployeeShiftCards(employeeName);
         }
         
         // Show notification
@@ -988,10 +1019,6 @@ function updateTaskCompletionStatus(employeeName, taskDescription, isCompleted) 
                     }
                 }
                 
-                // Check if all tasks are complete
-                if (isCompleted && typeof window.checkAllTasksComplete === 'function') {
-                    window.checkAllTasksComplete(employeeName);
-                }
             }
         });
     }
@@ -1004,7 +1031,13 @@ function updateTaskCompletionStatus(employeeName, taskDescription, isCompleted) 
                 task.completed = isCompleted;
             }
         });
+        try {
+            localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+        } catch (e) {
+            console.warn('Could not save tasks to localStorage:', e);
+        }
     }
+    if (typeof loadStoredTasks === 'function') loadStoredTasks();
 }
 
 // Update individual task item display
@@ -1064,47 +1097,59 @@ function updateTaskItemDisplay(taskItem) {
 // Handle checkbox change (defined in scheduling.js, but also available here)
 if (typeof handleTaskCheckboxChange === 'undefined') {
     function handleTaskCheckboxChange(taskItem, checkbox) {
+        const employeeName = taskItem.dataset.employeeName || taskItem.querySelector('.task-assignee')?.textContent?.trim();
+        const currentUser = getCurrentUser();
+        const isAssignedToCurrentUser = currentUser && employeeName && currentUser.toLowerCase() === employeeName.toLowerCase();
+        if (!isAssignedToCurrentUser) return;
+
+        const taskDescription = taskItem.dataset.taskDescription || taskItem.querySelector('.task-text')?.textContent?.trim();
+        const sid = taskItem.dataset.supabaseId;
+
         if (checkbox.checked) {
-            const taskDescription = taskItem.dataset.taskDescription || taskItem.querySelector('.task-text')?.textContent?.trim();
             if (taskDescription && typeof applyTaskCompletionToInventory === 'function') {
                 applyTaskCompletionToInventory(taskDescription, true);
             }
-            // Mark as complete
-            taskItem.classList.add('task-completed');
-            taskItem.classList.remove('in-progress');
-            const taskText = taskItem.querySelector('.task-text');
-            if (taskText) {
-                taskText.style.textDecoration = 'line-through';
-                taskText.style.opacity = '0.6';
+        }
+
+        if (typeof window.kitchenTasks !== 'undefined') {
+            window.kitchenTasks.forEach((task) => {
+                const match = sid
+                    ? String(task.supabase_id) === String(sid)
+                    : (task.assignee && employeeName &&
+                        task.assignee.toLowerCase() === employeeName.toLowerCase() &&
+                        task.description === taskDescription);
+                if (match) task.completed = !!checkbox.checked;
+            });
+            try {
+                localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+            } catch (e) {
+                console.warn('Could not save tasks to localStorage:', e);
             }
-            
-            // Check if all tasks for this employee are complete
-            const employeeName = taskItem.dataset.employeeName || taskItem.querySelector('.task-assignee')?.textContent.trim();
-            if (employeeName && typeof checkAllTasksComplete === 'function') {
-                checkAllTasksComplete(employeeName);
-            } else {
-                // Fallback: remove after delay
-                setTimeout(() => {
-                    taskItem.style.transition = 'all 0.4s ease';
-                    taskItem.style.opacity = '0';
-                    taskItem.style.transform = 'translateX(-20px)';
-                    setTimeout(() => {
-                        taskItem.remove();
-                        if (employeeName && typeof updateEmployeeShiftCards === 'function') {
-                            setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-                        }
-                    }, 400);
-                }, 1000);
-            }
-        } else {
-            // Mark as incomplete
-            taskItem.classList.remove('task-completed');
-            taskItem.classList.add('in-progress');
-            const taskText = taskItem.querySelector('.task-text');
-            if (taskText) {
-                taskText.style.textDecoration = 'none';
-                taskText.style.opacity = '1';
-            }
+        }
+
+        if (window.supabaseClient && window.ORG_ID) {
+            const newStatus = checkbox.checked ? 'completed' : 'todo';
+            const localTask = sid
+                ? (window.kitchenTasks || []).find((t) => String(t.supabase_id) === String(sid))
+                : (window.kitchenTasks || []).find(
+                    (t) =>
+                        t.assignee === employeeName && t.description === taskDescription
+                );
+            const query = window.supabaseClient.from('tasks').update({
+                status: newStatus,
+                completed_at: checkbox.checked ? new Date().toISOString() : null
+            }).eq('org_id', window.ORG_ID);
+            const update = localTask?.supabase_id
+                ? query.eq('id', localTask.supabase_id)
+                : query.eq('text', taskDescription);
+            update.then(({ error }) => {
+                if (error) console.warn('[Supabase] Task status update failed:', error.message);
+            });
+        }
+
+        if (typeof loadStoredTasks === 'function') loadStoredTasks();
+        if (employeeName && typeof updateEmployeeShiftCards === 'function') {
+            updateEmployeeShiftCards(employeeName);
         }
     }
 }
@@ -1196,7 +1241,10 @@ function markTaskComplete(progressItem) {
 
     // Sync to Supabase
     if (window.supabaseClient && window.ORG_ID) {
-        const localTask = (window.kitchenTasks || []).find(t => t.description === taskDescription);
+        const sid = progressItem.dataset?.supabaseId;
+        const localTask = sid
+            ? (window.kitchenTasks || []).find((t) => String(t.supabase_id) === String(sid))
+            : (window.kitchenTasks || []).find((t) => t.description === taskDescription);
         const q = window.supabaseClient.from('tasks')
             .update({ status: 'completed', completed_at: new Date().toISOString() })
             .eq('org_id', window.ORG_ID);
@@ -1207,20 +1255,25 @@ function markTaskComplete(progressItem) {
             if (error) console.warn('[Supabase] markTaskComplete failed:', error.message);
         });
     }
-    
-    // Remove from list after a short delay
+
+    if (typeof window.kitchenTasks !== 'undefined' && employeeName) {
+        const sid = progressItem.dataset?.supabaseId;
+        window.kitchenTasks.forEach((t) => {
+            const match = sid
+                ? String(t.supabase_id) === String(sid)
+                : t.assignee === employeeName && t.description === taskDescription;
+            if (match) t.completed = true;
+        });
+        try {
+            localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+        } catch (_) {}
+    }
+
     setTimeout(() => {
-        progressItem.style.transition = 'all 0.4s ease';
-        progressItem.style.opacity = '0';
-        progressItem.style.transform = 'translateX(-20px)';
-        setTimeout(() => {
-            progressItem.remove();
-            
-            // Update shift cards on scheduling page if employee has no more tasks
-            if (employeeName && typeof updateEmployeeShiftCards === 'function') {
-                setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-            }
-        }, 400);
+        if (typeof loadStoredTasks === 'function') loadStoredTasks();
+        if (employeeName && typeof updateEmployeeShiftCards === 'function') {
+            setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
+        }
     }, 1500);
 }
 
@@ -2042,16 +2095,35 @@ function dashboardNormName(s) {
     return (s || '').trim().toLowerCase();
 }
 
-// Team roster + task counts (all employees). "On shift today" names kept for scheduling helpers.
+/** Parse shift bounds in local time; extend end to next day if overnight. */
+function dashboardShiftBounds(shift, dateYmd) {
+    if (!shift?.start_time || !shift?.end_time || !dateYmd) return null;
+    const st = String(shift.start_time).slice(0, 8);
+    const et = String(shift.end_time).slice(0, 8);
+    const start = new Date(`${dateYmd}T${st}`);
+    const end = new Date(`${dateYmd}T${et}`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    if (end <= start) end.setDate(end.getDate() + 1);
+    return { start, end };
+}
+
+function dashboardShiftIsActiveNow(shift, dateYmd, nowMs) {
+    const b = dashboardShiftBounds(shift, dateYmd);
+    if (!b) return false;
+    return nowMs >= b.start.getTime() && nowMs < b.end.getTime();
+}
+
+// Team overview: only employees **currently** within shift hours; task progress for those rows only.
 async function loadTodayShifts() {
     if (!window.supabaseClient || !window.ORG_ID) return;
     const now = new Date();
+    const nowMs = now.getTime();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     const [shiftsRes, positionsRes, tasksRes] = await Promise.all([
         window.supabaseClient
             .from('shifts')
-            .select('id, employee_name, position, start_time')
+            .select('id, employee_name, position, start_time, end_time')
             .eq('org_id', window.ORG_ID)
             .eq('shift_date', todayStr)
             .order('start_time', { ascending: true }),
@@ -2072,17 +2144,34 @@ async function loadTodayShifts() {
     const taskRows = tasksRes.data || [];
     const taskRowsForTodaySummary = taskRows.filter((t) => dashboardTaskCountsTowardToday(t, todayStr));
 
-    const onShiftToday = new Map();
-    const todayShiftIdsByEmployee = new Map();
+    const activeShiftRowsByKey = new Map();
     shifts.forEach((s) => {
+        if (!dashboardShiftIsActiveNow(s, todayStr, nowMs)) return;
         const name = (s.employee_name || '').trim();
         if (!name) return;
         const key = dashboardNormName(name);
-        if (!onShiftToday.has(key)) onShiftToday.set(key, s);
-        if (!todayShiftIdsByEmployee.has(key)) todayShiftIdsByEmployee.set(key, new Set());
-        if (s.id != null) todayShiftIdsByEmployee.get(key).add(String(s.id));
+        if (!activeShiftRowsByKey.has(key)) activeShiftRowsByKey.set(key, []);
+        activeShiftRowsByKey.get(key).push(s);
     });
-    window.todayShiftNames = new Set(shifts.map((s) => s.employee_name).filter(Boolean));
+
+    const onShiftToday = new Map();
+    const todayShiftIdsByEmployee = new Map();
+    activeShiftRowsByKey.forEach((list, key) => {
+        onShiftToday.set(key, list[0]);
+        const idSet = new Set();
+        list.forEach((row) => {
+            if (row.id != null) idSet.add(String(row.id));
+        });
+        todayShiftIdsByEmployee.set(key, idSet);
+    });
+
+    const rosterNames = [];
+    activeShiftRowsByKey.forEach((list) => {
+        const nm = (list[0].employee_name || '').trim();
+        if (nm) rosterNames.push(nm);
+    });
+
+    window.todayShiftNames = new Set(rosterNames);
 
     const positionByName = new Map();
     positions.forEach((p) => {
@@ -2090,21 +2179,12 @@ async function loadTodayShifts() {
         if (n) positionByName.set(dashboardNormName(n), p.position || '');
     });
 
-    let rosterNames = [...new Set(positions.map((p) => (p.employee_name || '').trim()).filter(Boolean))];
-    if (rosterNames.length === 0) {
-        const fromTasks = new Set();
-        taskRows.forEach((t) => {
-            const disp = dashboardTaskAssigneeDisplayName(t);
-            if (disp && disp.toLowerCase() !== 'unassigned') fromTasks.add(disp);
-        });
-        rosterNames = [...fromTasks];
-    }
-
     const countsByKey = new Map();
     taskRowsForTodaySummary.forEach((t) => {
         const assignee = dashboardTaskAssigneeDisplayName(t);
         if (!assignee || assignee.toLowerCase() === 'unassigned') return;
         const key = dashboardNormName(assignee);
+        if (!activeShiftRowsByKey.has(key)) return;
         const taskShiftId = t?.shift_id != null ? String(t.shift_id) : null;
         const allowedShiftIds = todayShiftIdsByEmployee.get(key) || null;
         if (allowedShiftIds && allowedShiftIds.size > 0) {
@@ -2125,7 +2205,7 @@ async function loadTodayShifts() {
 
     const n = rosterNames.length;
     if (emptyMsg) emptyMsg.style.display = n === 0 ? 'block' : 'none';
-    if (badge) badge.textContent = n === 0 ? '0 team' : `${n} team`;
+    if (badge) badge.textContent = n === 0 ? '0 on shift' : `${n} on shift`;
 
     rosterNames.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).forEach((empName) => {
         const key = dashboardNormName(empName);
@@ -2134,12 +2214,15 @@ async function loadTodayShifts() {
             (shiftRow && shiftRow.position) ||
             positionByName.get(key) ||
             '—';
+        const bounds = shiftRow ? dashboardShiftBounds(shiftRow, todayStr) : null;
+        const untilStr =
+            bounds &&
+            bounds.end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
         const counts = countsByKey.get(key) || { total: 0, done: 0 };
         const summary =
             counts.total === 0
                 ? 'No tasks assigned'
                 : `${counts.done} of ${counts.total} task${counts.total === 1 ? '' : 's'} finished`;
-        const onShift = !!shiftRow;
         const initial = (empName || '?').charAt(0).toUpperCase();
 
         const item = document.createElement('div');
@@ -2150,13 +2233,13 @@ async function loadTodayShifts() {
                 <div class="employee-avatar">${initial}</div>
                 <div class="employee-details">
                     <span class="employee-name clickable-employee">${escapeHtml(empName)}</span>
-                    <span class="employee-role">${escapeHtml(role)}${onShift ? ' · Scheduled today' : ''}</span>
+                    <span class="employee-role">${escapeHtml(role)}${untilStr ? ` · Until ${untilStr}` : ''}</span>
                     <span class="employee-task-summary">${escapeHtml(summary)}</span>
                 </div>
             </div>
-            <div class="shift-status ${onShift ? 'online' : 'offline'}">
+            <div class="shift-status online">
                 <i class="fas fa-circle"></i>
-                ${onShift ? 'On shift' : 'Off shift'}
+                On shift
             </div>
         `;
         const clickable = item.querySelector('.clickable-employee');
@@ -2209,6 +2292,7 @@ window.addEventListener('supabase-ready', async function () {
         nextKitchenTasks.push(row);
     });
 
+    nextKitchenTasks.sort((a, b) => (Number(a.supabase_id) || 0) - (Number(b.supabase_id) || 0));
     window.kitchenTasks = nextKitchenTasks;
     localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
     loadStoredTasks(); // Re-render Kitchen Progress from merged kitchenTasks

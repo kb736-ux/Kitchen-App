@@ -368,7 +368,6 @@ function removeEmployeeShiftsInDateRangeLocal(employeeName, startDateStr, endDat
 /** True if this employee has an approved calendar time-off that covers dateStr. */
 async function employeeHasApprovedTimeOffOnDate(employeeDisplayName, dateStr) {
     if (!window.supabaseClient || !window.ORG_ID || !dateStr) return false;
-    const mine = normEmployeeKey(employeeDisplayName);
     const { data, error } = await window.supabaseClient
         .from('shift_requests')
         .select('employee_name, time_off_start_date, time_off_end_date')
@@ -377,7 +376,7 @@ async function employeeHasApprovedTimeOffOnDate(employeeDisplayName, dateStr) {
         .eq('request_type', 'time_off');
     if (error || !data?.length) return false;
     for (const r of data) {
-        if (normEmployeeKey(r.employee_name || '') !== mine) continue;
+        if (!employeeNameFuzzyMatch(r.employee_name, employeeDisplayName)) continue;
         const s = r.time_off_start_date;
         const e = r.time_off_end_date || r.time_off_start_date;
         if (!s || !e) continue;
@@ -431,9 +430,8 @@ async function fetchApprovedTimeOffRequestsForOrg() {
 }
 
 function employeeCoveredByTimeOffRows(rows, employeeDisplayName, dateStr) {
-    const mine = normEmployeeKey(employeeDisplayName);
     for (const r of rows || []) {
-        if (normEmployeeKey(r.employee_name || '') !== mine) continue;
+        if (!employeeNameFuzzyMatch(r.employee_name, employeeDisplayName)) continue;
         const s = r.time_off_start_date;
         const e = r.time_off_end_date || r.time_off_start_date;
         if (!s || !e) continue;
@@ -589,8 +587,7 @@ async function approveShiftRequest(requestId, shiftId, employeeName, position, r
             showNotification('Could not load shifts for time off: ' + rangeErr.message, 'error');
             return;
         }
-        const mine = normEmployeeKey(employeeName);
-        const matched = (rangeShifts || []).filter((s) => normEmployeeKey(s.employee_name || '') === mine);
+        const matched = (rangeShifts || []).filter((s) => employeeNameFuzzyMatch(s.employee_name, employeeName));
 
         for (const srow of matched) {
             const { error: delErr } = await window.supabaseClient
@@ -648,36 +645,7 @@ async function approveShiftRequest(requestId, shiftId, employeeName, position, r
         read: false,
     });
 
-    let notifiedOpenShift = 0;
-    for (const pos of positionsToAnnounce) {
-        const { data: capable } = await window.supabaseClient
-            .from('shifts')
-            .select('employee_name')
-            .eq('org_id', window.ORG_ID)
-            .eq('position', pos)
-            .neq('employee_name', employeeName)
-            .not('employee_name', 'is', null);
-
-        const uniqueEmployees = [...new Set((capable || []).map((s) => s.employee_name).filter(Boolean))];
-        for (const name of uniqueEmployees) {
-            await window.supabaseClient.from('notifications').insert({
-                org_id: window.ORG_ID,
-                employee_name: name,
-                type: 'open_shift',
-                title: 'Open Shift Available',
-                body: `A ${pos} shift is now open. Check Open Shifts to pick it up!`,
-                read: false,
-            });
-            sendPushToEmployee(name, 'Open Shift Available', `A ${pos} shift is now open. Check the app!`);
-            notifiedOpenShift += 1;
-        }
-    }
-
-    if (positionsToAnnounce.size > 0) {
-        showNotification(`Time off approved — shifts removed. Open-shift notices sent (${notifiedOpenShift} notification(s)).`, 'success');
-    } else {
-        showNotification('Time off approved — no shifts were on the schedule for that period.', 'success');
-    }
+    showNotification('Time off approved — shifts have been updated.', 'success');
 
     await loadShiftRequests();
     if (typeof renderSchedule === 'function') renderSchedule();
@@ -823,10 +791,24 @@ async function syncSupabaseShiftsToGrid() {
         return;
     }
 
+    // Fetch approved time-off rows and filter out / auto-delete shifts covered by time off
+    const timeOffRows = await fetchApprovedTimeOffRequestsForOrg();
+
     const rs = normShiftTimeHM;
 
     (rows || []).forEach(row => {
         if (!row.employee_name || !row.shift_date || !row.start_time || !row.end_time) return;
+
+        // Skip (and delete from DB) if employee has approved time off on this date
+        if (employeeCoveredByTimeOffRows(timeOffRows, row.employee_name, row.shift_date)) {
+            // Auto-clean: remove orphaned shift from Supabase
+            window.supabaseClient.from('shifts').delete().eq('id', row.id)
+                .then(({ error: delErr }) => {
+                    if (delErr) console.warn('[Sync] Could not auto-delete time-off shift:', delErr.message);
+                    else console.log('[Sync] Auto-deleted shift', row.id, 'for', row.employee_name, 'on', row.shift_date, '(approved time off)');
+                });
+            return;
+        }
 
         const dayKey = getDayKeyForDate(row.shift_date);
         if (!dayKey) return;
@@ -1316,6 +1298,21 @@ function normEmployeeKey(s) {
     return String(s || '').trim().toLowerCase();
 }
 
+/** Fuzzy match: "Rohan" matches "Rohan Kumar" and vice versa (first-name or full-name). */
+function employeeNameFuzzyMatch(a, b) {
+    const na = normEmployeeKey(a);
+    const nb = normEmployeeKey(b);
+    if (!na || !nb) return false;
+    if (na === nb) return true;
+    // One is a prefix/first-name of the other
+    if (na.startsWith(nb + ' ') || nb.startsWith(na + ' ')) return true;
+    // First token match (both first names identical)
+    const fa = na.split(/\s+/)[0];
+    const fb = nb.split(/\s+/)[0];
+    if (fa && fb && fa === fb) return true;
+    return false;
+}
+
 /** Prefer "First Last", then display_name, then employee_name — for schedule dropdown labels */
 function profileScheduleDisplayLabel(p) {
     if (!p) return '';
@@ -1470,8 +1467,8 @@ async function populatePositionSelect() {
     if (shiftDetailsPosition) shiftDetailsPosition.innerHTML = opts;
 }
 
-// Update employee dropdown to show which employees have approved drops
-function updateEmployeeDropdownForDay() {
+// Update employee dropdown to show which employees have approved drops or time off
+async function updateEmployeeDropdownForDay() {
     const daySelect = document.getElementById('day-select');
     const employeeSelect = document.getElementById('employee-select');
     if (!daySelect || !employeeSelect) return;
@@ -1480,23 +1477,41 @@ function updateEmployeeDropdownForDay() {
     const selectedDate = getDateForDay(selectedDay);
     if (!selectedDate) return;
     
-    // Update each option to show drop status
+    let timeOffRows = [];
+    try {
+        timeOffRows = await fetchApprovedTimeOffRequestsForOrg();
+    } catch(e) {}
+    
+    // Update each option to show drop status and hide if on time off
     Array.from(employeeSelect.options).forEach(option => {
         if (!option.value) return; // Skip "Select Employee"
         
-        const employeeName = getEmployeeDisplayName(option.value);
-        const hasDrop = isEmployeeDropping(employeeName, selectedDate);
+        const cleanText = option.textContent.replace(' (Approved Drop)', '').trim();
+        const fallbackName = getEmployeeDisplayName(option.value);
         
-        // Remove existing drop indicator
-        option.textContent = option.textContent.replace(' (Approved Drop)', '');
+        const hasTimeOff = employeeCoveredByTimeOffRows(timeOffRows, cleanText, selectedDate) || 
+                           employeeCoveredByTimeOffRows(timeOffRows, fallbackName, selectedDate) ||
+                           employeeCoveredByTimeOffRows(timeOffRows, option.value, selectedDate);
+                           
+        const hasDrop = isEmployeeDropping(cleanText, selectedDate) || 
+                        isEmployeeDropping(fallbackName, selectedDate) ||
+                        isEmployeeDropping(cleanText.split(' ')[0], selectedDate);
         
-        if (hasDrop) {
-            option.textContent += ' (Approved Drop)';
-            option.style.color = '#e53e3e';
-            option.style.fontStyle = 'italic';
+        if (hasTimeOff) {
+            option.style.display = 'none';
         } else {
-            option.style.color = '';
-            option.style.fontStyle = '';
+            option.style.display = '';
+            // Remove existing drop indicator
+            option.textContent = cleanText;
+            
+            if (hasDrop) {
+                option.textContent += ' (Approved Drop)';
+                option.style.color = '#e53e3e';
+                option.style.fontStyle = 'italic';
+            } else {
+                option.style.color = '';
+                option.style.fontStyle = '';
+            }
         }
     });
 }
@@ -3372,10 +3387,6 @@ function updateTaskInProgressList(employeeName, taskDescription, isCompleted) {
                 }
             }
             
-            // Check if all tasks are complete
-            if (isCompleted && typeof window.checkAllTasksComplete === 'function') {
-                window.checkAllTasksComplete(employeeName);
-            }
         }
     });
     
@@ -3395,6 +3406,7 @@ function updateTaskInProgressList(employeeName, taskDescription, isCompleted) {
             console.warn('Could not save tasks to localStorage:', e);
         }
     }
+    if (typeof loadStoredTasks === 'function') loadStoredTasks();
 }
 
 async function assignTask() {
@@ -3524,6 +3536,7 @@ async function addTaskToProgress(employeeName, taskDescription, options = {}) {
                 console.warn('Could not save tasks to localStorage:', e);
             }
         }
+        if (typeof loadStoredTasks === 'function') loadStoredTasks();
         return { ok: true, localOnly: true };
     }
 
@@ -3595,22 +3608,7 @@ async function addTaskToProgress(employeeName, taskDescription, options = {}) {
             localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
         } catch (_) {}
 
-        const progressList = document.querySelector('.progress-list');
-        if (progressList) {
-            const existingTasks = Array.from(progressList.querySelectorAll('.progress-item'));
-            const existsInDOM = existingTasks.some(item => {
-                const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
-                const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
-                return assignee === employeeName && desc === taskDescription;
-            });
-            if (!existsInDOM) {
-                if (typeof window.createTaskItem === 'function') {
-                    window.createTaskItem(progressList, employeeName, taskDescription);
-                } else if (typeof createTaskItem === 'function') {
-                    createTaskItem(progressList, employeeName, taskDescription);
-                }
-            }
-        }
+        if (typeof loadStoredTasks === 'function') loadStoredTasks();
         notifyTaskAssigned(employeeName, taskDescription);
     }
     return { ok: true };
@@ -3657,27 +3655,9 @@ function removeTask(employeeName, taskDescription, shiftId = null) {
         }
     }
     
-    // Remove from progress list on home page
-    const progressList = document.querySelector('.progress-list');
-    if (progressList) {
-        progressList.querySelectorAll('.progress-item').forEach(item => {
-            const assignee = item.dataset.employeeName || item.querySelector('.task-assignee')?.textContent?.trim();
-            const desc = item.dataset.taskDescription || item.querySelector('.task-text')?.textContent?.trim();
-            
-            if (assignee === employeeName && desc === taskDescription) {
-                // Animate out
-                item.style.transition = 'all 0.3s ease';
-                item.style.opacity = '0';
-                item.style.transform = 'translateX(-20px)';
-                setTimeout(() => {
-                    item.remove();
-                    // Update shift card indicators if on scheduling page
-                    if (typeof updateEmployeeShiftCards === 'function') {
-                        updateEmployeeShiftCards(employeeName);
-                    }
-                }, 300);
-            }
-        });
+    if (typeof loadStoredTasks === 'function') loadStoredTasks();
+    if (typeof updateEmployeeShiftCards === 'function') {
+        updateEmployeeShiftCards(employeeName);
     }
     
     // Show notification
@@ -3695,12 +3675,13 @@ function getCurrentUser() {
 }
 
 // Create a task item with checkboxes (only visible to assigned employee)
-function createTaskItem(container, employeeName, taskDescription) {
+function createTaskItem(container, employeeName, taskDescription, supabaseId) {
     const taskItem = document.createElement('div');
     taskItem.className = 'progress-item in-progress';
     taskItem.dataset.employeeName = employeeName;
     taskItem.dataset.taskDescription = taskDescription;
     taskItem.dataset.completed = 'false';
+    if (supabaseId != null && supabaseId !== '') taskItem.dataset.supabaseId = String(supabaseId);
     
     const currentUser = getCurrentUser();
     const isAssignedToCurrentUser = currentUser && currentUser.toLowerCase() === employeeName.toLowerCase();
@@ -3771,57 +3752,43 @@ function createTaskItem(container, employeeName, taskDescription) {
 
 // Handle checkbox change
 function handleTaskCheckboxChange(taskItem, checkbox) {
-    const employeeName = taskItem.dataset.employeeName;
+    const employeeName = taskItem.dataset.employeeName || taskItem.querySelector('.task-assignee')?.textContent?.trim();
     const currentUser = getCurrentUser();
-    const isAssignedToCurrentUser = currentUser && currentUser.toLowerCase() === employeeName.toLowerCase();
-    
+    const isAssignedToCurrentUser = currentUser && employeeName && currentUser.toLowerCase() === employeeName.toLowerCase();
+
     // Only allow assigned employee to check/uncheck
     if (!isAssignedToCurrentUser) return;
-    
-    const taskDescription = taskItem.dataset.taskDescription;
 
-    if (checkbox.checked) {
-        // Mark as complete
-        taskItem.dataset.completed = 'true';
-        taskItem.classList.add('task-completed');
-        taskItem.classList.remove('in-progress');
-        const taskText = taskItem.querySelector('.task-text');
-        if (taskText) {
-            taskText.style.textDecoration = 'line-through';
-            taskText.style.opacity = '0.6';
-        }
-        
-        // Sync kit/make completion to inventory
-        if (typeof applyTaskCompletionToInventory === 'function') {
-            applyTaskCompletionToInventory(taskDescription, true);
-        }
-        
-        // Update read-only views for other users
-        updateTaskStatusForOthers(employeeName, taskDescription, true);
-        
-        // Check if all tasks for this employee are complete
-        checkAllTasksComplete(employeeName);
-    } else {
-        // Mark as incomplete
-        taskItem.dataset.completed = 'false';
-        taskItem.classList.remove('task-completed');
-        taskItem.classList.add('in-progress');
-        const taskText = taskItem.querySelector('.task-text');
-        if (taskText) {
-            taskText.style.textDecoration = 'none';
-            taskText.style.opacity = '1';
-        }
-        
-        // Update read-only views for other users
-        updateTaskStatusForOthers(employeeName, taskDescription, false);
+    const taskDescription = taskItem.dataset.taskDescription || taskItem.querySelector('.task-text')?.textContent?.trim();
+    const sid = taskItem.dataset.supabaseId;
+
+    if (checkbox.checked && taskDescription && typeof applyTaskCompletionToInventory === 'function') {
+        applyTaskCompletionToInventory(taskDescription, true);
     }
 
-    // Sync completion status to Supabase
+    if (typeof window.kitchenTasks !== 'undefined') {
+        window.kitchenTasks.forEach((task) => {
+            const match = sid
+                ? String(task.supabase_id) === String(sid)
+                : (task.assignee && employeeName &&
+                    task.assignee.toLowerCase() === employeeName.toLowerCase() &&
+                    task.description === taskDescription);
+            if (match) task.completed = !!checkbox.checked;
+        });
+        try {
+            localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+        } catch (e) {
+            console.warn('Could not save tasks to localStorage:', e);
+        }
+    }
+
     if (window.supabaseClient && window.ORG_ID) {
         const newStatus = checkbox.checked ? 'completed' : 'todo';
-        const localTask = (window.kitchenTasks || []).find(t =>
-            t.assignee === employeeName && t.description === taskDescription
-        );
+        const localTask = sid
+            ? (window.kitchenTasks || []).find((t) => String(t.supabase_id) === String(sid))
+            : (window.kitchenTasks || []).find(
+                (t) => t.assignee === employeeName && t.description === taskDescription
+            );
         const query = window.supabaseClient.from('tasks')
             .update({
                 status: newStatus,
@@ -3834,6 +3801,11 @@ function handleTaskCheckboxChange(taskItem, checkbox) {
         update.then(({ error }) => {
             if (error) console.warn('[Supabase] Task status update failed:', error.message);
         });
+    }
+
+    if (typeof loadStoredTasks === 'function') loadStoredTasks();
+    if (employeeName && typeof updateEmployeeShiftCards === 'function') {
+        updateEmployeeShiftCards(employeeName);
     }
 }
 
@@ -4140,6 +4112,7 @@ window.addEventListener('supabase-ready', async function () {
         nextKitchenTasks.push(kt);
     });
 
+    nextKitchenTasks.sort((a, b) => (Number(a.supabase_id) || 0) - (Number(b.supabase_id) || 0));
     window.kitchenTasks = nextKitchenTasks;
     localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
     if (typeof loadStoredTasks === 'function') loadStoredTasks();
