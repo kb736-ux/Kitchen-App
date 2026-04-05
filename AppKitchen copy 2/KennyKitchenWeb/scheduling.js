@@ -419,23 +419,72 @@ async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, sta
 /** One fetch for assign-shift recurrence (was N×260 round-trips and froze the UI). */
 async function fetchApprovedTimeOffRequestsForOrg() {
     if (!window.supabaseClient || !window.ORG_ID) return [];
-    const { data, error } = await window.supabaseClient
-        .from('shift_requests')
-        .select('employee_name, time_off_start_date, time_off_end_date')
-        .eq('org_id', window.ORG_ID)
-        .eq('status', 'approved')
-        .eq('request_type', 'time_off');
-    if (error || !data?.length) return [];
-    return data;
+    const [reqRes, profRes] = await Promise.all([
+        window.supabaseClient
+            .from('shift_requests')
+            .select('employee_name, time_off_start_date, time_off_end_date')
+            .eq('org_id', window.ORG_ID)
+            .eq('status', 'approved')
+            .eq('request_type', 'time_off'),
+        window.supabaseClient
+            .from('profiles')
+            .select('employee_name, display_name, first_name, last_name, email')
+            .eq('org_id', window.ORG_ID),
+    ]);
+    if (reqRes.error || !reqRes.data?.length) return [];
+    const profiles = profRes.data || [];
+    
+    // Build a lookup: from any name variant → all known names for that person
+    const nameAliases = new Map(); // lowercased key → Set of all name variants
+    profiles.forEach(p => {
+        const variants = new Set();
+        const en = (p.employee_name || '').trim();
+        const dn = (p.display_name || '').trim();
+        const fn = (p.first_name || '').trim();
+        const ln = (p.last_name || '').trim();
+        const full = [fn, ln].filter(Boolean).join(' ');
+        const emailLocal = ((p.email || '').split('@')[0] || '').trim();
+        [en, dn, fn, full, emailLocal].forEach(v => { if (v) variants.add(v); });
+        
+        // Map each variant key to the full set
+        variants.forEach(v => {
+            const k = v.toLowerCase();
+            if (!nameAliases.has(k)) nameAliases.set(k, new Set());
+            variants.forEach(vv => nameAliases.get(k).add(vv));
+        });
+    });
+    
+    // Enrich each time-off row with all name variants
+    return reqRes.data.map(r => {
+        const storedName = (r.employee_name || '').trim();
+        const storedKey = storedName.toLowerCase();
+        const aliases = nameAliases.get(storedKey);
+        const allNames = aliases ? [...aliases] : [storedName];
+        return {
+            employee_name: storedName,
+            all_names: allNames,
+            time_off_start_date: r.time_off_start_date,
+            time_off_end_date: r.time_off_end_date,
+        };
+    });
 }
 
 function employeeCoveredByTimeOffRows(rows, employeeDisplayName, dateStr) {
     for (const r of rows || []) {
-        if (!employeeNameFuzzyMatch(r.employee_name, employeeDisplayName)) continue;
         const s = r.time_off_start_date;
         const e = r.time_off_end_date || r.time_off_start_date;
         if (!s || !e) continue;
-        if (dateStr >= s && dateStr <= e) return true;
+        if (dateStr < s || dateStr > e) continue;
+        
+        // Check stored employee_name
+        if (employeeNameFuzzyMatch(r.employee_name, employeeDisplayName)) return true;
+        
+        // Check all enriched name aliases (email local, display_name, first+last, etc.)
+        if (r.all_names) {
+            for (const alias of r.all_names) {
+                if (employeeNameFuzzyMatch(alias, employeeDisplayName)) return true;
+            }
+        }
     }
     return false;
 }
@@ -1498,19 +1547,30 @@ async function updateEmployeeDropdownForDay() {
         // Check multiple name variations against every time-off row
         let hasTimeOff = false;
         for (const row of timeOffRows) {
-            const rowName = (row.employee_name || '').trim();
             const s = row.time_off_start_date;
             const e = row.time_off_end_date || s;
             if (!s || !e) continue;
             if (selectedDate < s || selectedDate > e) continue;
             
+            // Collect all name variants from the row (stored name + profile aliases)
+            const namesToCheck = [row.employee_name || ''];
+            if (row.all_names) namesToCheck.push(...row.all_names);
+            
             // Check all possible name matches
-            if (employeeNameFuzzyMatch(rowName, cleanText) ||
-                employeeNameFuzzyMatch(rowName, fallbackName) ||
-                employeeNameFuzzyMatch(rowName, option.value) ||
-                employeeNameFuzzyMatch(rowName, firstName)) {
+            let matched = false;
+            for (const rowName of namesToCheck) {
+                if (!rowName) continue;
+                if (employeeNameFuzzyMatch(rowName, cleanText) ||
+                    employeeNameFuzzyMatch(rowName, fallbackName) ||
+                    employeeNameFuzzyMatch(rowName, option.value) ||
+                    employeeNameFuzzyMatch(rowName, firstName)) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) {
                 hasTimeOff = true;
-                console.log('[TimeOff-Dropdown] HIDING', cleanText, '- matched time off row:', rowName, s, '-', e);
+                console.log('[TimeOff-Dropdown] HIDING', cleanText, '- matched time off row:', row.employee_name, 'aliases:', row.all_names, s, '-', e);
                 break;
             }
         }
