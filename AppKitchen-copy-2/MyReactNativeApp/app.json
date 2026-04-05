@@ -22,7 +22,8 @@
           "photosPermission": "Allow Sheek to access your photos so you can set a profile picture.",
           "cameraPermission": "Allow Sheek to use your camera to take a profile photo."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",

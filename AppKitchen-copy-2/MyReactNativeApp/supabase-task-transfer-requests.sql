@@ -3,7 +3,7 @@
 --
 -- Requires public.kk_auth_can_access_org(org_id) (from rls-fix-org-members-shifts.sql /
 -- supabase-migrate-to-uuid.sql). If policies fail, create the table only, then run:
---   AppKitchen copy 2/fix-task-transfer-stack-depth.sql
+--   AppKitchen-copy-2/fix-task-transfer-stack-depth.sql
 --
 CREATE TABLE IF NOT EXISTS public.task_transfer_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

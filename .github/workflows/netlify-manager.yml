@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "AppKitchen copy 2/KennyKitchenWeb/**"
+      - "AppKitchen-copy-2/KennyKitchenWeb/**"
       - ".github/workflows/netlify-manager.yml"
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Netlify
-        run: npx --yes netlify-cli deploy --prod --dir="AppKitchen copy 2/KennyKitchenWeb"
+        run: npx --yes netlify-cli deploy --prod --dir="AppKitchen-copy-2/KennyKitchenWeb"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID_MANAGER }}

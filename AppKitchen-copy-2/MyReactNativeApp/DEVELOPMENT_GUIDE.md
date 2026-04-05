@@ -89,7 +89,7 @@ This is almost always **stale JavaScript on the device** or **Expo Go talking to
    In **Expo Go**: shake device → **Reload** (or kill Expo Go and scan the QR again).
 
 3. **Same project folder**  
-   Make sure the terminal running Expo is `.../AppKitchen copy 2/MyReactNativeApp` — not another copy of the repo elsewhere.
+   Make sure the terminal running Expo is `.../AppKitchen-copy-2/MyReactNativeApp` — not another copy of the repo elsewhere.
 
 4. **Tunnel vs LAN**  
    `--tunnel` can lag or stick to an old session. If Mac and phone are on the **same Wi‑Fi**, try **without** tunnel:

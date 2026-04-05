@@ -18,7 +18,7 @@ Stripe + Sheek — deploy checklist
    - Enable the portal and allow customers to switch plans (add your three prices).
 
 5) Supabase CLI (install from https://supabase.com/docs/guides/cli)
-   cd "AppKitchen copy 2"
+   cd "AppKitchen-copy-2"
    supabase login
    supabase link --project-ref <YOUR_PROJECT_REF>
 

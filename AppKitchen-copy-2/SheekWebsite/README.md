@@ -39,10 +39,10 @@ Use the **same pattern** for marketing and manager:
 | **Functions directory** | (empty) — clear `netlify/functions` if it was set |
 
 **Marketing (`sheekapp.com`):**  
-**Base directory:** `AppKitchen copy 2/SheekWebsite`
+**Base directory:** `AppKitchen-copy-2/SheekWebsite`
 
 **Manager (`app.sheekapp.com`):**  
-**Base directory:** `AppKitchen copy 2/KennyKitchenWeb`
+**Base directory:** `AppKitchen-copy-2/KennyKitchenWeb`
 
 After you save, Netlify may show **Base** as `/` on the summary screen when it means “no extra prefix”; what matters is the **Configure** screen shows the **full path** above and **Publish** = `.`.
 
@@ -57,7 +57,7 @@ Some browsers or Netlify UI versions **refill** fields and won’t save empty va
 3. **GitHub** → repo **Settings** → **Secrets and variables** → **Actions** → add:
    - `NETLIFY_AUTH_TOKEN` — the token from step 1  
    - `NETLIFY_SITE_ID_MANAGER` — the Site ID from step 2  
-4. Push to `main` (or merge a PR). Workflow **`.github/workflows/netlify-manager.yml`** runs `netlify deploy --prod --dir="AppKitchen copy 2/KennyKitchenWeb"` — no base/publish UI needed for that deploy.
+4. Push to `main` (or merge a PR). Workflow **`.github/workflows/netlify-manager.yml`** runs `netlify deploy --prod --dir="AppKitchen-copy-2/KennyKitchenWeb"` — no base/publish UI needed for that deploy.
 
 **Avoid two deploys fighting:** for the **manager** site only, either **unlink** the Git repo in Netlify (**Build & deploy → Continuous deployment → Manage repository → Unlink**), or set a **Stop builds** / ignore pattern if you use it — otherwise Git-triggered Netlify builds may still run with bad UI settings alongside the good Action deploy.
 

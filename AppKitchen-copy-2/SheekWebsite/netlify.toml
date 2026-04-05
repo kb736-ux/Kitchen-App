@@ -1,0 +1,4 @@
+# Used when Netlify "Base directory" = AppKitchen-copy-2/SheekWebsite
+# and "Publish directory" = .
+[build]
+  publish = "."
