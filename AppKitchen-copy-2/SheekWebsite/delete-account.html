@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete your account — Sheek</title>
+  <meta name="description" content="How to request deletion of your Sheek account and associated data." />
+  <link rel="canonical" href="https://sheekapp.com/delete-account.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="https://sheekapp.com/" class="logo">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i>
+        Sheek
+      </a>
+      <nav class="nav-desktop" aria-label="Primary">
+        <a href="https://sheekapp.com/">Home</a>
+        <a href="support.html">Support</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-primary" href="support.html">Contact</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="section" style="padding-top: 3rem; padding-bottom: 4rem;">
+    <div class="wrap" style="max-width: 640px;">
+      <h1 class="section-title" style="text-align: left; margin-bottom: 0.5rem;">Delete your account</h1>
+      <p class="section-sub" style="text-align: left; margin-bottom: 2rem;">
+        You can request deletion of your Sheek account and personal data associated with it. Restaurant organizations may require manager approval for some records; we will confirm what applies to your request.
+      </p>
+
+      <div class="glass-card" style="padding: 1.5rem; border-radius: 16px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); margin-bottom: 1.5rem;">
+        <h2 style="font-size: 1.05rem; margin: 0 0 0.75rem; color: #e2e8f0;">How to request deletion</h2>
+        <ol style="margin: 0; padding-left: 1.25rem; color: var(--text-muted); line-height: 1.65; font-size: 0.95rem;">
+          <li style="margin-bottom: 0.5rem;">Email us from the address tied to your Sheek account.</li>
+          <li style="margin-bottom: 0.5rem;">Use the subject line: <strong style="color: #e2e8f0;">Account deletion request</strong>.</li>
+          <li>Include your <strong style="color: #e2e8f0;">restaurant or organization name</strong> if you use Sheek with a team.</li>
+        </ol>
+        <p style="margin: 1rem 0 0; font-size: 0.95rem;">
+          <a class="btn btn-primary" href="support.html">Open support — email Sheek</a>
+        </p>
+      </div>
+
+      <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6;">
+        We will respond with next steps and may verify your identity before deleting data. Some billing or legal records may be retained only as required by law. See our <a href="privacy.html" style="color: #7dd3fc;">privacy policy</a> for more detail.
+      </p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <i class="fas fa-utensils logo-icon" aria-hidden="true"></i> Sheek
+      </div>
+      <p class="footer-copy">&copy; <span id="y"></span> Sheek. <a href="https://sheekapp.com/">Home</a> · <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a></p>
+    </div>
+  </footer>
+  <script>
+    document.getElementById('y').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
