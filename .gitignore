@@ -86,3 +86,6 @@ __MACOSX/
 # *.zip
 # *.tar.gz
 # *.tgz
+
+# Local Netlify folder
+.netlify
