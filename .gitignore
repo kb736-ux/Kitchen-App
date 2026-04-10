@@ -89,3 +89,6 @@ __MACOSX/
 
 # Local Netlify folder
 .netlify
+
+# Supabase CLI local cache (changes on every link/cli use)
+**/supabase/.temp/
