@@ -80,8 +80,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const allowedOrigins = (Deno.env.get("INVITE_ALLOWED_ORIGINS") ||
-    "https://app.sheekapp.com,http://localhost:5173,http://127.0.0.1:5500,http://localhost:5500")
+  const envOrigins = (Deno.env.get("INVITE_ALLOWED_ORIGINS") || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -95,10 +94,25 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  if (!allowedOrigins.includes(redirectUrl.origin)) {
+
+  const origin = redirectUrl.origin;
+  const host = redirectUrl.hostname;
+
+  const defaultAllowed =
+    origin === "https://app.sheekapp.com" ||
+    /^localhost$/i.test(host) ||
+    host === "127.0.0.1" ||
+    host.endsWith(".netlify.app") ||
+    host.endsWith(".sheekapp.com");
+
+  // Env list adds extra origins; default patterns cover Sheek + Netlify + local dev.
+  const allowed = defaultAllowed || envOrigins.includes(origin);
+
+  if (!allowed) {
     return new Response(
       JSON.stringify({
-        error: "redirect_to origin not allowed. Set INVITE_ALLOWED_ORIGINS for this deployment.",
+        error:
+          "redirect_to origin not allowed. Add INVITE_ALLOWED_ORIGINS in Edge Function secrets or deploy from app.sheekapp.com / Netlify.",
       }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

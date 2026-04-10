@@ -36,6 +36,8 @@ window.EMPLOYEE_IDS = {
   });
 
   window.supabaseClient = client;
+  window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
+  window.SUPABASE_URL = SUPABASE_URL;
   window.ORG_ID = ORG_ID || localStorage.getItem('kk_org_id') || null;
 
   async function safeAll(query) {

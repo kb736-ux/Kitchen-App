@@ -1445,6 +1445,24 @@ async function syncEmployeeManagerAccess(employeeName, isManager) {
     }
 }
 
+async function inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo) {
+    const trimmed = (email || '').trim();
+    const { error } = await window.supabaseClient.auth.signInWithOtp({
+        email: trimmed,
+        options: { emailRedirectTo: redirectTo },
+    });
+    if (error) {
+        console.warn('[Invite] OTP fallback failed:', error.message);
+        showEmployeeToast(error.message || 'Could not send invite email.', 'error');
+        return false;
+    }
+    showEmployeeToast(
+        `Email sent to ${trimmed}. They’ll get a link to confirm and set a password (same as before).`,
+        'success'
+    );
+    return true;
+}
+
 async function inviteEmployeeByEmail(employeeName, email, isManager) {
     if (!window.supabaseClient) {
         console.warn('[Invite] Supabase client not ready; cannot send invite for', employeeName);
@@ -1476,12 +1494,17 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
             if (typeof su === 'string' && su) base = su.replace(/\/$/, '');
             else if (restUrl) base = new URL(restUrl).origin;
         } catch (_) {}
+
+        const anonKey = window.SUPABASE_ANON_KEY || '';
+        const headers = {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        };
+        if (anonKey) headers.apikey = anonKey;
+
         const res = await fetch(`${base}/functions/v1/invite-employee`, {
             method: 'POST',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify({
                 email: trimmed,
                 employee_name: employeeName,
@@ -1490,19 +1513,43 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
                 redirect_to: redirectTo,
             }),
         });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            console.warn('[Invite] Edge function failed:', json?.error || res.status);
-            showEmployeeToast(json?.error || 'Could not send invite email.', 'error');
+
+        const text = await res.text();
+        let json = {};
+        try {
+            json = text ? JSON.parse(text) : {};
+        } catch (_) {
+            json = { error: text || res.statusText || 'Unknown error' };
+        }
+
+        if (res.ok) {
+            showEmployeeToast(
+                `Invite sent to ${trimmed}. They’ll open the email, set a password, then can use the web or mobile app.`,
+                'success'
+            );
             return;
         }
-        showEmployeeToast(
-            `Invite sent to ${trimmed}. They’ll open the email, set a password, then can use the web or mobile app.`,
-            'success'
-        );
+
+        console.warn('[Invite] Edge function failed:', res.status, json?.error || text);
+
+        const errMsg = String(json?.error || '');
+        const noFallback =
+            res.status === 403 ||
+            res.status === 409 ||
+            /only managers|already has a sheek account|already registered/i.test(errMsg);
+
+        if (noFallback) {
+            showEmployeeToast(errMsg || 'Could not send invite email.', 'error');
+            return;
+        }
+
+        await inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo);
     } catch (e) {
         console.warn('[Invite] Unexpected error:', e.message);
-        showEmployeeToast('Could not send invite email. Please try again.', 'error');
+        const ok = await inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo);
+        if (!ok) {
+            showEmployeeToast('Could not send invite email. Please try again.', 'error');
+        }
     }
 }
 
