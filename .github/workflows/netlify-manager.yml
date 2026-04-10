@@ -1,5 +1,9 @@
 # Deploy KennyKitchenWeb when Netlify UI won't let you clear autofill (base/publish/package).
-# Setup: repo secrets NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID_MANAGER (see SheekWebsite README).
+#
+# Required GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   NETLIFY_AUTH_TOKEN     — Personal access token from Netlify (User settings → Applications).
+#   NETLIFY_SITE_ID_MANAGER — Site API ID: Netlify → Site settings → Site details → Site ID.
+#
 # Optional: unlink Git on that Netlify site so only this workflow publishes the manager app.
 name: Netlify — manager (KennyKitchenWeb)
 
@@ -16,8 +20,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify Netlify secrets
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID_MANAGER: ${{ secrets.NETLIFY_SITE_ID_MANAGER }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::error::Missing secret NETLIFY_AUTH_TOKEN. Add it under Repo → Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -z "$NETLIFY_SITE_ID_MANAGER" ]; then
+            echo "::error::Missing secret NETLIFY_SITE_ID_MANAGER (Netlify site API ID). Add it under Repo → Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Deploy to Netlify
-        run: npx --yes netlify-cli deploy --prod --dir="AppKitchen-copy-2/KennyKitchenWeb"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID_MANAGER }}
+        run: |
+          npx --yes netlify-cli deploy --prod \
+            --dir="AppKitchen-copy-2/KennyKitchenWeb" \
+            --site="$NETLIFY_SITE_ID"
