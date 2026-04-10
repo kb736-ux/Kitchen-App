@@ -1445,24 +1445,11 @@ async function syncEmployeeManagerAccess(employeeName, isManager) {
     }
 }
 
-async function inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo) {
-    const trimmed = (email || '').trim();
-    const { error } = await window.supabaseClient.auth.signInWithOtp({
-        email: trimmed,
-        options: { emailRedirectTo: redirectTo },
-    });
-    if (error) {
-        console.warn('[Invite] OTP fallback failed:', error.message);
-        showEmployeeToast(error.message || 'Could not send invite email.', 'error');
-        return false;
-    }
-    showEmployeeToast(
-        `Email sent to ${trimmed}. They’ll get a link to confirm and set a password (same as before).`,
-        'success'
-    );
-    return true;
-}
-
+/**
+ * Send the same magic-link invite as before (signInWithOtp).
+ * Does not use the invite-employee Edge Function — that path depended on JWT + deploy + invite templates
+ * and broke email for many setups. Magic links use the standard "Magic link" template + SMTP.
+ */
 async function inviteEmployeeByEmail(employeeName, email, isManager) {
     if (!window.supabaseClient) {
         console.warn('[Invite] Supabase client not ready; cannot send invite for', employeeName);
@@ -1480,72 +1467,22 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
     const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
 
     try {
-        await window.supabaseClient.auth.refreshSession().catch(() => {});
-        const { data: sess } = await window.supabaseClient.auth.getSession();
-        if (!sess?.session?.access_token) {
-            showEmployeeToast('Sign in as a manager to send invites.', 'error');
+        const { error } = await window.supabaseClient.auth.signInWithOtp({
+            email: trimmed,
+            options: { emailRedirectTo: redirectTo },
+        });
+        if (error) {
+            console.warn('[Invite] signInWithOtp failed:', error.message);
+            showEmployeeToast(error.message || 'Could not send invite email.', 'error');
             return;
         }
-
-        // Use client invoke() so apikey + Authorization match what Edge JWT verification expects (raw fetch often gets 401).
-        const { data: fnData, error: fnErr } = await window.supabaseClient.functions.invoke(
-            'invite-employee',
-            {
-                body: {
-                    email: trimmed,
-                    employee_name: employeeName,
-                    is_manager: !!isManager,
-                    org_id: window.ORG_ID,
-                    redirect_to: redirectTo,
-                },
-            }
+        showEmployeeToast(
+            `Invite email sent to ${trimmed}. They should open the link to confirm and set a password.`,
+            'success'
         );
-
-        let json = {};
-        let status = 0;
-        if (fnErr) {
-            status = Number(fnErr.context?.status || fnErr.status || 0) || 0;
-            try {
-                const b = fnErr.context?.body;
-                if (b) {
-                    json = typeof b === 'string' ? JSON.parse(b) : b;
-                }
-            } catch (_) {}
-            if (!json?.error && fnErr.message) {
-                json = { ...json, error: fnErr.message };
-            }
-        } else {
-            json = fnData && typeof fnData === 'object' ? fnData : {};
-        }
-
-        if (!fnErr && json?.ok === true) {
-            showEmployeeToast(
-                `Invite sent to ${trimmed}. They’ll open the email, set a password, then can use the web or mobile app.`,
-                'success'
-            );
-            return;
-        }
-
-        console.warn('[Invite] Edge function failed:', status, json?.error || fnErr?.message);
-
-        const errMsg = String(json?.error || fnErr?.message || '');
-        const noFallback =
-            status === 403 ||
-            status === 409 ||
-            /only managers|already has a sheek account|already registered/i.test(errMsg);
-
-        if (noFallback) {
-            showEmployeeToast(errMsg || 'Could not send invite email.', 'error');
-            return;
-        }
-
-        await inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo);
     } catch (e) {
         console.warn('[Invite] Unexpected error:', e.message);
-        const ok = await inviteEmployeeByEmailOtpFallback(employeeName, email, isManager, redirectTo);
-        if (!ok) {
-            showEmployeeToast('Could not send invite email. Please try again.', 'error');
-        }
+        showEmployeeToast('Could not send invite email. Please try again.', 'error');
     }
 }
 
