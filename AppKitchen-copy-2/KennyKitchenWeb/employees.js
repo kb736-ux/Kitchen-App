@@ -1480,49 +1480,45 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
     const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
 
     try {
+        await window.supabaseClient.auth.refreshSession().catch(() => {});
         const { data: sess } = await window.supabaseClient.auth.getSession();
-        const token = sess?.session?.access_token;
-        if (!token) {
+        if (!sess?.session?.access_token) {
             showEmployeeToast('Sign in as a manager to send invites.', 'error');
             return;
         }
 
-        let base = 'https://xutxuhypqpxobujxdhfz.supabase.co';
-        try {
-            const su = window.supabaseClient?.supabaseUrl;
-            const restUrl = window.supabaseClient?.rest?.url;
-            if (typeof su === 'string' && su) base = su.replace(/\/$/, '');
-            else if (restUrl) base = new URL(restUrl).origin;
-        } catch (_) {}
+        // Use client invoke() so apikey + Authorization match what Edge JWT verification expects (raw fetch often gets 401).
+        const { data: fnData, error: fnErr } = await window.supabaseClient.functions.invoke(
+            'invite-employee',
+            {
+                body: {
+                    email: trimmed,
+                    employee_name: employeeName,
+                    is_manager: !!isManager,
+                    org_id: window.ORG_ID,
+                    redirect_to: redirectTo,
+                },
+            }
+        );
 
-        const anonKey = window.SUPABASE_ANON_KEY || '';
-        const headers = {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-        };
-        if (anonKey) headers.apikey = anonKey;
-
-        const res = await fetch(`${base}/functions/v1/invite-employee`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                email: trimmed,
-                employee_name: employeeName,
-                is_manager: !!isManager,
-                org_id: window.ORG_ID,
-                redirect_to: redirectTo,
-            }),
-        });
-
-        const text = await res.text();
         let json = {};
-        try {
-            json = text ? JSON.parse(text) : {};
-        } catch (_) {
-            json = { error: text || res.statusText || 'Unknown error' };
+        let status = 0;
+        if (fnErr) {
+            status = Number(fnErr.context?.status || fnErr.status || 0) || 0;
+            try {
+                const b = fnErr.context?.body;
+                if (b) {
+                    json = typeof b === 'string' ? JSON.parse(b) : b;
+                }
+            } catch (_) {}
+            if (!json?.error && fnErr.message) {
+                json = { ...json, error: fnErr.message };
+            }
+        } else {
+            json = fnData && typeof fnData === 'object' ? fnData : {};
         }
 
-        if (res.ok) {
+        if (!fnErr && json?.ok === true) {
             showEmployeeToast(
                 `Invite sent to ${trimmed}. They’ll open the email, set a password, then can use the web or mobile app.`,
                 'success'
@@ -1530,12 +1526,12 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
             return;
         }
 
-        console.warn('[Invite] Edge function failed:', res.status, json?.error || text);
+        console.warn('[Invite] Edge function failed:', status, json?.error || fnErr?.message);
 
-        const errMsg = String(json?.error || '');
+        const errMsg = String(json?.error || fnErr?.message || '');
         const noFallback =
-            res.status === 403 ||
-            res.status === 409 ||
+            status === 403 ||
+            status === 409 ||
             /only managers|already has a sheek account|already registered/i.test(errMsg);
 
         if (noFallback) {
