@@ -59,6 +59,15 @@ function collectAllKnownPositionLabels() {
     return labels;
 }
 
+/** Scheduling / Assign Shift: all position labels (extra + per-employee + DB-backed). */
+window.kkGetOrgPositionLabelsForScheduling = function () {
+    try {
+        return [...collectAllKnownPositionLabels()].sort((a, b) => a.localeCompare(b));
+    } catch (_) {
+        return [];
+    }
+};
+
 function appendPositionCard(positionName, opts) {
     const animate = opts && opts.animate !== false;
     const name = String(positionName || '').trim();
@@ -180,6 +189,7 @@ async function loadEmployeePositionsFromSupabase() {
             _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
         });
 
+    _employeePositionsCache = map;
     return map;
 }
 
@@ -1298,11 +1308,6 @@ function handleCreatePositionSubmit() {
         nameInput?.focus();
         return;
     }
-    if (!responsibilities) {
-        showEmployeeToast('Please enter responsibilities for the position.', 'error');
-        respInput?.focus();
-        return;
-    }
 
     if (collectAllKnownPositionLabels().has(positionName)) {
         showEmployeeToast('A position with that name already exists.', 'error');
@@ -1390,20 +1395,12 @@ function savePositionDetail(positionName) {
     const responsibilitiesEl = document.getElementById('position-detail-responsibilities');
     const responsibilities = (responsibilitiesEl?.value || '').trim();
 
-    if (!responsibilities) {
-        showEmployeeToast('Please enter responsibilities.', 'error');
-        responsibilitiesEl?.focus();
-        return;
-    }
-
-    // Save responsibilities
     positionResponsibilities[positionName] = responsibilities;
 
-    // Close modal
     const modal = document.getElementById('position-detail-modal');
     closeEmployeesModal(modal);
 
-    showEmployeeToast(`Responsibilities updated for "${positionName}".`, 'success');
+    showEmployeeToast(`Saved "${positionName}".`, 'success');
 }
 
 function escapeEmployeesHtml(text) {
@@ -1456,24 +1453,53 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
     const trimmed = (email || '').trim();
     if (!trimmed) return;
 
+    const params = new URLSearchParams({
+        org: window.ORG_ID || '',
+        name: employeeName,
+        manager: isManager ? '1' : '0',
+        email: trimmed,
+    });
+    const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
+
     try {
-        const params = new URLSearchParams({
-            org: window.ORG_ID || '',
-            name: employeeName,
-            manager: isManager ? '1' : '0',
-            email: trimmed,
-        });
-        const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
-        const { error } = await window.supabaseClient.auth.signInWithOtp({
-            email: trimmed,
-            options: { emailRedirectTo: redirectTo },
-        });
-        if (error) {
-            console.warn('[Invite] Failed to send invite:', error.message);
-            showEmployeeToast('Could not send invite email. Please check the address.', 'error');
-        } else {
-            showEmployeeToast(`Invite email sent to ${trimmed}.`, 'success');
+        const { data: sess } = await window.supabaseClient.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (!token) {
+            showEmployeeToast('Sign in as a manager to send invites.', 'error');
+            return;
         }
+
+        let base = 'https://xutxuhypqpxobujxdhfz.supabase.co';
+        try {
+            const su = window.supabaseClient?.supabaseUrl;
+            const restUrl = window.supabaseClient?.rest?.url;
+            if (typeof su === 'string' && su) base = su.replace(/\/$/, '');
+            else if (restUrl) base = new URL(restUrl).origin;
+        } catch (_) {}
+        const res = await fetch(`${base}/functions/v1/invite-employee`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                email: trimmed,
+                employee_name: employeeName,
+                is_manager: !!isManager,
+                org_id: window.ORG_ID,
+                redirect_to: redirectTo,
+            }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            console.warn('[Invite] Edge function failed:', json?.error || res.status);
+            showEmployeeToast(json?.error || 'Could not send invite email.', 'error');
+            return;
+        }
+        showEmployeeToast(
+            `Invite sent to ${trimmed}. They’ll open the email, set a password, then can use the web or mobile app.`,
+            'success'
+        );
     } catch (e) {
         console.warn('[Invite] Unexpected error:', e.message);
         showEmployeeToast('Could not send invite email. Please try again.', 'error');

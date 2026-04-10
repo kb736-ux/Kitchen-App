@@ -1130,6 +1130,9 @@ function setupModalHandlers() {
     
     if (assignShiftBtn) {
         assignShiftBtn.addEventListener('click', async () => {
+            if (typeof loadEmployeePositionsFromSupabase === 'function') {
+                await loadEmployeePositionsFromSupabase();
+            }
             await populateEmployeeSelectFromOrg();
             openModal('assign-shift-modal');
         });
@@ -1479,16 +1482,40 @@ async function populatePositionSelect() {
         'MOD': 'mod', 'Cold Foods': 'cold-foods', 'Expo': 'expo' };
 
     let positions = new Set();
+
+    if (typeof window.kkGetOrgPositionLabelsForScheduling === 'function') {
+        window.kkGetOrgPositionLabelsForScheduling().forEach((p) => {
+            if (p) positions.add(p);
+        });
+    }
+
     if (window.supabaseClient && window.ORG_ID) {
         const { data } = await window.supabaseClient
             .from('employee_positions')
             .select('positions')
             .eq('org_id', window.ORG_ID);
-        (data || []).forEach(r => {
-            (r.positions || []).forEach(p => {
+        (data || []).forEach((r) => {
+            let arr = r.positions;
+            if (typeof arr === 'string') {
+                try {
+                    arr = JSON.parse(arr);
+                } catch (_) {
+                    arr = [];
+                }
+            }
+            (arr || []).forEach((p) => {
                 const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
                 if (label) positions.add(label);
             });
+        });
+
+        const { data: shiftRows } = await window.supabaseClient
+            .from('shifts')
+            .select('position')
+            .eq('org_id', window.ORG_ID);
+        (shiftRows || []).forEach((row) => {
+            const label = String(row?.position || '').trim();
+            if (label) positions.add(label);
         });
     }
 
@@ -4140,14 +4167,15 @@ document.head.appendChild(notificationStyles);
 window.addEventListener('supabase-ready', async function () {
     if (!window.supabaseClient || !window.ORG_ID) return;
     loadRecentAnnouncements();
-    await populateEmployeeSelectFromOrg();
-    await populatePositionSelect();
-
-    if (typeof window.kitchenTasks === 'undefined') window.kitchenTasks = [];
 
     if (typeof loadEmployeePositionsFromSupabase === 'function') {
         await loadEmployeePositionsFromSupabase();
     }
+
+    await populateEmployeeSelectFromOrg();
+    await populatePositionSelect();
+
+    if (typeof window.kitchenTasks === 'undefined') window.kitchenTasks = [];
 
     const { data: tasks, error } = await window.supabaseClient
         .from('tasks')

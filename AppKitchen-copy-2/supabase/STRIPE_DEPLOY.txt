@@ -49,3 +49,15 @@ Stripe + Sheek — deploy checklist
 
 Secrets already available to Edge Functions (do not set manually unless needed):
 SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+
+Employee invites (invite-employee Edge Function)
+================================================
+Deploy: supabase functions deploy invite-employee
+
+Dashboard → Authentication → URL configuration:
+  Add redirect URL: https://app.sheekapp.com/employee-onboard.html
+  (and http://localhost:* if testing locally)
+
+Optional secret: INVITE_ALLOWED_ORIGINS=comma-separated origins (defaults include https://app.sheekapp.com)
+
+Managers must be org_members with role manager or owner for the restaurant.

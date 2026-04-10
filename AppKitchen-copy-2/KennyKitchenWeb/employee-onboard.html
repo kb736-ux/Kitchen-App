@@ -41,7 +41,7 @@
       </div>
 
       <div id="onboard-body" style="font-size:14px;color:#4b5563;line-height:1.5;">
-        <p id="onboard-body-intro">Confirm your email or phone, create a password, and we’ll link you to your restaurant.</p>
+        <p id="onboard-body-intro">Use the <strong>invite link from your email</strong> first — it lets you create a password and join your restaurant. If you already have a Sheek password, sign in below.</p>
       </div>
 
       <!-- Step 1: not signed in -->
@@ -49,30 +49,31 @@
         <form id="form-send-link" novalidate>
           <label class="onboard-label" for="ob-email">Work email</label>
           <input class="onboard-input" id="ob-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
-          <button type="submit" class="onboard-btn" id="btn-send-link">Email me a sign-in link</button>
-          <p class="onboard-hint">We’ll email you a link to confirm this address. Use the same email your manager invited.</p>
+          <button type="submit" class="onboard-btn" id="btn-send-link">Email me another link</button>
+          <p class="onboard-hint">Only if you lost the invite: we’ll send a sign-in link to this address (same email your manager used). If you see “rate limit,” wait an hour or ask your manager to resend from the dashboard.</p>
           <p id="form-send-link-err" class="onboard-err" hidden></p>
         </form>
 
-        <div class="onboard-divider">or mobile</div>
+        <details class="onboard-step" style="margin-top:14px;">
+          <summary style="cursor:pointer;font-size:13px;color:#6b7280;">Use phone / SMS instead (optional)</summary>
+          <form id="form-send-sms" novalidate style="margin-top:12px;">
+            <div id="sms-step-request">
+              <label class="onboard-label" for="ob-phone">Mobile number</label>
+              <input class="onboard-input" id="ob-phone" name="phone" type="tel" autocomplete="tel" placeholder="+1 555 123 4567" inputmode="tel">
+              <button type="submit" class="onboard-btn onboard-btn-secondary" id="btn-send-sms">Text me a code</button>
+              <p class="onboard-hint">Requires SMS (e.g. Twilio) enabled in Supabase.</p>
+            </div>
+            <div id="sms-step-verify" hidden>
+              <label class="onboard-label" for="ob-sms-code">6-digit code</label>
+              <input class="onboard-input" id="ob-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456">
+              <button type="button" class="onboard-btn" id="btn-verify-sms">Verify &amp; continue</button>
+              <p class="onboard-hint">Enter the code we texted you.</p>
+            </div>
+            <p id="form-send-sms-err" class="onboard-err" hidden></p>
+          </form>
+        </details>
 
-        <form id="form-send-sms" novalidate>
-          <div id="sms-step-request">
-            <label class="onboard-label" for="ob-phone">Mobile number</label>
-            <input class="onboard-input" id="ob-phone" name="phone" type="tel" autocomplete="tel" placeholder="+1 555 123 4567" inputmode="tel">
-            <button type="submit" class="onboard-btn onboard-btn-secondary" id="btn-send-sms">Text me a code</button>
-            <p class="onboard-hint">Include country code (e.g. +1). SMS must be enabled for your project in Supabase.</p>
-          </div>
-          <div id="sms-step-verify" hidden>
-            <label class="onboard-label" for="ob-sms-code">6-digit code</label>
-            <input class="onboard-input" id="ob-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456">
-            <button type="button" class="onboard-btn" id="btn-verify-sms">Verify &amp; continue</button>
-            <p class="onboard-hint">Enter the code we texted you.</p>
-          </div>
-          <p id="form-send-sms-err" class="onboard-err" hidden></p>
-        </form>
-
-        <div class="onboard-divider">already have a password?</div>
+        <div class="onboard-divider">Already have a password?</div>
 
         <form id="form-signin" novalidate>
           <label class="onboard-label" for="ob-signin-email">Email</label>
