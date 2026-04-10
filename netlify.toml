@@ -1,0 +1,4 @@
+# Netlify: manager web app (static HTML/JS/CSS)
+# Repo folder name uses hyphens: AppKitchen-copy-2 (not "AppKitchen copy 2").
+[build]
+  publish = "AppKitchen-copy-2/KennyKitchenWeb"
