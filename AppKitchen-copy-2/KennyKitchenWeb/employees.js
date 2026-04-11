@@ -120,8 +120,9 @@ async function loadEmployeePositionsFromSupabase() {
             .eq('org_id', window.ORG_ID),
         window.supabaseClient
             .from('profiles')
-            .select('id, employee_name, display_name, full_name, email')
-            .eq('org_id', window.ORG_ID),
+            .select('id, user_id, employee_name, display_name, full_name, email')
+            .eq('org_id', window.ORG_ID)
+            .eq('onboarding_completed', true),
         window.supabaseClient
             .from('org_members')
             .select('user_id, role')
@@ -151,43 +152,55 @@ async function loadEmployeePositionsFromSupabase() {
     window._employeeIdToCanonicalName = {};
     _employeeDisplayByName = {};
     (data || []).forEach(r => {
-        window._employeeNameToId[r.employee_name] = r.id;
-        map[r.employee_name] = r.positions || [];
-        _employeeDisplayByName[r.employee_name] = prettifyEmployeeKey(r.employee_name) || r.employee_name;
+        const en = (r.employee_name || '').trim();
+        if (!en) return;
+        window._employeeNameToId[en] = r.id;
+        map[en] = r.positions || [];
+        _employeeDisplayByName[en] = prettifyEmployeeKey(en) || en;
     });
 
-    // Build robust name->UUID lookup from all profiles first.
-    // We use this for task/chat assignment even if org_members is incomplete.
-    (profilesData || [])
-        .filter(p => !!p.id && ((p.employee_name || '').trim() || (p.display_name || '').trim()))
-        .forEach(p => {
-            const name = p.employee_name.trim();
-            const display = (p.display_name || '').trim();
-            if (name) {
-                window._profileNameToId[name] = p.id;
-                window._employeeNameToId[name] = p.id;
-                window._employeeIdToCanonicalName[p.id] = name;
-            }
-            if (display) {
-                window._profileNameToId[display] = p.id;
-                window._employeeNameToId[display] = p.id;
-            }
-            if (name) {
-                window._displayNameToCanonicalEmployeeName[name] = name;
-                if (display) window._displayNameToCanonicalEmployeeName[display] = name;
-            }
-        });
+    const rosterProfiles = (profilesData || []).filter(
+        (p) =>
+            !!p.id &&
+            !!p.user_id &&
+            (p.employee_name || '').trim() &&
+            allowedMemberIds.has(p.user_id)
+    );
+    const seenUserIds = new Set();
+    const dedupedProfiles = [];
+    rosterProfiles.forEach((p) => {
+        if (!p.user_id || seenUserIds.has(p.user_id)) return;
+        seenUserIds.add(p.user_id);
+        dedupedProfiles.push(p);
+    });
+
+    // Build robust name->UUID lookup from roster profiles (one row per auth user).
+    dedupedProfiles.forEach((p) => {
+        const name = (p.employee_name || '').trim();
+        const display = (p.display_name || '').trim();
+        if (name) {
+            window._profileNameToId[name] = p.id;
+            window._employeeNameToId[name] = p.id;
+            window._employeeIdToCanonicalName[p.id] = name;
+        }
+        if (display) {
+            window._profileNameToId[display] = p.id;
+            window._employeeNameToId[display] = p.id;
+        }
+        if (name) {
+            window._displayNameToCanonicalEmployeeName[name] = name;
+            if (display) window._displayNameToCanonicalEmployeeName[display] = name;
+        }
+    });
 
     // Only Supabase-backed profiles should appear in employees list.
-    (profilesData || [])
-        .filter(p => !!p.id && (p.employee_name || '').trim() && (allowedMemberIds.size === 0 || allowedMemberIds.has(p.id)))
-        .forEach(p => {
-            const name = p.employee_name.trim();
-            if (!Object.prototype.hasOwnProperty.call(map, name)) {
-                map[name] = [];
-            }
-            _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
-        });
+    dedupedProfiles.forEach((p) => {
+        const name = (p.employee_name || '').trim();
+        if (!Object.prototype.hasOwnProperty.call(map, name)) {
+            map[name] = [];
+        }
+        _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
+    });
 
     _employeePositionsCache = map;
     return map;
@@ -785,17 +798,19 @@ function showEmployeeToast(message, type) {
         showNotificationToast(message, type);
         return;
     }
+    const longError = type === 'error' && String(message || '').length > 120;
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed; bottom: 20px; right: 20px;
         background: ${type === 'error' ? '#e53e3e' : '#4CAF50'};
         color: white; padding: 1rem 1.5rem; border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 10000;
-        font-weight: 600; max-width: 320px;
+        font-weight: 600; max-width: ${longError ? 'min(92vw,520px)' : '320px'};
+        line-height: 1.35; white-space: pre-wrap;
     `;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => toast.remove(), longError ? 12000 : 3000);
 }
 
 // --- Create Employee & Create Position modals ---
@@ -900,20 +915,21 @@ async function handleCreateEmployeeSubmit() {
     const nameInput = document.getElementById('employee-full-name');
     const emailInput = document.getElementById('employee-email');
     const phoneInput = document.getElementById('employee-phone');
-    const compensationType = document.querySelector('input[name="employee-compensation-type"]:checked')?.value || 'hourly';
     const isManager = !!document.getElementById('employee-is-manager')?.checked;
     const fullName = (nameInput?.value || '').trim();
     const email = (emailInput?.value || '').trim();
-    const phone = (phoneInput?.value || '').trim();
 
     if (!fullName) {
         showEmployeeToast('Please enter the employee\'s full name.', 'error');
         nameInput?.focus();
         return;
     }
-    if (!phone && !email) {
-        showEmployeeToast('Please enter at least an email or phone number.', 'error');
-        (emailInput || phoneInput)?.focus();
+    if (!email) {
+        showEmployeeToast(
+            'Enter an email address to send the invite. Employees are added only after they finish signup.',
+            'error'
+        );
+        emailInput?.focus();
         return;
     }
 
@@ -945,84 +961,22 @@ async function handleCreateEmployeeSubmit() {
         }
     }
 
-    const list = document.querySelector('.employees-card .shift-list');
-    if (!list) return;
-
-    const avatarLetter = fullName.charAt(0).toUpperCase();
-
-    // Store employee data with compensation type
-    if (!window.employeeData) {
-        window.employeeData = {};
-    }
-    window.employeeData[fullName] = {
-        name: fullName,
-        email: email || null,
-        phone: phone,
-        compensationType: compensationType,
-        isManager: isManager
-    };
-
-    // Read selected positions from checkboxes
+    // Read selected positions from checkboxes (stored in invite URL; applied when they finish signup).
     const selectedPositions = Array.from(
         document.querySelectorAll('#employee-position-checkboxes input[type="checkbox"]:checked')
     ).map(cb => cb.value);
 
-    // Save positions to data store
-    const posData = getEmployeePositions();
-    posData[fullName] = selectedPositions;
-    saveEmployeePositions(posData);
+    const inviteOk = await inviteEmployeeByEmail(fullName, email, isManager, selectedPositions);
+    if (!inviteOk) return;
 
-    _managerFlagsByName[fullName] = isManager;
-    syncEmployeeManagerAccess(fullName, isManager);
-
-    if (email) {
-        inviteEmployeeByEmail(fullName, email, isManager);
-    }
-
-    const item = document.createElement('div');
-    item.className = 'shift-item';
-    item.dataset.employeeName = fullName;
-    item.dataset.compensationType = compensationType;
-    item.innerHTML = `
-        <div class="employee-info">
-            <div class="employee-avatar">${avatarLetter}</div>
-            <div class="employee-details">
-                <span class="employee-name">${escapeEmployeesHtml(fullName)}</span>
-                <span class="employee-role" style="display:none;"></span>
-            </div>
-        </div>
-        <div class="shift-status offline">
-            <i class="fas fa-circle"></i>
-            Off
-        </div>
-    `;
-
-    list.appendChild(item);
-    item.style.opacity = '0';
-    item.style.transform = 'translateY(10px)';
-    requestAnimationFrame(() => {
-        item.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
-        item.style.opacity = '1';
-        item.style.transform = 'translateY(0)';
-    });
-
-    // Add edit button to new row
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn-edit-positions';
-    editBtn.title = 'Manage positions';
-    editBtn.innerHTML = '<i class="fas fa-pen"></i>';
-    editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPositionsModal(fullName); });
-    item.appendChild(editBtn);
-
-    // Update positions section
-    updatePositionsFromEmployees();
-
-    // Clear form and close modal
     if (nameInput) nameInput.value = '';
     if (phoneInput) phoneInput.value = '';
     const employeeModal = document.getElementById('create-employee-modal');
     closeEmployeesModal(employeeModal);
-    showEmployeeToast(`Employee "${fullName}" created.`, 'success');
+    showEmployeeToast(
+        `Invite sent to ${email}. They will appear here after they confirm email and set a password.`,
+        'success'
+    );
 }
 
 // Update positions section and employee role tags from stored data
@@ -1446,17 +1400,53 @@ async function syncEmployeeManagerAccess(employeeName, isManager) {
 }
 
 /**
+ * Human-readable OTP invite failure (Supabase often returns short messages; SMTP/redirect issues need hints).
+ */
+function formatInviteEmailFailure(error, redirectTo) {
+    const raw =
+        (error && (error.message || error.msg || error.error_description)) ||
+        (typeof error === 'string' ? error : '') ||
+        '';
+    const status = (error && (error.status || error.statusCode)) || '';
+    const base = [raw.trim(), status ? `(HTTP ${status})` : ''].filter(Boolean).join(' ').trim();
+    const text = base || 'Supabase did not return an error message (check Auth logs and browser console).';
+
+    const t = text.toLowerCase();
+    const hints = [];
+    if (/redirect|invalid.*url|not valid/i.test(text) || t.includes('uri')) {
+        hints.push(
+            'Authentication → URL Configuration → add Redirect URL: ' +
+                `${window.location.origin}/employee-onboard.html (wildcard e.g. https://*.netlify.app/** if supported).`
+        );
+    }
+    if (t.includes('rate') || status === 429) {
+        hints.push('Email rate limit: wait a few minutes or increase limits / use custom SMTP in Supabase.');
+    }
+    if (/smtp|mail sender|535|authentication failed|e-mail address is not verified|domain is not verified/i.test(text)) {
+        hints.push(
+            'SMTP / sender: use custom SMTP with a verified domain (e.g. Resend) and a matching From address in Supabase.'
+        );
+    }
+    if (t.includes('signup') && (t.includes('disabled') || t.includes('not allowed'))) {
+        hints.push('Enable email signups: Authentication → Providers → Email.');
+    }
+
+    const userLine = hints.length ? `${text} — ${hints[0]}` : text;
+    return { userLine, text, hints, redirectTo };
+}
+
+/**
  * Send the same magic-link invite as before (signInWithOtp).
  * Does not use the invite-employee Edge Function — that path depended on JWT + deploy + invite templates
  * and broke email for many setups. Magic links use the standard "Magic link" template + SMTP.
  */
-async function inviteEmployeeByEmail(employeeName, email, isManager) {
+async function inviteEmployeeByEmail(employeeName, email, isManager, positionLabels) {
     if (!window.supabaseClient) {
         console.warn('[Invite] Supabase client not ready; cannot send invite for', employeeName);
-        return;
+        return false;
     }
     const trimmed = (email || '').trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
 
     const params = new URLSearchParams({
         org: window.ORG_ID || '',
@@ -1464,25 +1454,32 @@ async function inviteEmployeeByEmail(employeeName, email, isManager) {
         manager: isManager ? '1' : '0',
         email: trimmed,
     });
+    const labels = Array.isArray(positionLabels)
+        ? positionLabels.map((s) => String(s || '').trim()).filter(Boolean)
+        : [];
+    if (labels.length) params.set('pos', labels.join('|'));
     const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
 
     try {
         const { error } = await window.supabaseClient.auth.signInWithOtp({
             email: trimmed,
-            options: { emailRedirectTo: redirectTo },
+            options: {
+                emailRedirectTo: redirectTo,
+                shouldCreateUser: true,
+            },
         });
         if (error) {
-            console.warn('[Invite] signInWithOtp failed:', error.message);
-            showEmployeeToast(error.message || 'Could not send invite email.', 'error');
-            return;
+            const { userLine } = formatInviteEmailFailure(error, redirectTo);
+            console.warn('[Invite] signInWithOtp failed:', error, '\nemailRedirectTo:', redirectTo);
+            showEmployeeToast(userLine, 'error');
+            return false;
         }
-        showEmployeeToast(
-            `Invite email sent to ${trimmed}. They should open the link to confirm and set a password.`,
-            'success'
-        );
+        return true;
     } catch (e) {
-        console.warn('[Invite] Unexpected error:', e.message);
-        showEmployeeToast('Could not send invite email. Please try again.', 'error');
+        const { userLine } = formatInviteEmailFailure(e, redirectTo);
+        console.warn('[Invite] Unexpected error:', e, '\nemailRedirectTo:', redirectTo);
+        showEmployeeToast(userLine, 'error');
+        return false;
     }
 }
 

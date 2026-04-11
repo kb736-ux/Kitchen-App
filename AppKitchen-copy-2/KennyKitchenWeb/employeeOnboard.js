@@ -117,7 +117,7 @@
     try {
       const { data: existingProfiles } = await supabase
         .from('profiles')
-        .select('id, user_id')
+        .select('id, user_id, onboarding_completed')
         .eq('org_id', orgId)
         .ilike('employee_name', dn);
 
@@ -130,6 +130,7 @@
             display_name: dn,
             first_name: firstName || null,
             last_name: lastName || null,
+            onboarding_completed: true,
           })
           .eq('id', existingProfiles[0].id);
         if (updErr) console.warn('[Onboard] profiles update failed:', updErr.message);
@@ -142,6 +143,7 @@
           employee_name: dn,
           first_name: firstName || null,
           last_name: lastName || null,
+          onboarding_completed: true,
         });
         if (profErr) {
           const msg = String(profErr.message || '').toLowerCase();
@@ -156,6 +158,7 @@
                 employee_name: dn,
                 first_name: firstName || null,
                 last_name: lastName || null,
+                onboarding_completed: true,
               })
               .eq('user_id', user.id)
               .eq('org_id', orgId);
