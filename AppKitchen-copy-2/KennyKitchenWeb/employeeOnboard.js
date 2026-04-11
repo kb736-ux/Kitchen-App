@@ -42,18 +42,38 @@
     }
   }
 
-  function buildRedirectUrl(orgId, employeeName, isManager, emailQuery) {
+  function buildRedirectUrl(orgId, employeeName, isManager, emailQuery, positionLabels) {
     const p = new URLSearchParams();
     if (orgId) p.set('org', orgId);
     if (employeeName) p.set('name', employeeName);
     p.set('manager', isManager ? '1' : '0');
     const e = (emailQuery || '').trim();
     if (e) p.set('email', e);
+    const labels = Array.isArray(positionLabels)
+      ? positionLabels.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    if (labels.length) p.set('pos', labels.join('|'));
     const path = window.location.pathname || '/employee-onboard.html';
     return `${window.location.origin}${path}?${p.toString()}`;
   }
 
-  async function linkOrgAndFinish(supabase, orgId, employeeName, isManager, user) {
+  function parsePositionsParam(raw) {
+    if (!raw || typeof raw !== 'string') return [];
+    return raw
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  function splitDisplayName(fullName) {
+    const dn = (fullName || '').trim();
+    if (!dn) return { first: '', last: '' };
+    const parts = dn.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return { first: parts[0], last: '' };
+    return { first: parts[0], last: parts.slice(1).join(' ') };
+  }
+
+  async function linkOrgAndFinish(supabase, orgId, employeeName, isManager, user, positionLabels) {
     if (!orgId) {
       setSubtitle('Missing restaurant');
       showStep('step-done');
@@ -91,6 +111,82 @@
       }
     }
 
+    const email = String(user.email || '').trim();
+    const dn = (employeeName || '').trim() || email.split('@')[0] || 'Team member';
+    const { first: firstName, last: lastName } = splitDisplayName(dn);
+    try {
+      const { data: existingProfiles } = await supabase
+        .from('profiles')
+        .select('id, user_id')
+        .eq('org_id', orgId)
+        .ilike('employee_name', dn);
+
+      if (existingProfiles && existingProfiles.length > 0) {
+        const { error: updErr } = await supabase
+          .from('profiles')
+          .update({
+            user_id: user.id,
+            email: email || null,
+            display_name: dn,
+            first_name: firstName || null,
+            last_name: lastName || null,
+          })
+          .eq('id', existingProfiles[0].id);
+        if (updErr) console.warn('[Onboard] profiles update failed:', updErr.message);
+      } else {
+        const { error: profErr } = await supabase.from('profiles').insert({
+          org_id: orgId,
+          user_id: user.id,
+          email: email || null,
+          display_name: dn,
+          employee_name: dn,
+          first_name: firstName || null,
+          last_name: lastName || null,
+        });
+        if (profErr) {
+          const msg = String(profErr.message || '').toLowerCase();
+          const dup = profErr.code === '23505' || msg.includes('duplicate') || msg.includes('unique');
+          if (dup) {
+            const { error: updErr } = await supabase
+              .from('profiles')
+              .update({
+                org_id: orgId,
+                email: email || null,
+                display_name: dn,
+                employee_name: dn,
+                first_name: firstName || null,
+                last_name: lastName || null,
+              })
+              .eq('user_id', user.id)
+              .eq('org_id', orgId);
+            if (updErr) console.warn('[Onboard] profiles update failed:', updErr.message);
+          } else {
+            console.warn('[Onboard] profiles insert failed:', profErr.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Onboard] profiles error:', e.message);
+    }
+
+    const positions = Array.isArray(positionLabels) ? positionLabels : [];
+    if (positions.length) {
+      try {
+        const { error: epErr } = await supabase.from('employee_positions').upsert(
+          {
+            org_id: orgId,
+            employee_name: dn,
+            positions,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'org_id,employee_name' }
+        );
+        if (epErr) console.warn('[Onboard] employee_positions upsert failed:', epErr.message);
+      } catch (e) {
+        console.warn('[Onboard] employee_positions error:', e.message);
+      }
+    }
+
     const niceName = employeeName || user.email || user.phone || 'your account';
     setSubtitle('You’re all set!');
     showStep('step-done');
@@ -108,7 +204,7 @@
       .replace(/"/g, '&quot;');
   }
 
-  function bindUnauthedForms(supabase, orgId, employeeName, isManager, prefillEmail) {
+  function bindUnauthedForms(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels) {
     const emailInput = document.getElementById('ob-email');
     const signinEmail = document.getElementById('ob-signin-email');
     if (emailInput && prefillEmail) emailInput.value = prefillEmail;
@@ -124,7 +220,7 @@
       }
       const btn = document.getElementById('btn-send-link');
       if (btn) btn.disabled = true;
-      const redirectTo = buildRedirectUrl(orgId, employeeName, isManager, email);
+      const redirectTo = buildRedirectUrl(orgId, employeeName, isManager, email, positionLabels);
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: redirectTo },
@@ -200,7 +296,7 @@
       }
       setSubtitle('Create your password');
       showStep('step-password');
-      bindPasswordForm(supabase, orgId, employeeName, isManager, data.session.user);
+      bindPasswordForm(supabase, orgId, employeeName, isManager, data.session.user, positionLabels);
     });
 
     document.getElementById('form-signin')?.addEventListener('submit', async (ev) => {
@@ -227,7 +323,7 @@
     });
   }
 
-  function bindPasswordForm(supabase, orgId, employeeName, isManager, user) {
+  function bindPasswordForm(supabase, orgId, employeeName, isManager, user, positionLabels) {
     const form = document.getElementById('form-password');
     if (!form || form.dataset.bound === '1') return;
     form.dataset.bound = '1';
@@ -259,11 +355,11 @@
         showFormError('form-password-err', error.message || 'Could not save password.');
         return;
       }
-      await linkOrgAndFinish(supabase, orgId, employeeName, isManager, user);
+      await linkOrgAndFinish(supabase, orgId, employeeName, isManager, user, positionLabels);
     });
   }
 
-  async function route(supabase, orgId, employeeName, isManager, prefillEmail) {
+  async function route(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       setSubtitle('Sign up or sign in');
@@ -296,14 +392,14 @@
       const msg = document.getElementById('step-done-message');
       if (msg) msg.textContent = 'Almost done…';
       document.getElementById('step-done-link')?.setAttribute('hidden', '');
-      await linkOrgAndFinish(supabase, orgId, employeeName, isManager, session.user);
+      await linkOrgAndFinish(supabase, orgId, employeeName, isManager, session.user, positionLabels);
       document.getElementById('step-done-link')?.removeAttribute('hidden');
       return;
     }
 
     setSubtitle('Create your password');
     showStep('step-password');
-    bindPasswordForm(supabase, orgId, employeeName, isManager, session.user);
+    bindPasswordForm(supabase, orgId, employeeName, isManager, session.user, positionLabels);
   }
 
   async function run() {
@@ -323,10 +419,11 @@
     const employeeName = params.get('name') || '';
     const isManager = params.get('manager') === '1';
     const prefillEmail = params.get('email') || '';
+    const positionLabels = parsePositionsParam(params.get('pos') || '');
 
-    bindUnauthedForms(supabase, orgId, employeeName, isManager, prefillEmail);
+    bindUnauthedForms(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels);
 
-    await route(supabase, orgId, employeeName, isManager, prefillEmail);
+    await route(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels);
 
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
@@ -337,7 +434,7 @@
         if (stillUnauthed && !stillUnauthed.hidden) {
           setSubtitle('Create your password');
           showStep('step-password');
-          bindPasswordForm(supabase, orgId, employeeName, isManager, session.user);
+          bindPasswordForm(supabase, orgId, employeeName, isManager, session.user, positionLabels);
         }
       }
     });
