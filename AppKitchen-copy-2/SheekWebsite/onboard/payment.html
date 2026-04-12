@@ -70,13 +70,11 @@
         );
         if (!o) return;
 
-        var planLabel = { starter: "Starter", growth: "Growth", scale: "Scale" };
         document.getElementById("ob-summary").innerHTML =
           "<p><strong>Restaurant:</strong> " +
           escapeHtml(o.restaurant_name) +
-          "</p><p><strong>Plan:</strong> " +
-          (planLabel[o.plan] || o.plan) +
-          "</p><p><strong>Manager:</strong> " +
+          "</p><p><strong>Pricing:</strong> $3.00/user/mo (or $2.50 for 30+ employees)</p>" +
+          "<p><strong>Manager:</strong> " +
           escapeHtml(o.first_name + " " + o.last_name) +
           " · " +
           escapeHtml(o.email) +

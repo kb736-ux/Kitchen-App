@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Restaurant & plan — Sheek</title>
-  <meta name="description" content="Name your restaurant and choose a Sheek subscription tier." />
+  <title>Restaurant details — Sheek</title>
+  <meta name="description" content="Name your restaurant and start your per-user Sheek subscription." />
   <link rel="icon" type="image/png" href="/favicon.png" sizes="512x512" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -35,8 +35,8 @@
   <main class="onboard-wizard-main">
     <div class="wrap onboard-wizard-inner">
       <p class="onboard-step-pill">Step 2 of 3</p>
-      <h1 class="onboard-wizard-title">Restaurant &amp; plan</h1>
-      <p class="onboard-wizard-lead">Choose how your restaurant appears in Sheek and which subscription tier fits your team size.</p>
+      <h1 class="onboard-wizard-title">Restaurant details</h1>
+      <p class="onboard-wizard-lead">Name your restaurant as it should appear in Sheek for your team.</p>
 
       <div class="onboarding-lead-card onboard-wizard-card onboard-wizard-card-wide">
         <form id="onboard-step2-form" class="onboarding-lead-form">
@@ -44,21 +44,11 @@
             <label for="ob-restaurant">Restaurant name</label>
             <input id="ob-restaurant" name="restaurant_name" type="text" autocomplete="organization" placeholder="e.g. Northside Diner" required />
           </div>
-          <fieldset class="onboard-plan-fieldset">
-            <legend class="onboard-plan-legend">Subscription tier</legend>
-            <label class="onboard-plan-option">
-              <input type="radio" name="plan" value="starter" checked />
-              <span><strong>Starter</strong> — up to 20 employees</span>
-            </label>
-            <label class="onboard-plan-option">
-              <input type="radio" name="plan" value="growth" />
-              <span><strong>Growth</strong> — 21–40 employees</span>
-            </label>
-            <label class="onboard-plan-option">
-              <input type="radio" name="plan" value="scale" />
-              <span><strong>Scale</strong> — 41+ employees</span>
-            </label>
-          </fieldset>
+          <div class="onboard-pricing-display" style="margin-top:12px;padding:14px 16px;border:2px solid #dcfce7;border-radius:12px;background:#f0fdf4;">
+            <div style="font-weight:700;font-size:15px;color:#166534;margin-bottom:4px;">$3.00/user/mo</div>
+            <div style="font-size:13px;color:#4b5563;line-height:1.45;">$2.50/user/mo for 30+ employees. No caps — add as many staff as you need.</div>
+            <input type="hidden" name="plan" value="per_user" />
+          </div>
           <p id="ob2-err" class="onboarding-lead-error" role="alert" hidden></p>
           <div class="onboard-wizard-actions">
             <a class="btn btn-outline" href="index.html">Back</a>
@@ -78,15 +68,6 @@
       document.addEventListener("DOMContentLoaded", function () {
         if (!window.sheekOnboard.require(["first_name", "last_name", "email"], "index.html")) return;
 
-        var q = new URLSearchParams(window.location.search || "");
-        var qp = String(q.get("plan") || "").toLowerCase().trim();
-        var o = window.sheekOnboard.load();
-        var pref = qp === "starter" || qp === "growth" || qp === "scale" ? qp : o.pref_plan;
-        if (pref === "starter" || pref === "growth" || pref === "scale") {
-          var r = document.querySelector('input[name="plan"][value="' + pref + '"]');
-          if (r) r.checked = true;
-        }
-
         var form = document.getElementById("onboard-step2-form");
         var errEl = document.getElementById("ob2-err");
         form.addEventListener("submit", function (e) {
@@ -99,9 +80,7 @@
             errEl.removeAttribute("hidden");
             return;
           }
-          var pr = form.querySelector('input[name="plan"]:checked');
-          var plan = pr ? String(pr.value || "").toLowerCase() : "starter";
-          window.sheekOnboard.save({ restaurant_name: name, plan: plan });
+          window.sheekOnboard.save({ restaurant_name: name, plan: "per_user" });
           window.location.href = "payment.html";
         });
       });
