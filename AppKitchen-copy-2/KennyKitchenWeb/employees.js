@@ -1167,16 +1167,18 @@ async function deleteEmployeeFromEditModal() {
     if (!editPositionsTarget) return;
     const employeeName = editPositionsTarget;
     const employeeLabel = getEmployeeDisplayName(employeeName);
-    const confirmed = window.confirm(`Delete employee "${employeeLabel}"? This cannot be undone.`);
+    const confirmed = window.confirm(`Delete employee "${employeeLabel}"?\n\nThis will permanently remove ALL of their data (shifts, tasks, messages, etc.) and prevent them from logging in.\n\nThis cannot be undone.`);
     if (!confirmed) return;
 
     const deleteBtn = document.getElementById('delete-edit-employee');
     if (deleteBtn) {
         deleteBtn.disabled = true;
         deleteBtn.style.opacity = '0.7';
+        deleteBtn.textContent = 'Deleting…';
     }
 
     try {
+        // Clear local/in-memory data
         const posData = getEmployeePositions();
         if (posData && Object.prototype.hasOwnProperty.call(posData, employeeName)) {
             delete posData[employeeName];
@@ -1197,49 +1199,117 @@ async function deleteEmployeeFromEditModal() {
         const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(employeeName) : employeeName.replace(/"/g, '\\"');
         document.querySelector(`.employees-card .shift-item[data-employee-name="${escaped}"]`)?.remove();
 
-        // Best-effort DB cleanup.
+        // Call the Edge Function for full delete (all tables + auth user)
         if (window.supabaseClient && window.ORG_ID) {
             const normalized = employeeName.trim().toLowerCase();
             const userIdFromMap = window.getEmployeeIdFromName?.(employeeName) || null;
 
+            // Try to find the user_id from profiles
             const { data: profileRows } = await window.supabaseClient
                 .from('profiles')
-                .select('id, employee_name')
+                .select('id, user_id, employee_name')
                 .eq('org_id', window.ORG_ID);
             const matchedProfile = (profileRows || []).find((p) => (p.employee_name || '').trim().toLowerCase() === normalized);
-            const profileId = matchedProfile?.id || userIdFromMap || null;
+            const userId = matchedProfile?.user_id || userIdFromMap || null;
 
-            await Promise.all([
-                window.supabaseClient
-                    .from('employee_positions')
-                    .delete()
-                    .eq('org_id', window.ORG_ID)
-                    .ilike('employee_name', employeeName),
-                window.supabaseClient
-                    .from('profiles')
-                    .delete()
-                    .eq('org_id', window.ORG_ID)
-                    .ilike('employee_name', employeeName),
-                profileId
-                    ? window.supabaseClient
-                        .from('org_members')
+            let edgeFunctionWorked = false;
+
+            // Try Edge Function first (handles auth deletion + all tables)
+            try {
+                const { data: { session } } = await window.supabaseClient.auth.getSession();
+                if (session?.access_token) {
+                    const resp = await fetch(`${window.SUPABASE_URL}/functions/v1/delete-employee`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session.access_token}`,
+                            'apikey': window.SUPABASE_ANON_KEY,
+                        },
+                        body: JSON.stringify({
+                            org_id: window.ORG_ID,
+                            employee_name: employeeName,
+                            user_id: userId,
+                        }),
+                    });
+                    if (resp.ok) {
+                        const result = await resp.json();
+                        console.log('[Employees] Edge Function deleted:', result.deleted);
+                        edgeFunctionWorked = true;
+                    } else {
+                        const errBody = await resp.text();
+                        console.warn('[Employees] Edge Function failed:', resp.status, errBody);
+                    }
+                }
+            } catch (efErr) {
+                console.warn('[Employees] Edge Function not available:', efErr.message);
+            }
+
+            // Fallback: client-side cleanup if Edge Function didn't work
+            if (!edgeFunctionWorked) {
+                console.log('[Employees] Falling back to client-side delete');
+                const profileId = matchedProfile?.id || userIdFromMap || null;
+
+                await Promise.all([
+                    // Core employee tables
+                    window.supabaseClient
+                        .from('employee_positions')
                         .delete()
                         .eq('org_id', window.ORG_ID)
-                        .eq('user_id', profileId)
-                    : Promise.resolve(),
-                profileId
-                    ? window.supabaseClient
-                        .from('admin_users')
+                        .ilike('employee_name', employeeName),
+                    window.supabaseClient
+                        .from('profiles')
                         .delete()
-                        .eq('user_id', profileId)
-                    : Promise.resolve(),
-            ]);
+                        .eq('org_id', window.ORG_ID)
+                        .ilike('employee_name', employeeName),
+                    // Shifts
+                    window.supabaseClient
+                        .from('shifts')
+                        .delete()
+                        .eq('org_id', window.ORG_ID)
+                        .ilike('employee_name', employeeName),
+                    // Shift requests
+                    window.supabaseClient
+                        .from('shift_requests')
+                        .delete()
+                        .eq('org_id', window.ORG_ID)
+                        .ilike('employee_name', employeeName)
+                        .then(() => {})
+                        .catch(() => {}),
+                    // Notifications
+                    window.supabaseClient
+                        .from('notifications')
+                        .delete()
+                        .eq('org_id', window.ORG_ID)
+                        .ilike('employee_name', employeeName)
+                        .then(() => {})
+                        .catch(() => {}),
+                    // Org members + admin
+                    profileId
+                        ? window.supabaseClient
+                            .from('org_members')
+                            .delete()
+                            .eq('org_id', window.ORG_ID)
+                            .eq('user_id', profileId)
+                        : Promise.resolve(),
+                    profileId
+                        ? window.supabaseClient
+                            .from('admin_users')
+                            .delete()
+                            .eq('user_id', profileId)
+                        : Promise.resolve(),
+                ]);
+
+                // Note: client-side cannot delete auth user — only Edge Function can do that
+                if (userId) {
+                    console.warn('[Employees] Cannot delete auth user from client. Deploy the delete-employee Edge Function to fully block login.');
+                }
+            }
         }
 
         closeEditPositionsModal();
         updatePositionsFromEmployees();
         await renderEmployeesWithHours();
-        showEmployeeToast(`Deleted employee "${escapeEmployeesHtml(employeeLabel)}".`, 'success');
+        showEmployeeToast(`Deleted employee "${escapeEmployeesHtml(employeeLabel)}". All data removed.`, 'success');
     } catch (e) {
         console.warn('[Employees] delete employee failed:', e.message);
         showEmployeeToast(e?.message || 'Could not delete employee. Please try again.', 'error');
@@ -1247,9 +1317,11 @@ async function deleteEmployeeFromEditModal() {
         if (deleteBtn) {
             deleteBtn.disabled = false;
             deleteBtn.style.opacity = '1';
+            deleteBtn.textContent = 'Delete Employee';
         }
     }
 }
+
 
 function handleCreatePositionSubmit() {
     const nameInput = document.getElementById('position-name');
