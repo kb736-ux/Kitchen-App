@@ -1470,8 +1470,11 @@ async function inviteEmployeeByEmail(employeeName, email, isManager, positionLab
         });
         if (error) {
             const { userLine } = formatInviteEmailFailure(error, redirectTo);
+            const rawMsg = error.message || error.msg || error.error_description || JSON.stringify(error);
+            const statusCode = error.status || error.statusCode || '';
             console.warn('[Invite] signInWithOtp failed:', error, '\nemailRedirectTo:', redirectTo);
-            showEmployeeToast(userLine, 'error');
+            console.warn('[Invite] Raw error message:', rawMsg, '| Status:', statusCode);
+            showEmployeeToast(`${rawMsg}${statusCode ? ` (HTTP ${statusCode})` : ''} — Redirect: ${redirectTo}`, 'error');
             return false;
         }
         return true;
