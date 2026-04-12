@@ -209,6 +209,14 @@ Deno.serve(async (req: Request) => {
 
     console.log(`[delete-employee] Deleted ${employeeName} from org ${orgId}: ${deleted.join(", ")}`);
 
+    // 13. Sync Stripe quantity
+    try {
+      await admin.functions.invoke("sync-stripe-quantity", { body: { org_id: orgId } });
+      deleted.push("stripe_sync");
+    } catch (e) {
+      console.warn("[delete-employee] sync-stripe-quantity failed:", e);
+    }
+
     return new Response(
       JSON.stringify({ success: true, deleted, employee_name: employeeName, user_id: userId }),
       {

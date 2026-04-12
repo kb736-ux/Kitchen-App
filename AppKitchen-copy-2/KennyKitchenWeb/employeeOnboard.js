@@ -168,6 +168,13 @@
           }
         }
       }
+      
+      // Async trigger to sync stripe quantity
+      try {
+        await supabase.functions.invoke('sync-stripe-quantity', { body: { org_id: orgId } });
+      } catch (e) {
+        console.warn('[Onboard] sync-stripe-quantity failed:', e.message);
+      }
     } catch (e) {
       console.warn('[Onboard] profiles error:', e.message);
     }
