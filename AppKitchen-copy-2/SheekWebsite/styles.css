@@ -447,6 +447,11 @@ a {
 }
 
 /* Pricing */
+.pricing-inner {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
 .pricing-grid {
   display: grid;
   gap: 1.25rem;
@@ -454,7 +459,7 @@ a {
 
 @media (min-width: 800px) {
   .pricing-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     align-items: stretch;
   }
 }
