@@ -18,7 +18,7 @@ async function syncOrgFromSubscription(
 ) {
   const priceId = firstPriceId(sub);
   const plan = priceIdToPlan(priceId) || String(sub.metadata?.plan || "").toLowerCase();
-  const resolvedPlan = ["starter", "growth", "scale"].includes(plan) ? plan : "starter";
+  const resolvedPlan = ["per_user", "starter", "growth", "scale"].includes(plan) ? plan : "per_user";
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
 
   const { error } = await admin
@@ -48,7 +48,7 @@ async function findOrgIdByCustomer(
 
 function normalizePlanValue(p: string): string {
   const v = String(p || "").toLowerCase().trim();
-  return ["starter", "growth", "scale"].includes(v) ? v : "starter";
+  return ["per_user", "starter", "growth", "scale"].includes(v) ? v : "per_user";
 }
 
 /**
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
           .update({
             stripe_subscription_id: null,
             stripe_subscription_status: "canceled",
-            subscription_plan: "starter",
+            subscription_plan: "per_user",
           })
           .eq("id", orgId);
         break;

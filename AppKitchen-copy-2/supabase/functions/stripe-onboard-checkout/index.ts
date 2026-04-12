@@ -8,7 +8,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
 
 function normalizePlan(p: string): string | null {
   const v = String(p || "").toLowerCase().trim();
-  return ["starter", "growth", "scale"].includes(v) ? v : null;
+  return ["per_user", "starter", "growth", "scale"].includes(v) ? v : null;
 }
 
 /** Allow redirects back to the manager app or marketing onboard complete page. */
@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           error:
-            "Stripe price not configured. Set STRIPE_PRICE_STARTER, STRIPE_PRICE_GROWTH, STRIPE_PRICE_SCALE on the function.",
+            "Stripe price not configured. Set STRIPE_PRICE_PER_USER on the function.",
         }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

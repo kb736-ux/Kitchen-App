@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     const successUrl = String(body.success_url || "").trim();
     const cancelUrl = String(body.cancel_url || "").trim();
 
-    if (!["starter", "growth", "scale"].includes(plan) || !orgId || !successUrl || !cancelUrl) {
+    if (!["per_user", "starter", "growth", "scale"].includes(plan) || !orgId || !successUrl || !cancelUrl) {
       return new Response(
         JSON.stringify({ error: "Invalid plan, org_id, or return URLs" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           error:
-            "Stripe price not configured. Set STRIPE_PRICE_STARTER, STRIPE_PRICE_GROWTH, STRIPE_PRICE_SCALE on the function.",
+            "Stripe price not configured. Set STRIPE_PRICE_PER_USER on the function.",
         }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

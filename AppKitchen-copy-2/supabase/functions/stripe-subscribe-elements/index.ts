@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     const plan = String(body.plan || "").toLowerCase().trim();
     const orgId = String(body.org_id || "").trim();
 
-    if (!["starter", "growth", "scale"].includes(plan) || !orgId) {
+    if (!["per_user", "starter", "growth", "scale"].includes(plan) || !orgId) {
       return new Response(JSON.stringify({ error: "Invalid plan or org_id" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
