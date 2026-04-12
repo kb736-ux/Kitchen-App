@@ -122,19 +122,11 @@
           />
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
-          <span style="font-size:13px;font-weight:500;color:#374151;">Subscription plan</span>
-          <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;">
-            <input type="radio" name="kk-signup-plan" value="starter" checked style="margin-top:3px;" />
-            <div><strong style="font-size:13px;color:#111827;">Starter</strong><div style="font-size:11px;color:#6b7280;line-height:1.35;">Up to 20 employees</div></div>
-          </label>
-          <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;">
-            <input type="radio" name="kk-signup-plan" value="growth" style="margin-top:3px;" />
-            <div><strong style="font-size:13px;color:#111827;">Growth</strong><div style="font-size:11px;color:#6b7280;line-height:1.35;">21–40 employees</div></div>
-          </label>
-          <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;">
-            <input type="radio" name="kk-signup-plan" value="scale" style="margin-top:3px;" />
-            <div><strong style="font-size:13px;color:#111827;">Scale</strong><div style="font-size:11px;color:#6b7280;line-height:1.35;">41+ employees</div></div>
-          </label>
+          <span style="font-size:13px;font-weight:500;color:#374151;">Pricing</span>
+          <div style="padding:10px 12px;border:2px solid #dcfce7;border-radius:10px;background:#f0fdf4;">
+            <div style="font-size:13px;font-weight:600;color:#166534;">$3.00/user/mo</div>
+            <div style="font-size:11px;color:#6b7280;line-height:1.35;">$2.50/user/mo for 30+ employees. No limits—add as many staff as you need.</div>
+          </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
           <span style="font-size:13px;font-weight:500;color:#374151;">Your name</span>
@@ -522,9 +514,7 @@
   } catch (_) {}
 
   function readSelectedSignupPlan() {
-    const el = document.querySelector('#auth-overlay input[name="kk-signup-plan"]:checked');
-    const v = (el?.value || 'starter').toLowerCase().trim();
-    return ['starter', 'growth', 'scale'].includes(v) ? v : 'starter';
+    return 'per_user';
   }
 
   async function bootstrapNewRestaurant(user, restaurantName, displayName, subscriptionPlan, explicitFirst, explicitLast) {
@@ -532,9 +522,7 @@
     const name = (restaurantName || '').trim();
     if (!name) throw new Error('Please enter your restaurant name.');
     if (!user?.id) throw new Error('Not signed in.');
-    const plan = ['starter', 'growth', 'scale'].includes(String(subscriptionPlan || '').toLowerCase())
-      ? String(subscriptionPlan).toLowerCase()
-      : 'starter';
+    const plan = 'per_user';
 
     const { data: orgRow, error: orgErr } = await supa
       .from('orgs')
@@ -661,7 +649,7 @@
     const lnMeta = String(user.user_metadata?.kk_manager_last || '').trim();
     const displayName = String(user.user_metadata?.full_name || user.user_metadata?.name || '').trim();
     const metaPlan = String(user.user_metadata?.kk_subscription_plan || '').toLowerCase().trim();
-    const plan = ['starter', 'growth', 'scale'].includes(metaPlan) ? metaPlan : 'starter';
+    const plan = 'per_user';
     try {
       await bootstrapNewRestaurant(user, pending, displayName, plan, fnMeta, lnMeta);
       await clearPendingRestaurantMeta();
@@ -735,7 +723,7 @@
       setAuthMode(startMode);
       if (startMode === 'signup') {
         const planParam = String(params.get('plan') || '').toLowerCase().trim();
-        if (planParam === 'starter' || planParam === 'growth' || planParam === 'scale') {
+        if (planParam) {
           const radio = document.querySelector(
             `#auth-overlay input[name="kk-signup-plan"][value="${planParam}"]`
           );

@@ -118,12 +118,10 @@
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Subscription &amp; billing</div>
         <div id="admin-stripe-status" style="font-size:12px;color:#4b5563;margin-bottom:8px;line-height:1.4;">—</div>
         <div id="admin-subscription-usage" style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.4;">—</div>
-        <label for="admin-subscription-plan" style="font-size:12px;font-weight:500;color:#374151;">Plan tier (employee limits)</label>
-        <select id="admin-subscription-plan" style="width:100%;margin-top:4px;border-radius:10px;border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;box-sizing:border-box;">
-          <option value="starter">Starter — up to 20 employees</option>
-          <option value="growth">Growth — 21–40 employees</option>
-          <option value="scale">Scale — 41+ employees</option>
-        </select>
+        <div id="admin-pricing-info" style="font-size:13px;color:#111827;font-weight:600;margin-bottom:10px;padding:8px 12px;background:#ecfdf5;border-radius:10px;line-height:1.5;">
+          $3.00/user/mo &middot; $2.50/user/mo for 30+ employees
+        </div>
+        <input type="hidden" id="admin-subscription-plan" value="per_user" />
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center;">
           <button type="button" id="admin-stripe-checkout-btn" style="border-radius:999px;border:none;padding:8px 14px;font-size:13px;font-weight:600;background:#635bff;color:#fff;cursor:pointer;">
             Subscribe (Stripe page)
@@ -135,7 +133,7 @@
             Billing portal
           </button>
         </div>
-        <p style="font-size:11px;color:#9ca3af;margin:8px 0 0;line-height:1.35;"><strong>Stripe page</strong> = hosted Checkout. <strong>Pay on this site</strong> = embedded card form (<code style="font-size:10px;">stripe-checkout.html</code>). Both use the same prices and webhooks. With an active subscription, the plan dropdown is locked — use the billing portal to change plans.</p>
+        <p style="font-size:11px;color:#9ca3af;margin:8px 0 0;line-height:1.35;">Per-user billing. Add unlimited employees — your bill adjusts automatically.</p>
       </div>
       <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px;">
         <div style="display:flex;gap:10px;">
@@ -456,26 +454,17 @@
       const portalBtn = document.getElementById('admin-stripe-portal-btn');
 
       orgStripeSubscriptionId = (orgRow && orgRow.stripe_subscription_id) || null;
-      const rawPlan = String(orgRow?.subscription_plan || 'starter').toLowerCase();
-      const resolvedPlan = ['starter', 'growth', 'scale'].includes(rawPlan) ? rawPlan : 'starter';
-      if (planSel) {
-        planSel.value = resolvedPlan;
-        planSel.disabled = !!orgStripeSubscriptionId;
-        planSel.title = orgStripeSubscriptionId
-          ? 'Plan is managed by Stripe. Use Billing portal to change plans.'
-          : '';
-      }
       if (stripeStatusEl) {
         const st = (orgRow?.stripe_subscription_status || '').trim();
         if (orgStripeSubscriptionId) {
           stripeStatusEl.textContent =
-            `Stripe subscription: ${st || 'active'} — plan tier syncs from your paid price.`;
+            `Stripe subscription: ${st || 'active'} — billing adjusts with employee count.`;
         } else if (orgRow?.stripe_customer_id) {
           stripeStatusEl.textContent =
-            'Stripe customer on file — use Subscribe to start or finish a subscription, or open the billing portal.';
+            'Stripe customer on file — use Subscribe to start a per-user subscription.';
         } else {
           stripeStatusEl.textContent =
-            'No Stripe billing on file yet — choose a tier and click Subscribe with Stripe.';
+            'No billing set up yet — click Subscribe to start your per-user plan.';
         }
       }
       if (portalBtn) {
@@ -484,14 +473,19 @@
         portalBtn.style.opacity = '1';
       }
 
-      if (usageEl && typeof window.kkGetEmployeeLimit === 'function' && typeof window.kkGetSubscriptionPlan === 'function') {
-        const lim = window.kkGetEmployeeLimit(resolvedPlan);
-        const p = window.kkGetSubscriptionPlan(resolvedPlan);
-        const n = profileCount != null ? profileCount : '—';
-        const capLabel = lim == null ? 'unlimited' : String(lim);
-        usageEl.textContent = `${p.label}: ${n} employee${n === 1 ? '' : 's'} on file — plan allows up to ${capLabel}.`;
+      if (usageEl && typeof window.kkGetPerUserRate === 'function') {
+        const n = profileCount != null ? profileCount : 0;
+        const rate = window.kkGetPerUserRate(n);
+        const total = window.kkGetMonthlyTotal(n);
+        usageEl.textContent = `${n} employee${n === 1 ? '' : 's'} × $${rate.toFixed(2)}/user = $${total.toFixed(2)}/mo`;
       } else if (usageEl) {
-        usageEl.textContent = 'Load subscriptionPlans.js to see plan limits here.';
+        const n = profileCount != null ? profileCount : '—';
+        usageEl.textContent = `${n} employee${n === 1 ? '' : 's'} on file.`;
+      }
+
+      const pricingInfo = document.getElementById('admin-pricing-info');
+      if (pricingInfo && typeof window.kkGetPricingDescription === 'function') {
+        pricingInfo.textContent = window.kkGetPricingDescription();
       }
       let profileByEmailRow = null;
       if (Array.isArray(profileByEmail) && profileByEmail.length > 0) {
@@ -774,25 +768,9 @@
       }
 
       const planEl = document.getElementById('admin-subscription-plan');
-      let newPlan = String(planEl?.value || 'starter').toLowerCase();
-      if (!['starter', 'growth', 'scale'].includes(newPlan)) newPlan = 'starter';
+      let newPlan = 'per_user';
 
-      if (!stripeSubIdForSave) {
-        if (typeof window.kkGetEmployeeLimit === 'function' && window.ORG_ID) {
-          const { count: pc, error: pcErr } = await supa
-            .from('profiles')
-            .select('*', { count: 'exact', head: true })
-            .eq('org_id', window.ORG_ID);
-          if (!pcErr) {
-            const lim = window.kkGetEmployeeLimit(newPlan);
-            if (lim != null && (pc ?? 0) > lim) {
-              throw new Error(
-                `Plan "${window.kkGetSubscriptionPlan(newPlan).label}" allows up to ${lim} employees. You have ${pc}. Remove roster entries or choose Scale.`
-              );
-            }
-          }
-        }
-      }
+      // No plan-based employee limits — per-user billing scales automatically.
 
       const orgUpdate = { name: restaurantName };
       if (!stripeSubIdForSave) {

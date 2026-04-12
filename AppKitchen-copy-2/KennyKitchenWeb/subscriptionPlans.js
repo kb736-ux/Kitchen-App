@@ -1,53 +1,88 @@
 /**
- * Sheek — subscription tiers by employee count (profiles in org).
+ * Sheek — Per-user pricing model.
+ * $3.00 per user/month for under 30 employees.
+ * $2.50 per user/month for 30+ employees.
  * Loaded before adminSettings.js / employees.js / used from auth for labels.
  */
 (function () {
-  const PLANS = {
-    starter: {
-      id: 'starter',
-      label: 'Starter',
-      description: 'Up to 20 employees',
-      maxEmployees: 20,
-    },
-    growth: {
-      id: 'growth',
-      label: 'Growth',
-      description: '21–40 employees',
-      maxEmployees: 40,
-    },
-    scale: {
-      id: 'scale',
-      label: 'Scale',
-      description: '41+ employees (unlimited)',
-      maxEmployees: null,
-    },
+  const PRICING = {
+    standardRate: 3.00,    // $/user/month for < 30 employees
+    bulkRate: 2.50,        // $/user/month for 30+ employees
+    bulkThreshold: 30,     // employee count at which bulk rate kicks in
   };
 
+  /** Returns the per-user rate based on employee count. */
+  function getPerUserRate(employeeCount) {
+    const count = Number(employeeCount) || 0;
+    return count >= PRICING.bulkThreshold ? PRICING.bulkRate : PRICING.standardRate;
+  }
+
+  /** Returns the monthly cost for a given employee count. */
+  function getMonthlyTotal(employeeCount) {
+    const count = Number(employeeCount) || 0;
+    if (count <= 0) return 0;
+    const rate = getPerUserRate(count);
+    return +(count * rate).toFixed(2);
+  }
+
+  /** Returns a human-readable pricing label. */
+  function getPricingLabel(employeeCount) {
+    const count = Number(employeeCount) || 0;
+    const rate = getPerUserRate(count);
+    const total = getMonthlyTotal(count);
+    return `$${rate.toFixed(2)}/user × ${count} = $${total.toFixed(2)}/mo`;
+  }
+
+  /** Returns a description of the pricing tiers. */
+  function getPricingDescription() {
+    return `$${PRICING.standardRate.toFixed(2)}/user/mo · $${PRICING.bulkRate.toFixed(2)}/user/mo for ${PRICING.bulkThreshold}+ employees`;
+  }
+
+  // Legacy compatibility — no plan-based limits anymore, all users can add unlimited employees.
   function normalizePlanId(id) {
-    const k = String(id || '').toLowerCase().trim();
-    return PLANS[k] ? k : 'starter';
+    return 'per_user';
   }
 
   function getPlan(planId) {
-    return PLANS[normalizePlanId(planId)] || PLANS.starter;
+    return {
+      id: 'per_user',
+      label: 'Per User',
+      description: getPricingDescription(),
+      maxEmployees: null, // unlimited
+    };
   }
 
-  /** @returns {number|null} null = unlimited */
+  /** @returns {number|null} null = unlimited (no hard cap with per-user pricing) */
   function getEmployeeLimit(planId) {
-    const m = getPlan(planId).maxEmployees;
-    return m == null ? null : m;
+    return null; // no limit — they pay per user
   }
 
   function canAddEmployee(currentProfileCount, planId) {
-    const lim = getEmployeeLimit(planId);
-    if (lim == null) return true;
-    return Number(currentProfileCount) < lim;
+    return true; // always allowed — billing scales with usage
   }
 
+  // Legacy plan object for backward compat
+  const PLANS = {
+    per_user: {
+      id: 'per_user',
+      label: 'Per User',
+      description: getPricingDescription(),
+      maxEmployees: null,
+    },
+    // Keep legacy keys so old code doesn't break
+    starter: { id: 'per_user', label: 'Per User', description: getPricingDescription(), maxEmployees: null },
+    growth:  { id: 'per_user', label: 'Per User', description: getPricingDescription(), maxEmployees: null },
+    scale:   { id: 'per_user', label: 'Per User', description: getPricingDescription(), maxEmployees: null },
+  };
+
   window.KK_SUBSCRIPTION_PLANS = PLANS;
+  window.KK_PRICING = PRICING;
   window.kkNormalizePlanId = normalizePlanId;
   window.kkGetSubscriptionPlan = getPlan;
   window.kkGetEmployeeLimit = getEmployeeLimit;
   window.kkCanAddEmployee = canAddEmployee;
+  window.kkGetPerUserRate = getPerUserRate;
+  window.kkGetMonthlyTotal = getMonthlyTotal;
+  window.kkGetPricingLabel = getPricingLabel;
+  window.kkGetPricingDescription = getPricingDescription;
 })();

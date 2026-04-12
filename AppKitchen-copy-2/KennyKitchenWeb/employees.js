@@ -933,33 +933,8 @@ async function handleCreateEmployeeSubmit() {
         return;
     }
 
-    if (typeof window.kkCanAddEmployee === 'function' && window.supabaseClient && window.ORG_ID) {
-        try {
-            const [{ count }, { data: orgRow }] = await Promise.all([
-                window.supabaseClient
-                    .from('profiles')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('org_id', window.ORG_ID),
-                window.supabaseClient
-                    .from('orgs')
-                    .select('subscription_plan')
-                    .eq('id', window.ORG_ID)
-                    .maybeSingle(),
-            ]);
-            const plan = String(orgRow?.subscription_plan || 'starter').toLowerCase();
-            const safePlan = ['starter', 'growth', 'scale'].includes(plan) ? plan : 'starter';
-            if (!window.kkCanAddEmployee(count ?? 0, safePlan)) {
-                const lim = window.kkGetEmployeeLimit(safePlan);
-                showEmployeeToast(
-                    `Your subscription plan allows up to ${lim} employees. Upgrade under Admin Settings → Subscription (Scale = 41+).`,
-                    'error'
-                );
-                return;
-            }
-        } catch (e) {
-            console.warn('[Employees] Plan check failed:', e?.message);
-        }
-    }
+    // Per-user pricing — no employee cap. Billing scales automatically.
+    // (kkCanAddEmployee always returns true now.)
 
     // Read selected positions from checkboxes (stored in invite URL; applied when they finish signup).
     const selectedPositions = Array.from(

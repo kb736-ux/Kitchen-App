@@ -88,15 +88,14 @@
   <script>
 (function () {
   const params = new URLSearchParams(window.location.search);
-  const plan = (params.get('plan') || 'starter').toLowerCase();
+  const plan = 'per_user';
   const orgId = (params.get('org_id') || '').trim();
   const planLabel = document.getElementById('plan-label');
   const msg = document.getElementById('message');
   const form = document.getElementById('payment-form');
   const submitBtn = document.getElementById('submit');
 
-  const planNames = { starter: 'Starter', growth: 'Growth', scale: 'Scale' };
-  if (planLabel) planLabel.textContent = planNames[plan] || plan;
+  if (planLabel) planLabel.textContent = '$3/user/mo · $2.50 for 30+';
 
   function setMsg(text, cls) {
     if (!msg) return;
