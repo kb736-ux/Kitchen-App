@@ -112,6 +112,220 @@
     overflow: hidden;
 }
 
+/* Employee (rows) × day (columns) matrix */
+.schedule-matrix-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+}
+
+.schedule-matrix {
+    display: flex;
+    flex-direction: column;
+    min-width: 880px;
+    background: #e2e8f0;
+    gap: 1px;
+    border: 1px solid #e2e8f0;
+    border-radius: 0 0 12px 12px;
+}
+
+.sched-matrix-row {
+    display: grid;
+    grid-template-columns: 200px repeat(7, minmax(108px, 1fr));
+    gap: 1px;
+    background: #e2e8f0;
+    align-items: stretch;
+}
+
+.sched-matrix-header-row {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+}
+
+.sched-corner-cell {
+    background: linear-gradient(135deg, #2e7d32, #4CAF50);
+    color: white;
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
+}
+
+.sched-day-header-cell {
+    background: linear-gradient(135deg, #4CAF50, #66bb6a);
+    color: white;
+    padding: 0.75rem 0.5rem;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.sched-day-header-cell.sched-day-header-today {
+    background: linear-gradient(135deg, #2e7d32, #43a047);
+    box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.85);
+}
+
+.sched-day-header-cell.sched-day-header-past {
+    background: linear-gradient(135deg, #78909c, #90a4ae);
+    opacity: 0.92;
+}
+
+.sched-employee-cell {
+    background: #fff;
+    padding: 0.6rem 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+    border-right: 1px solid #edf2f7;
+}
+
+.sched-emp-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #4CAF50;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.sched-emp-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
+
+.sched-emp-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: #2d3748;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sched-emp-hrs {
+    font-size: 0.72rem;
+    color: #718096;
+    font-weight: 600;
+}
+
+.sched-matrix-cell {
+    background: #fff;
+    padding: 6px;
+    min-height: 88px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sched-matrix-cell.sched-matrix-cell-today {
+    background: linear-gradient(180deg, rgba(76, 175, 80, 0.09) 0%, #fff 40%);
+    box-shadow: inset 0 0 0 2px rgba(76, 175, 80, 0.28);
+}
+
+.sched-matrix-cell.sched-matrix-cell-past {
+    background: #f7fafc;
+}
+
+.sched-cell-add {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    padding: 0;
+    z-index: 1;
+    transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.sched-cell-add:hover {
+    background: rgba(76, 175, 80, 0.22);
+    transform: scale(1.05);
+}
+
+.sched-matrix-cell-past .sched-cell-add {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.sched-cell-shifts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 28px;
+    flex: 1;
+}
+
+.shift-card.shift-card--compact {
+    padding: 0.5rem 0.6rem;
+    margin: 0;
+}
+
+.shift-card.shift-card--compact .shift-header {
+    margin-bottom: 0.35rem;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.shift-card.shift-card--compact .shift-position {
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.shift-card.shift-card--compact .shift-time {
+    font-size: 0.68rem;
+    padding: 0.15rem 0.35rem;
+}
+
+.shift-card.shift-card--compact .shift-employee,
+.shift-card.shift-card--compact .shift-card-hint {
+    display: none;
+}
+
+.sched-matrix-empty {
+    padding: 2rem 1.5rem;
+    text-align: center;
+    color: #718096;
+    font-size: 0.95rem;
+    background: #fff;
+}
+
+.sched-matrix-empty p {
+    margin: 0;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
+}
+
 .schedule-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);

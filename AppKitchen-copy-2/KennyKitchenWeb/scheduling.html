@@ -101,61 +101,10 @@
                 </button>
             </div>
 
-            <!-- Schedule Grid -->
+            <!-- Schedule matrix: employees (rows) × days (columns); built by scheduling.js -->
             <div class="schedule-container">
-                <div class="schedule-grid">
-                    <!-- Day Headers (dates populated by JS) -->
-                    <div class="day-header" data-day="monday">Monday</div>
-                    <div class="day-header" data-day="tuesday">Tuesday</div>
-                    <div class="day-header" data-day="wednesday">Wednesday</div>
-                    <div class="day-header" data-day="thursday">Thursday</div>
-                    <div class="day-header" data-day="friday">Friday</div>
-                    <div class="day-header" data-day="saturday">Saturday</div>
-                    <div class="day-header" data-day="sunday">Sunday</div>
-
-                    <!-- Monday Shifts -->
-                    <div class="day-column" data-day="monday">
-                        <button class="day-add-btn" title="Add Shift for Monday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-
-                    <!-- Tuesday - Sunday (Empty for now) -->
-                    <div class="day-column" data-day="tuesday">
-                        <button class="day-add-btn" title="Add Shift for Tuesday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-                    
-                    <div class="day-column" data-day="wednesday">
-                        <button class="day-add-btn" title="Add Shift for Wednesday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-                    
-                    <div class="day-column" data-day="thursday">
-                        <button class="day-add-btn" title="Add Shift for Thursday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-                    
-                    <div class="day-column" data-day="friday">
-                        <button class="day-add-btn" title="Add Shift for Friday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-                    
-                    <div class="day-column" data-day="saturday">
-                        <button class="day-add-btn" title="Add Shift for Saturday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
-                    
-                    <div class="day-column" data-day="sunday">
-                        <button class="day-add-btn" title="Add Shift for Sunday">
-                            <i class="fas fa-plus"></i> Add Shift
-                        </button>
-                    </div>
+                <div class="schedule-matrix-scroll">
+                    <div id="schedule-matrix" class="schedule-matrix" aria-label="Weekly schedule by employee"></div>
                 </div>
             </div>
         </main>
@@ -534,6 +483,6 @@
     <script src="employees.js?v=20260426-otp-invite"></script>
     <script src="script.js"></script>
     <script src="recipes.js"></script>
-    <script src="scheduling.js?v=20260410a"></script>
+    <script src="scheduling.js?v=20260410b"></script>
 </body>
 </html>
