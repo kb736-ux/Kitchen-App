@@ -113,7 +113,8 @@ const positionResponsibilities = {};
 
 async function loadEmployeePositionsFromSupabase() {
     if (!window.supabaseClient || !window.ORG_ID) return null;
-    // Names from recent shifts (covers staff on the schedule without employee_positions / profile quirks).
+    window._profileBackedEmployeeNames = new Set();
+    // Names from recent shifts (fold into profile canonicals; see filter after merge).
     const rosterSince = new Date();
     rosterSince.setFullYear(rosterSince.getFullYear() - 1);
     const rosterSinceStr = ymd(rosterSince);
@@ -137,6 +138,7 @@ async function loadEmployeePositionsFromSupabase() {
     ]);
     if (error) {
         console.warn('[Supabase] Employee positions load failed:', error.message);
+        window._profileBackedEmployeeNames = new Set();
         return null;
     }
     if (profilesError) {
@@ -202,8 +204,9 @@ async function loadEmployeePositionsFromSupabase() {
         _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
     });
 
-    // Rows in employee_positions without a matching profile (e.g. manager-added name,
-    // or onboarding not finished yet) should still appear on Employees + scheduling.
+    // Include shift / employee_positions spellings so mergeDuplicateRosterMap can fold them into
+    // the profile's canonical employee_name (e.g. "Kenneth-bae" → "Kenneth Bae"). Rows with no
+    // matching profile are removed after merge (roster is auth-backed profiles only).
     Object.keys(positionsByEmployee).forEach((en) => {
         if (map[en]) return;
         map[en] = positionsByEmployee[en] || [];
@@ -221,6 +224,22 @@ async function loadEmployeePositionsFromSupabase() {
     });
 
     map = mergeDuplicateRosterMap(map, dedupedProfiles);
+
+    const profileEmployeeNames = new Set(
+        dedupedProfiles.map((p) => (p.employee_name || '').trim()).filter(Boolean)
+    );
+    const filteredMap = {};
+    const nextAliases = {};
+    Object.keys(map).forEach((canonical) => {
+        const aliases = window._rosterCanonicalAliases[canonical] || [canonical];
+        const backed = aliases.some((a) => profileEmployeeNames.has((a || '').trim()));
+        if (!backed) return;
+        filteredMap[canonical] = map[canonical];
+        nextAliases[canonical] = aliases;
+    });
+    window._rosterCanonicalAliases = nextAliases;
+    window._profileBackedEmployeeNames = new Set(Object.keys(filteredMap));
+    map = filteredMap;
 
     _employeePositionsCache = map;
     return map;

@@ -1116,6 +1116,11 @@ async function renderScheduleMatrix() {
         .map((k) => (k || '').trim())
         .filter(Boolean);
 
+    const profileBacked =
+        window._profileBackedEmployeeNames instanceof Set && window._profileBackedEmployeeNames.size > 0
+            ? window._profileBackedEmployeeNames
+            : new Set(fromPos);
+
     let fromShifts = [];
     if (window.supabaseClient && window.ORG_ID) {
         const { data } = await window.supabaseClient
@@ -1129,7 +1134,15 @@ async function renderScheduleMatrix() {
         ];
     }
 
-    const rosterSet = new Set([...fromPos, ...fromShifts]);
+    const rosterSet = new Set(fromPos);
+    fromShifts.forEach((raw) => {
+        const n = (raw || '').trim();
+        if (!n) return;
+        const canon =
+            typeof getCanonicalEmployeeName === 'function' ? getCanonicalEmployeeName(n) : n;
+        const c = (canon || '').trim();
+        if (c && profileBacked.has(c)) rosterSet.add(c);
+    });
     const roster = Array.from(rosterSet).sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: 'base' })
     );
@@ -1571,13 +1584,16 @@ async function populateEmployeeSelectFromOrg() {
     if (!employeeSelect) return;
 
     let names = [];
-    if (window.supabaseClient && window.ORG_ID) {
-        const { data, error } = await window.supabaseClient
-            .from('employee_positions')
-            .select('employee_name')
-            .eq('org_id', window.ORG_ID)
-            .order('employee_name');
-        names = (data || []).map(r => r.employee_name).filter(Boolean);
+    if (typeof loadEmployeePositionsFromSupabase === 'function' && window.supabaseClient && window.ORG_ID) {
+        try {
+            await loadEmployeePositionsFromSupabase();
+        } catch (_) {}
+    }
+    if (typeof getEmployeePositions === 'function') {
+        names = Object.keys(getEmployeePositions() || {})
+            .map((k) => (k || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     }
     if (names.length === 0) names = DEFAULT_EMPLOYEES;
 
@@ -3272,13 +3288,16 @@ async function populateTaskEmployeeSelect() {
     if (!select) return;
 
     let names = [];
-    if (window.supabaseClient && window.ORG_ID) {
-        const { data, error } = await window.supabaseClient
-            .from('employee_positions')
-            .select('employee_name')
-            .eq('org_id', window.ORG_ID)
-            .order('employee_name');
-        names = (data || []).map(r => r.employee_name).filter(Boolean);
+    if (typeof loadEmployeePositionsFromSupabase === 'function' && window.supabaseClient && window.ORG_ID) {
+        try {
+            await loadEmployeePositionsFromSupabase();
+        } catch (_) {}
+    }
+    if (typeof getEmployeePositions === 'function') {
+        names = Object.keys(getEmployeePositions() || {})
+            .map((k) => (k || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     }
     if (names.length === 0) names = DEFAULT_EMPLOYEES;
 
