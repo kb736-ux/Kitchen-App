@@ -145,7 +145,7 @@ async function loadEmployeePositionsFromSupabase() {
             .filter(m => !!m.user_id && allowedRoles.has((m.role || '').toLowerCase()))
             .map(m => m.user_id)
     );
-    const map = {};
+    const positionsByEmployee = {};
     window._employeeNameToId = {};
     window._profileNameToId = {};
     window._displayNameToCanonicalEmployeeName = {};
@@ -155,8 +155,7 @@ async function loadEmployeePositionsFromSupabase() {
         const en = (r.employee_name || '').trim();
         if (!en) return;
         window._employeeNameToId[en] = r.id;
-        map[en] = r.positions || [];
-        _employeeDisplayByName[en] = prettifyEmployeeKey(en) || en;
+        positionsByEmployee[en] = r.positions || [];
     });
 
     const rosterProfiles = (profilesData || []).filter(
@@ -193,12 +192,11 @@ async function loadEmployeePositionsFromSupabase() {
         }
     });
 
-    // Only Supabase-backed profiles should appear in employees list.
+    const map = {};
+    // Only Supabase-backed profiles with UUIDs should appear in employees list.
     dedupedProfiles.forEach((p) => {
         const name = (p.employee_name || '').trim();
-        if (!Object.prototype.hasOwnProperty.call(map, name)) {
-            map[name] = [];
-        }
+        map[name] = positionsByEmployee[name] || [];
         _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
     });
 
