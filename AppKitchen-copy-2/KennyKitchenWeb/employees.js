@@ -1511,7 +1511,7 @@ async function inviteEmployeeByEmail(employeeName, email, isManager, positionLab
             return false;
         }
 
-        const res = await window.fetch(`${window.SUPABASE_URL || 'https://hkdwylvokewnmmzmslyv.supabase.co'}/functions/v1/invite-employee`, {
+        const res = await window.fetch(`${window.SUPABASE_URL || 'https://xutxuhypqpxobujxdhfz.supabase.co'}/functions/v1/invite-employee`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
