@@ -370,6 +370,23 @@
   }
 
   async function route(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels) {
+    // Robustly handle the token directly incase supabase-js drops it
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const qParams = new URLSearchParams(window.location.search);
+    
+    if (qParams.has('code')) {
+      const { error } = await supabase.auth.exchangeCodeForSession(qParams.get('code'));
+      if (error) console.error("Code exchange failed:", error);
+    } else if (hashParams.has('access_token')) {
+      await supabase.auth.setSession({
+        access_token: hashParams.get('access_token'),
+        refresh_token: hashParams.get('refresh_token') || ''
+      });
+    }
+
+    // Wait a brief moment to let standard bindings settle if they were in progress
+    await new Promise(res => setTimeout(res, 200));
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       setSubtitle('Sign up or sign in');
