@@ -374,6 +374,9 @@
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const qParams = new URLSearchParams(window.location.search);
     
+    // DEBUG: Grab explicit errors thrown by Supabase GoTrue
+    const sbError = hashParams.get('error_description') || hashParams.get('error') || qParams.get('error_description');
+
     if (qParams.has('code')) {
       const { error } = await supabase.auth.exchangeCodeForSession(qParams.get('code'));
       if (error) console.error("Code exchange failed:", error);
@@ -391,6 +394,10 @@
     if (!session?.user) {
       setSubtitle('Sign up or sign in');
       showStep('step-unauthed');
+      if (sbError) {
+         const dbg = document.getElementById('debug-hash-err');
+         if (dbg) { dbg.textContent = 'Auth Error: ' + sbError; dbg.style.display = 'block'; }
+      }
       if (!orgId) {
         setSubtitle('Invite link incomplete');
         setUnauthedDisabled(true);
