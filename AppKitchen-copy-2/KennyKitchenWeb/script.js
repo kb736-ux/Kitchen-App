@@ -480,7 +480,10 @@ function updateNotificationBadge() {
 function showNotificationToast(message, type = 'success') {
     const toast = document.createElement('div');
     const bgColor = type === 'success' ? '#4CAF50' : '#e53e3e';
-    
+    const longError = type === 'error' && String(message || '').length > 120;
+    const maxW = longError ? 'min(92vw, 520px)' : '300px';
+    const durationMs = longError ? 12000 : 3000;
+
     toast.style.cssText = `
         position: fixed;
         bottom: 20px;
@@ -494,24 +497,25 @@ function showNotificationToast(message, type = 'success') {
         font-weight: 600;
         transform: translateY(100px);
         transition: transform 0.3s ease;
-        max-width: 300px;
+        max-width: ${maxW};
+        line-height: 1.35;
+        white-space: pre-wrap;
     `;
     toast.textContent = message;
-    
+
     document.body.appendChild(toast);
-    
+
     // Animate in
     setTimeout(() => {
         toast.style.transform = 'translateY(0)';
     }, 100);
-    
-    // Remove after 3 seconds
+
     setTimeout(() => {
         toast.style.transform = 'translateY(100px)';
         setTimeout(() => {
-            document.body.removeChild(toast);
+            if (toast.parentNode) document.body.removeChild(toast);
         }, 300);
-    }, 3000);
+    }, durationMs);
 }
 
 function progressAssigneeKey(name) {

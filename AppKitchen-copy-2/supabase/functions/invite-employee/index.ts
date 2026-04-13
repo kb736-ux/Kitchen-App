@@ -150,8 +150,28 @@ Deno.serve(async (req) => {
     },
   });
 
+  let finalErr = inviteErr;
+
   if (inviteErr) {
     const msg = inviteErr.message || "Invite failed";
+    const dup = /already|registered|exists/i.test(msg);
+    if (dup) {
+      // Fallback: If the user already exists (ghost profile or previous magic link),
+      // we just send them a password recovery email instead of bouncing. 
+      // It serves the exact same purpose (sets a new password and logs them in).
+      const { error: resetErr } = await admin.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+      if (!resetErr) {
+        finalErr = null; // Success!
+      } else {
+        finalErr = resetErr;
+      }
+    }
+  }
+
+  if (finalErr) {
+    const msg = finalErr.message || "Invite failed";
     const dup = /already|registered|exists/i.test(msg);
     return new Response(
       JSON.stringify({
