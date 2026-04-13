@@ -436,7 +436,8 @@
     await route(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels);
 
     supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
+      const validEvents = ['SIGNED_IN', 'PASSWORD_RECOVERY', 'INITIAL_SESSION'];
+      if (validEvents.includes(event) && session?.user) {
         try {
           if (sessionStorage.getItem(PW_LOGIN_FLAG) === '1') return;
         } catch (_) {}
