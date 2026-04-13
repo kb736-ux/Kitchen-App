@@ -1497,7 +1497,6 @@ async function inviteEmployeeByEmail(employeeName, email, isManager, positionLab
         org: window.ORG_ID || '',
         name: employeeName,
         manager: isManager ? '1' : '0',
-        email: trimmed,
     });
     const labels = Array.isArray(positionLabels)
         ? positionLabels.map((s) => String(s || '').trim()).filter(Boolean)
@@ -1506,27 +1505,37 @@ async function inviteEmployeeByEmail(employeeName, email, isManager, positionLab
     const redirectTo = `${window.location.origin}/employee-onboard.html?${params.toString()}`;
 
     try {
-        const { error } = await window.supabaseClient.auth.signInWithOtp({
-            email: trimmed,
-            options: {
-                emailRedirectTo: redirectTo,
-                shouldCreateUser: true,
-            },
-        });
-        if (error) {
-            const { userLine } = formatInviteEmailFailure(error, redirectTo);
-            const rawMsg = error.message || error.msg || error.error_description || JSON.stringify(error);
-            const statusCode = error.status || error.statusCode || '';
-            console.warn('[Invite] signInWithOtp failed:', error, '\nemailRedirectTo:', redirectTo);
-            console.warn('[Invite] Raw error message:', rawMsg, '| Status:', statusCode);
-            showEmployeeToast(`${rawMsg}${statusCode ? ` (HTTP ${statusCode})` : ''} — Redirect: ${redirectTo}`, 'error');
+        const { data: { session } } = await window.supabaseClient.auth.getSession();
+        if (!session?.access_token) {
+            showEmployeeToast("You must be logged in to send invites", "error");
             return false;
         }
+
+        const res = await window.fetch(`${window.SUPABASE_URL || 'https://hkdwylvokewnmmzmslyv.supabase.co'}/functions/v1/invite-employee`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({
+                email: trimmed,
+                employee_name: employeeName,
+                is_manager: isManager,
+                org_id: window.ORG_ID,
+                redirect_to: redirectTo
+            })
+        });
+
+        if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            const errMsg = errBody.error || "Invite failed to send.";
+            showEmployeeToast(errMsg, 'error');
+            return false;
+        }
+
         return true;
     } catch (e) {
-        const { userLine } = formatInviteEmailFailure(e, redirectTo);
-        console.warn('[Invite] Unexpected error:', e, '\nemailRedirectTo:', redirectTo);
-        showEmployeeToast(userLine, 'error');
+        showEmployeeToast("Unexpected error sending invite.", 'error');
         return false;
     }
 }
