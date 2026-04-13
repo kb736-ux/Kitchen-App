@@ -113,7 +113,12 @@ const positionResponsibilities = {};
 
 async function loadEmployeePositionsFromSupabase() {
     if (!window.supabaseClient || !window.ORG_ID) return null;
-    const [{ data, error }, { data: profilesData, error: profilesError }, { data: membersData, error: membersError }] = await Promise.all([
+    // Names from recent shifts (covers staff on the schedule without employee_positions / profile quirks).
+    const rosterSince = new Date();
+    rosterSince.setFullYear(rosterSince.getFullYear() - 1);
+    const rosterSinceStr = ymd(rosterSince);
+
+    const [{ data, error }, { data: profilesData, error: profilesError }, { data: shiftsData, error: shiftsError }] = await Promise.all([
         window.supabaseClient
             .from('employee_positions')
             .select('id, employee_name, positions')
@@ -121,12 +126,14 @@ async function loadEmployeePositionsFromSupabase() {
         window.supabaseClient
             .from('profiles')
             .select('id, user_id, employee_name, display_name, full_name, email')
-            .eq('org_id', window.ORG_ID)
-            .eq('onboarding_completed', true),
-        window.supabaseClient
-            .from('org_members')
-            .select('user_id, role')
             .eq('org_id', window.ORG_ID),
+        window.supabaseClient
+            .from('shifts')
+            .select('employee_name')
+            .eq('org_id', window.ORG_ID)
+            .gte('shift_date', rosterSinceStr)
+            .not('employee_name', 'is', null)
+            .limit(4000),
     ]);
     if (error) {
         console.warn('[Supabase] Employee positions load failed:', error.message);
@@ -135,16 +142,13 @@ async function loadEmployeePositionsFromSupabase() {
     if (profilesError) {
         console.warn('[Supabase] Profiles load failed:', profilesError.message);
     }
-    if (membersError) {
-        console.warn('[Supabase] Org members load failed:', membersError.message);
+    if (shiftsError) {
+        console.warn('[Supabase] Shifts roster names load failed:', shiftsError.message);
     }
 
-    const allowedRoles = new Set(['employee', 'manager', 'owner', 'admin']);
-    const allowedMemberIds = new Set(
-        (membersData || [])
-            .filter(m => !!m.user_id && allowedRoles.has((m.role || '').toLowerCase()))
-            .map(m => m.user_id)
-    );
+    // Do NOT filter profiles by org_members here: with typical RLS, managers only see their *own*
+    // org_members row, so allowed-user-id sets would exclude every other employee. Profiles for
+    // this org are already gated by Supabase RLS (same-org roster policies).
     const positionsByEmployee = {};
     window._employeeNameToId = {};
     window._profileNameToId = {};
@@ -162,8 +166,7 @@ async function loadEmployeePositionsFromSupabase() {
         (p) =>
             !!p.id &&
             !!p.user_id &&
-            (p.employee_name || '').trim() &&
-            allowedMemberIds.has(p.user_id)
+            (p.employee_name || '').trim()
     );
     const seenUserIds = new Set();
     const dedupedProfiles = [];
@@ -193,11 +196,28 @@ async function loadEmployeePositionsFromSupabase() {
     });
 
     const map = {};
-    // Only Supabase-backed profiles with UUIDs should appear in employees list.
     dedupedProfiles.forEach((p) => {
         const name = (p.employee_name || '').trim();
         map[name] = positionsByEmployee[name] || [];
         _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
+    });
+
+    // Rows in employee_positions without a matching profile (e.g. manager-added name,
+    // or onboarding not finished yet) should still appear on Employees + scheduling.
+    Object.keys(positionsByEmployee).forEach((en) => {
+        if (map[en]) return;
+        map[en] = positionsByEmployee[en] || [];
+        if (!_employeeDisplayByName[en]) _employeeDisplayByName[en] = en;
+    });
+
+    const shiftNamesSeen = new Set();
+    (shiftsData || []).forEach((row) => {
+        const en = (row.employee_name || '').trim();
+        if (!en || shiftNamesSeen.has(en)) return;
+        shiftNamesSeen.add(en);
+        if (map[en]) return;
+        map[en] = positionsByEmployee[en] || [];
+        if (!_employeeDisplayByName[en]) _employeeDisplayByName[en] = en;
     });
 
     _employeePositionsCache = map;
