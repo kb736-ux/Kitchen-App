@@ -195,7 +195,7 @@ async function loadEmployeePositionsFromSupabase() {
         }
     });
 
-    const map = {};
+    let map = {};
     dedupedProfiles.forEach((p) => {
         const name = (p.employee_name || '').trim();
         map[name] = positionsByEmployee[name] || [];
@@ -219,6 +219,8 @@ async function loadEmployeePositionsFromSupabase() {
         map[en] = positionsByEmployee[en] || [];
         if (!_employeeDisplayByName[en]) _employeeDisplayByName[en] = en;
     });
+
+    map = mergeDuplicateRosterMap(map, dedupedProfiles);
 
     _employeePositionsCache = map;
     return map;
@@ -316,6 +318,115 @@ function deriveEmployeeLabel(profile, fallbackName) {
     if (employee && isEmailLike(employee)) return prettifyEmployeeKey(employee);
     if (email) return prettifyEmployeeKey(email);
     return display || full || prettifyEmployeeKey(employee) || employee || fallbackName;
+}
+
+/** Collapse spacing/hyphen/underscore variants (e.g. "Kenneth Bae" vs "Kenneth-bae"). */
+function normalizeRosterNameForDedupe(name) {
+    return String(name || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s\-_.]+/g, '');
+}
+
+function profileForEmployeeKey(key, dedupedProfiles) {
+    const k = (key || '').trim();
+    return (dedupedProfiles || []).find((p) => (p.employee_name || '').trim() === k) || null;
+}
+
+/**
+ * Merge roster map keys that normalize to the same person. Does not merge when two keys map to
+ * different profile user_ids (true distinct accounts with similar names).
+ */
+function mergeDuplicateRosterMap(map, dedupedProfiles) {
+    const normalize = normalizeRosterNameForDedupe;
+    const keys = Object.keys(map || {});
+    const groups = new Map();
+    keys.forEach((k) => {
+        const norm = normalize(k);
+        if (!norm) return;
+        if (!groups.has(norm)) groups.set(norm, []);
+        groups.get(norm).push(k);
+    });
+
+    const merged = {};
+    window._rosterCanonicalAliases = {};
+
+    function scoreKey(k) {
+        let s = 0;
+        const prof = profileForEmployeeKey(k, dedupedProfiles);
+        if (prof) s += 200;
+        const pos = map[k] || [];
+        if (pos.length) s += 50 + pos.length * 5;
+        if (/[a-z]\s+[a-z]/i.test(k)) s += 18;
+        if (/[-_]/.test(k)) s -= 8;
+        s += Math.min((k || '').length, 48) * 0.05;
+        return s;
+    }
+
+    groups.forEach((variants, norm) => {
+        if (variants.length === 1) {
+            const c = variants[0];
+            merged[c] = map[c];
+            window._rosterCanonicalAliases[c] = [c];
+            return;
+        }
+        const userIds = new Set();
+        variants.forEach((k) => {
+            const p = profileForEmployeeKey(k, dedupedProfiles);
+            if (p?.user_id) userIds.add(p.user_id);
+        });
+        if (userIds.size > 1) {
+            variants.forEach((v) => {
+                merged[v] = map[v];
+                window._rosterCanonicalAliases[v] = [v];
+            });
+            return;
+        }
+        const sorted = variants.slice().sort((a, b) => scoreKey(b) - scoreKey(a));
+        const canonical = sorted[0];
+        const posDedup = new Map();
+        sorted.forEach((v) => {
+            (map[v] || []).forEach((p) => {
+                const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
+                const lk = label.toLowerCase();
+                if (lk && !posDedup.has(lk)) posDedup.set(lk, p);
+            });
+        });
+        merged[canonical] = [...posDedup.values()];
+
+        let bestProfile = null;
+        sorted.forEach((k) => {
+            const p = profileForEmployeeKey(k, dedupedProfiles);
+            if (p) bestProfile = p;
+        });
+        if (bestProfile) {
+            _employeeDisplayByName[canonical] = deriveEmployeeLabel(bestProfile, canonical);
+        } else {
+            _employeeDisplayByName[canonical] = _employeeDisplayByName[canonical] || prettifyEmployeeKey(canonical);
+        }
+        sorted.forEach((v) => {
+            if (v !== canonical) {
+                _employeeDisplayByName[v] = _employeeDisplayByName[canonical];
+            }
+            window._displayNameToCanonicalEmployeeName[v] = canonical;
+        });
+        window._displayNameToCanonicalEmployeeName[canonical] = canonical;
+
+        const pid =
+            window._profileNameToId[canonical] ||
+            window._employeeNameToId[canonical] ||
+            sorted.map((k) => window._profileNameToId[k] || window._employeeNameToId[k]).find(Boolean);
+        sorted.forEach((v) => {
+            if (pid) {
+                window._profileNameToId[v] = pid;
+                window._employeeNameToId[v] = pid;
+            }
+        });
+
+        window._rosterCanonicalAliases[canonical] = sorted.slice();
+    });
+
+    return merged;
 }
 
 function getEmployeeDisplayName(employeeName) {
@@ -459,12 +570,20 @@ async function renderEmployeesWithHours() {
     const todayStr = ymd(new Date());
     const onShiftSet = await loadOnShiftSetFromSupabase(todayStr);
 
-    const rows = employeeNames.map(name => ({
-        name,
-        hours: hoursMap[name] || 0,
-        positions: posData[name] || [],
-        onShift: onShiftSet.has(name)
-    }));
+    const rosterAliases = (canonical) =>
+        (window._rosterCanonicalAliases && window._rosterCanonicalAliases[canonical]) || [canonical];
+
+    const rows = employeeNames.map(name => {
+        const aliases = rosterAliases(name);
+        const hours = aliases.reduce((sum, a) => sum + (hoursMap[a] || 0), 0);
+        const onShift = aliases.some((a) => onShiftSet.has(a));
+        return {
+            name,
+            hours,
+            positions: posData[name] || [],
+            onShift,
+        };
+    });
 
     // Sort by hours worked, honoring the current sort order
     rows.sort((a, b) => {
