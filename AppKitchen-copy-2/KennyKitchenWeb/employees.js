@@ -1308,6 +1308,8 @@ async function deleteEmployeeFromEditModal() {
         deleteBtn.textContent = 'Deleting…';
     }
 
+    let deleteServerNotice = '';
+
     try {
         // Clear local/in-memory data
         const posData = getEmployeePositions();
@@ -1333,15 +1335,21 @@ async function deleteEmployeeFromEditModal() {
         // Call the Edge Function for full delete (all tables + auth user)
         if (window.supabaseClient && window.ORG_ID) {
             const normalized = employeeName.trim().toLowerCase();
-            const userIdFromMap = window.getEmployeeIdFromName?.(employeeName) || null;
 
-            // Try to find the user_id from profiles
             const { data: profileRows } = await window.supabaseClient
                 .from('profiles')
                 .select('id, user_id, employee_name')
                 .eq('org_id', window.ORG_ID);
-            const matchedProfile = (profileRows || []).find((p) => (p.employee_name || '').trim().toLowerCase() === normalized);
-            const userId = matchedProfile?.user_id || userIdFromMap || null;
+            let matchedProfile = (profileRows || []).find(
+                (p) => (p.employee_name || '').trim().toLowerCase() === normalized
+            );
+            if (!matchedProfile) {
+                const mapProfileId = window.getEmployeeIdFromName?.(employeeName) || null;
+                if (mapProfileId) {
+                    matchedProfile = (profileRows || []).find((p) => p.id === mapProfileId) || null;
+                }
+            }
+            const authUserId = matchedProfile?.user_id || null;
 
             let edgeFunctionWorked = false;
 
@@ -1359,12 +1367,15 @@ async function deleteEmployeeFromEditModal() {
                         body: JSON.stringify({
                             org_id: window.ORG_ID,
                             employee_name: employeeName,
-                            user_id: userId,
+                            user_id: authUserId,
                         }),
                     });
                     if (resp.ok) {
                         const result = await resp.json();
                         console.log('[Employees] Edge Function deleted:', result.deleted);
+                        if (result.auth_skip_reason) {
+                            deleteServerNotice = ' ' + result.auth_skip_reason;
+                        }
                         edgeFunctionWorked = true;
                     } else {
                         const errBody = await resp.text();
@@ -1378,7 +1389,6 @@ async function deleteEmployeeFromEditModal() {
             // Fallback: client-side cleanup if Edge Function didn't work
             if (!edgeFunctionWorked) {
                 console.log('[Employees] Falling back to client-side delete');
-                const profileId = matchedProfile?.id || userIdFromMap || null;
 
                 await Promise.all([
                     // Core employee tables
@@ -1414,25 +1424,33 @@ async function deleteEmployeeFromEditModal() {
                         .ilike('employee_name', employeeName)
                         .then(() => {})
                         .catch(() => {}),
-                    // Org members + admin
-                    profileId
+                    window.supabaseClient
+                        .from('tasks')
+                        .delete()
+                        .eq('org_id', window.ORG_ID)
+                        .ilike('employee_name', employeeName)
+                        .then(() => {})
+                        .catch(() => {}),
+                    // org_members / admin_users use auth user id, not profiles.id
+                    authUserId
                         ? window.supabaseClient
                             .from('org_members')
                             .delete()
                             .eq('org_id', window.ORG_ID)
-                            .eq('user_id', profileId)
+                            .eq('user_id', authUserId)
                         : Promise.resolve(),
-                    profileId
+                    authUserId
                         ? window.supabaseClient
                             .from('admin_users')
                             .delete()
-                            .eq('user_id', profileId)
+                            .eq('user_id', authUserId)
                         : Promise.resolve(),
                 ]);
 
-                // Note: client-side cannot delete auth user — only Edge Function can do that
-                if (userId) {
-                    console.warn('[Employees] Cannot delete auth user from client. Deploy the delete-employee Edge Function to fully block login.');
+                if (authUserId) {
+                    console.warn(
+                        '[Employees] Auth user still exists (cannot delete from browser). Deploy delete-employee Edge Function so login is fully revoked.'
+                    );
                 }
             }
         }
@@ -1440,7 +1458,11 @@ async function deleteEmployeeFromEditModal() {
         closeEditPositionsModal();
         updatePositionsFromEmployees();
         await renderEmployeesWithHours();
-        showEmployeeToast(`Deleted employee "${escapeEmployeesHtml(employeeLabel)}". All data removed.`, 'success');
+        showEmployeeToast(
+            `Deleted employee "${escapeEmployeesHtml(employeeLabel)}".` +
+                (deleteServerNotice || ' All data removed from this restaurant.'),
+            'success'
+        );
     } catch (e) {
         console.warn('[Employees] delete employee failed:', e.message);
         showEmployeeToast(e?.message || 'Could not delete employee. Please try again.', 'error');

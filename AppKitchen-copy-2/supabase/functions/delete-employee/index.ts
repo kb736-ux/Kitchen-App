@@ -189,7 +189,7 @@ Deno.serve(async (req: Request) => {
       } catch (_) {}
     }
 
-    // 11. Delete profiles
+    // 11. Delete profiles for this org + name
     const { error: e11 } = await admin
       .from("profiles")
       .delete()
@@ -197,14 +197,36 @@ Deno.serve(async (req: Request) => {
       .ilike("employee_name", employeeName);
     if (!e11) deleted.push("profiles");
 
-    // 12. Delete the auth user (prevents login entirely)
+    let authDeleted = false;
+    let authSkipReason: string | null = null;
+
+    // 12. Delete auth user only if they have no remaining profile rows (avoid nuking a multi-org account)
     if (userId) {
-      const { error: authErr } = await admin.auth.admin.deleteUser(userId);
-      if (authErr) {
-        console.warn("[delete-employee] auth.deleteUser failed:", authErr.message);
+      const { count: remainingProfiles, error: cntErr } = await admin
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+      if (cntErr) {
+        console.warn("[delete-employee] profile count failed:", cntErr.message);
+        authSkipReason = "Could not verify other restaurants for this login; auth user was not removed.";
+      } else if ((remainingProfiles ?? 0) === 0) {
+        const { error: authErr } = await admin.auth.admin.deleteUser(userId);
+        if (authErr) {
+          console.warn("[delete-employee] auth.deleteUser failed:", authErr.message);
+          authSkipReason = authErr.message || "Auth user could not be deleted.";
+        } else {
+          deleted.push("auth.users");
+          authDeleted = true;
+        }
       } else {
-        deleted.push("auth.users");
+        console.log(
+          `[delete-employee] Skipping auth.deleteUser: user ${userId} still has ${remainingProfiles} profile(s) elsewhere`,
+        );
+        authSkipReason =
+          "This login is still linked to another restaurant profile, so the Supabase auth user was kept.";
       }
+    } else {
+      authSkipReason = "No auth user was linked to this employee record (ghost / name-only row).";
     }
 
     console.log(`[delete-employee] Deleted ${employeeName} from org ${orgId}: ${deleted.join(", ")}`);
@@ -218,7 +240,14 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, deleted, employee_name: employeeName, user_id: userId }),
+      JSON.stringify({
+        success: true,
+        deleted,
+        employee_name: employeeName,
+        user_id: userId,
+        auth_deleted: authDeleted,
+        auth_skip_reason: authSkipReason,
+      }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
