@@ -44,12 +44,54 @@
         <p id="onboard-body-intro">Use the <strong>invite link from your email</strong> first — it lets you create a password and join your restaurant.</p>
       </div>
 
-      <!-- Step 1: not signed in (Invalid Link) -->
+      <!-- Step 1: not signed in — recovery forms + optional error detail -->
       <div id="step-unauthed" class="onboard-step" hidden>
-        <div style="background:#fef2f2;border:1px solid #fee2e2;border-radius:10px;padding:16px;">
-          <h3 style="margin:0 0 8px 0;color:#991b1b;font-size:15px;font-weight:600;">Link Expired or Invalid</h3>
-          <p style="margin:0 0 10px 0;color:#b91c1c;font-size:14px;line-height:1.4;">This invite link does not contain a valid security token or has already been used. Please ask your manager to send you a new invite.</p>
-          <p id="debug-hash-err" style="margin:0;color:#7f1d1d;font-size:12px;font-family:monospace;background:#fca5a5;padding:6px;border-radius:6px;display:none;"></p>
+        <h3 id="unauthed-title" style="margin:0 0 14px 0;color:#111827;font-size:16px;font-weight:600;">Finish signing in</h3>
+
+        <div id="unauthed-error-panel" hidden style="background:#fef2f2;border:1px solid #fee2e2;border-radius:10px;padding:14px;margin-bottom:16px;">
+          <p style="margin:0 0 8px 0;color:#991b1b;font-size:14px;font-weight:600;">Having trouble with the email link?</p>
+          <p style="margin:0 0 8px 0;color:#b91c1c;font-size:13px;line-height:1.45;">
+            Links expire and can only be used once. On phones, open the link in <strong>Safari or Chrome</strong> (not the mail app’s built-in browser). Some corporate scanners also “click” the link first and burn the token—use “Email me a new sign-in link” below.
+          </p>
+          <p id="debug-hash-err" style="margin:0;color:#7f1d1d;font-size:12px;font-family:ui-monospace,monospace;background:#fecaca;padding:8px;border-radius:6px;display:none;word-break:break-word;"></p>
+        </div>
+
+        <div id="unauthed-recovery-forms">
+          <form id="form-send-link" novalidate>
+            <label class="onboard-label" for="ob-email">Work email</label>
+            <input class="onboard-input" id="ob-email" type="email" autocomplete="email" required placeholder="you@example.com">
+            <button type="submit" class="onboard-btn" id="btn-send-link">Email me a new sign-in link</button>
+            <p id="form-send-link-err" class="onboard-err" hidden></p>
+          </form>
+
+          <div class="onboard-divider"><span>or phone</span></div>
+
+          <div id="sms-step-request">
+            <form id="form-send-sms" novalidate>
+              <label class="onboard-label" for="ob-phone">Mobile number</label>
+              <input class="onboard-input" id="ob-phone" type="tel" autocomplete="tel" placeholder="+1…">
+              <button type="submit" class="onboard-btn onboard-btn-secondary" id="btn-send-sms">Text me a code</button>
+              <p id="form-send-sms-err" class="onboard-err" hidden></p>
+            </form>
+          </div>
+
+          <div id="sms-step-verify" hidden>
+            <label class="onboard-label" for="ob-sms-code">6-digit code</label>
+            <input class="onboard-input" id="ob-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
+            <button type="button" class="onboard-btn" id="btn-verify-sms">Verify code</button>
+            <p class="onboard-hint">Use the same number you asked us to text.</p>
+          </div>
+
+          <div class="onboard-divider"><span>or sign in</span></div>
+
+          <form id="form-signin" novalidate>
+            <label class="onboard-label" for="ob-signin-email">Email</label>
+            <input class="onboard-input" id="ob-signin-email" type="email" autocomplete="username">
+            <label class="onboard-label" for="ob-signin-password" style="margin-top:10px;">Password</label>
+            <input class="onboard-input" id="ob-signin-password" type="password" autocomplete="current-password">
+            <button type="submit" class="onboard-btn onboard-btn-secondary" id="btn-signin">Sign in</button>
+            <p id="form-signin-err" class="onboard-err" hidden></p>
+          </form>
         </div>
       </div>
 
@@ -77,6 +119,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="employeeOnboard.js"></script>
+  <script src="employeeOnboard.js?v=20260414-mobile-magic-link"></script>
 </body>
 </html>

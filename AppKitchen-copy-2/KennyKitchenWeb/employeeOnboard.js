@@ -30,6 +30,42 @@
     showIntro(step === 'step-unauthed');
   }
 
+  function setUnauthedDisabled(disabled) {
+    const box = document.getElementById('unauthed-recovery-forms');
+    if (!box) return;
+    box.querySelectorAll('input, button, select, textarea').forEach((el) => {
+      el.disabled = !!disabled;
+    });
+  }
+
+  /** Remove PKCE ?code= (and auth hash) from the address bar without losing org/name params. */
+  function scrubAuthFromUrl() {
+    try {
+      const u = new URL(window.location.href);
+      let changed = false;
+      ['code', 'error', 'error_description', 'error_code'].forEach((k) => {
+        if (u.searchParams.has(k)) {
+          u.searchParams.delete(k);
+          changed = true;
+        }
+      });
+      if (window.location.hash && /access_token|refresh_token|error/i.test(window.location.hash)) {
+        u.hash = '';
+        changed = true;
+      }
+      if (changed) window.history.replaceState({}, '', u.pathname + u.search + u.hash);
+    } catch (_) {}
+  }
+
+  function decodeAuthErrorMessage(raw) {
+    if (!raw || typeof raw !== 'string') return raw || '';
+    try {
+      return decodeURIComponent(raw.replace(/\+/g, ' ')).trim();
+    } catch (_) {
+      return String(raw).replace(/\+/g, ' ').trim();
+    }
+  }
+
   function showFormError(id, msg) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -370,33 +406,73 @@
   }
 
   async function route(supabase, orgId, employeeName, isManager, prefillEmail, positionLabels) {
-    // Robustly handle the token directly incase supabase-js drops it
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const qParams = new URLSearchParams(window.location.search);
-    
-    // DEBUG: Grab explicit errors thrown by Supabase GoTrue
-    const sbError = hashParams.get('error_description') || hashParams.get('error') || qParams.get('error_description');
+    const sbErrorRaw =
+      hashParams.get('error_description') ||
+      hashParams.get('error') ||
+      qParams.get('error_description') ||
+      qParams.get('error');
+    const sbError = decodeAuthErrorMessage(sbErrorRaw);
 
-    if (qParams.has('code')) {
-      const { error } = await supabase.auth.exchangeCodeForSession(qParams.get('code'));
-      if (error) console.error("Code exchange failed:", error);
+    const dbg = document.getElementById('debug-hash-err');
+    const errPanel = document.getElementById('unauthed-error-panel');
+    if (dbg) {
+      dbg.textContent = '';
+      dbg.style.display = 'none';
+    }
+    if (errPanel) errPanel.hidden = true;
+
+    // Let supabase-js finish detectSessionInUrl / PKCE (mobile Safari can be slower).
+    await new Promise((res) => setTimeout(res, 450));
+    let {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    // Only exchange manually if still no session (avoids double-consuming ?code=).
+    if (!session?.user && qParams.has('code')) {
+      const { error: exErr } = await supabase.auth.exchangeCodeForSession(qParams.get('code'));
+      if (exErr) {
+        console.warn('[Onboard] Code exchange failed:', exErr.message);
+        if (dbg) {
+          dbg.textContent =
+            'Could not use the link: ' +
+            (exErr.message || 'link may have expired or been opened twice. Try “Email me a new link” below.');
+          dbg.style.display = 'block';
+        }
+        if (errPanel) errPanel.hidden = false;
+      } else {
+        scrubAuthFromUrl();
+      }
+      ({
+        data: { session },
+      } = await supabase.auth.getSession());
+    } else if (session?.user && qParams.has('code')) {
+      scrubAuthFromUrl();
     } else if (hashParams.has('access_token')) {
       await supabase.auth.setSession({
         access_token: hashParams.get('access_token'),
-        refresh_token: hashParams.get('refresh_token') || ''
+        refresh_token: hashParams.get('refresh_token') || '',
       });
+      ({
+        data: { session },
+      } = await supabase.auth.getSession());
+      scrubAuthFromUrl();
     }
 
-    // Wait a brief moment to let standard bindings settle if they were in progress
-    await new Promise(res => setTimeout(res, 200));
-
-    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       setSubtitle('Sign up or sign in');
       showStep('step-unauthed');
+      const titleEl = document.getElementById('unauthed-title');
+      if (titleEl) titleEl.textContent = orgId ? 'Finish signing in' : 'Invite link incomplete';
       if (sbError) {
-         const dbg = document.getElementById('debug-hash-err');
-         if (dbg) { dbg.textContent = 'Auth Error: ' + sbError; dbg.style.display = 'block'; }
+        if (dbg) {
+          dbg.textContent = sbError;
+          dbg.style.display = 'block';
+        }
+        if (errPanel) errPanel.hidden = false;
+      } else if (dbg && dbg.textContent) {
+        if (errPanel) errPanel.hidden = false;
       }
       if (!orgId) {
         setSubtitle('Invite link incomplete');
@@ -408,7 +484,19 @@
         }
       } else {
         setUnauthedDisabled(false);
+        const intro = document.getElementById('onboard-body-intro');
+        if (intro) {
+          if (sbError) {
+            intro.innerHTML =
+              '<strong>On a phone?</strong> The Gmail/Mail <em>in-app</em> browser often breaks magic links. Tap <strong>⋯</strong> or <strong>Open in Safari / Chrome</strong>, then use the button in the email again—or enter your email below for a <strong>new link</strong> to this same page.';
+          } else {
+            intro.innerHTML =
+              'If the button in your email didn’t work, enter the <strong>same email your manager invited</strong> below and we’ll send a fresh link to this page.';
+          }
+        }
       }
+      // Drop error/code fragments from the URL so refresh doesn’t keep showing a stale Supabase error.
+      scrubAuthFromUrl();
       return;
     }
 
