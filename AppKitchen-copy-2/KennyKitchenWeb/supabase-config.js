@@ -31,7 +31,10 @@ window.EMPLOYEE_IDS = {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      flowType: 'pkce',
+      // implicit: magic links work when opened on a *different* device/browser than the one that
+      // called signInWithOtp (e.g. manager sends invite from desktop, employee opens on phone).
+      // pkce stores a code_verifier in that first browser only — employees hit "PKCE code verifier not found".
+      flowType: 'implicit',
     },
   });
 

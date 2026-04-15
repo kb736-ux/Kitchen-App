@@ -434,10 +434,13 @@
       const { error: exErr } = await supabase.auth.exchangeCodeForSession(qParams.get('code'));
       if (exErr) {
         console.warn('[Onboard] Code exchange failed:', exErr.message);
+        let detail = exErr.message || 'link may have expired or been opened twice. Try “Email me a new link” below.';
+        if (/pkce|code verifier/i.test(detail)) {
+          detail =
+            'This link type doesn’t match your browser storage (common with email invites). Use “Email me a new sign-in link” below on this same phone, or ask your manager to resend after your app is updated.';
+        }
         if (dbg) {
-          dbg.textContent =
-            'Could not use the link: ' +
-            (exErr.message || 'link may have expired or been opened twice. Try “Email me a new link” below.');
+          dbg.textContent = 'Could not use the link: ' + detail;
           dbg.style.display = 'block';
         }
         if (errPanel) errPanel.hidden = false;
