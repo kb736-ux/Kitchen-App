@@ -404,6 +404,48 @@ async function fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, dateS
         }));
 }
 
+function shiftTimeToMinutes(t) {
+    const [h, m] = String(t || '0:0').split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+}
+
+/** Minutes from start-day midnight through end (next calendar day if overnight). */
+function normalizeShiftIntervalFromDayStart(startTime, endTime) {
+    let s0 = shiftTimeToMinutes(startTime);
+    let s1 = shiftTimeToMinutes(endTime);
+    if (s1 < s0) s1 += 24 * 60;
+    return [s0, s1];
+}
+
+function isOvernightShiftTimes(startTime, endTime) {
+    return shiftTimeToMinutes(endTime) < shiftTimeToMinutes(startTime);
+}
+
+/**
+ * Same shift_date: two ranges overlap if they share any minute (endpoints touching allowed).
+ * Overnight shifts (end clock < start clock) extend past midnight on the start day.
+ */
+function shiftTimeRangesOverlap(startA, endA, startB, endB) {
+    const [a0, a1] = normalizeShiftIntervalFromDayStart(startA, endA);
+    const [b0, b1] = normalizeShiftIntervalFromDayStart(startB, endB);
+    return a0 < b1 && a1 > b0;
+}
+
+/** prior* is an overnight shift on the calendar day before the new shift's shift_date. */
+function shiftOverlapsPriorDayOvernightSpill(priorStart, priorEnd, newStart, newEnd) {
+    if (!isOvernightShiftTimes(priorStart, priorEnd)) return false;
+    const spillEnd = shiftTimeToMinutes(priorEnd);
+    const [n0, n1] = normalizeShiftIntervalFromDayStart(newStart, newEnd);
+    return n0 < spillEnd && n1 > 0;
+}
+
+/** New shift is overnight; its morning portion on the next calendar day vs an existing shift that day. */
+function overnightTailOverlapsFollowingDayShift(overnightEndTime, followingStart, followingEnd) {
+    const tailEnd = shiftTimeToMinutes(overnightEndTime);
+    const [o0, o1] = normalizeShiftIntervalFromDayStart(followingStart, followingEnd);
+    return 0 < o1 && tailEnd > o0;
+}
+
 /** Overlap vs other saved shifts for same person on same day (Supabase). */
 async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, startTime, endTime, excludeShiftId = null) {
     const rows = await fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, dateStr);
@@ -413,6 +455,28 @@ async function employeeHasSupabaseShiftOverlap(employeeDisplayName, dateStr, sta
             return { overlap: true, other: row };
         }
     }
+
+    const prevYmd = addCalendarDaysYmd(dateStr, -1);
+    const prevRows = await fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, prevYmd);
+    for (const row of prevRows) {
+        if (excludeShiftId && String(row.id) === String(excludeShiftId)) continue;
+        if (!isOvernightShiftTimes(row.start_time, row.end_time)) continue;
+        if (shiftOverlapsPriorDayOvernightSpill(row.start_time, row.end_time, startTime, endTime)) {
+            return { overlap: true, other: row };
+        }
+    }
+
+    if (isOvernightShiftTimes(startTime, endTime)) {
+        const nextYmd = addCalendarDaysYmd(dateStr, 1);
+        const nextRows = await fetchSupabaseShiftsSameEmployeeSameDay(employeeDisplayName, nextYmd);
+        for (const row of nextRows) {
+            if (excludeShiftId && String(row.id) === String(excludeShiftId)) continue;
+            if (overnightTailOverlapsFollowingDayShift(endTime, row.start_time, row.end_time)) {
+                return { overlap: true, other: row };
+            }
+        }
+    }
+
     return { overlap: false };
 }
 
@@ -1404,6 +1468,37 @@ function setupModalHandlers() {
         }
 
         const shiftDateStr = getDateForDay(day);
+        const allPersonRows = collectShiftDataRowsForSamePerson(displayName);
+        const isSeparateShiftRow = (s) =>
+            !(supabaseId && s.shiftId && String(s.shiftId) === String(supabaseId));
+        if (shiftDateStr) {
+            const prevStr = addCalendarDaysYmd(shiftDateStr, -1);
+            for (const s of allPersonRows) {
+                if (!s.shiftDate || s.shiftDate !== prevStr || !isSeparateShiftRow(s)) continue;
+                if (!isOvernightShiftTimes(s.startTime, s.endTime)) continue;
+                if (shiftOverlapsPriorDayOvernightSpill(s.startTime, s.endTime, newStart, newEnd)) {
+                    showNotification(
+                        `${displayName} overlaps an overnight shift from ${formatDateForDisplay(prevStr)} (${s.startTime}–${s.endTime}).`,
+                        'error'
+                    );
+                    return;
+                }
+            }
+            if (isOvernightShiftTimes(newStart, newEnd)) {
+                const nextStr = addCalendarDaysYmd(shiftDateStr, 1);
+                for (const s of allPersonRows) {
+                    if (!s.shiftDate || s.shiftDate !== nextStr || !isSeparateShiftRow(s)) continue;
+                    if (overnightTailOverlapsFollowingDayShift(newEnd, s.startTime, s.endTime)) {
+                        showNotification(
+                            `${displayName}'s overnight shift would overlap ${formatDateForDisplay(nextStr)} (${s.startTime}–${s.endTime}).`,
+                            'error'
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
         if (window.supabaseClient && window.ORG_ID && shiftDateStr) {
             if (await employeeHasApprovedTimeOffOnDate(displayName, shiftDateStr)) {
                 showNotification(
@@ -2061,8 +2156,8 @@ async function assignShift() {
         let shiftsByDate = null;
         if (window.supabaseClient && window.ORG_ID && shiftDatesYmd.length > 0) {
             const sorted = [...shiftDatesYmd].sort();
-            const rangeStart = sorted[0];
-            const rangeEnd = sorted[sorted.length - 1];
+            const rangeStart = addCalendarDaysYmd(sorted[0], -1);
+            const rangeEnd = addCalendarDaysYmd(sorted[sorted.length - 1], 1);
             const [toRows, rangeShifts] = await Promise.all([
                 fetchApprovedTimeOffRequestsForOrg(),
                 fetchEmployeeShiftsInDateRange(employeeName, rangeStart, rangeEnd),
@@ -2103,6 +2198,29 @@ async function assignShift() {
                         return;
                     }
                 }
+                const prevY = addCalendarDaysYmd(dateStr, -1);
+                for (const row of shiftsByDate[prevY] || []) {
+                    if (!isOvernightShiftTimes(row.start_time, row.end_time)) continue;
+                    if (shiftOverlapsPriorDayOvernightSpill(row.start_time, row.end_time, startTime, endTime)) {
+                        showNotification(
+                            `${employeeName} already overlaps: overnight from ${formatDateForDisplay(prevY)} runs into ${formatDateForDisplay(dateStr)} (${row.start_time || '?'}–${row.end_time || '?'}).`,
+                            'error'
+                        );
+                        return;
+                    }
+                }
+                if (isOvernightShiftTimes(startTime, endTime)) {
+                    const nextY = addCalendarDaysYmd(dateStr, 1);
+                    for (const row of shiftsByDate[nextY] || []) {
+                        if (overnightTailOverlapsFollowingDayShift(endTime, row.start_time, row.end_time)) {
+                            showNotification(
+                                `${employeeName}'s overnight shift runs into ${formatDateForDisplay(nextY)} and overlaps (${row.start_time || '?'}–${row.end_time || '?'}).`,
+                                'error'
+                            );
+                            return;
+                        }
+                    }
+                }
             }
             const wk = getWeekStart(new Date(dateStr + 'T12:00:00'));
             const dk = getDayKeyForDate(dateStr);
@@ -2114,6 +2232,31 @@ async function assignShift() {
                         'error'
                     );
                     return;
+                }
+            }
+            const prevStr = addCalendarDaysYmd(dateStr, -1);
+            const prevLocal = (window.shiftData[scheduleKey] || []).filter((s) => s.shiftDate === prevStr);
+            for (const s of prevLocal) {
+                if (!isOvernightShiftTimes(s.startTime, s.endTime)) continue;
+                if (shiftOverlapsPriorDayOvernightSpill(s.startTime, s.endTime, startTime, endTime)) {
+                    showNotification(
+                        `${employeeName} already overlaps: overnight from ${formatDateForDisplay(prevStr)} runs into ${formatDateForDisplay(dateStr)} (${s.startTime}–${s.endTime}).`,
+                        'error'
+                    );
+                    return;
+                }
+            }
+            if (isOvernightShiftTimes(startTime, endTime)) {
+                const nextStr = addCalendarDaysYmd(dateStr, 1);
+                const nextLocal = (window.shiftData[scheduleKey] || []).filter((s) => s.shiftDate === nextStr);
+                for (const s of nextLocal) {
+                    if (overnightTailOverlapsFollowingDayShift(endTime, s.startTime, s.endTime)) {
+                        showNotification(
+                            `${employeeName}'s overnight shift runs into ${formatDateForDisplay(nextStr)} and overlaps (${s.startTime}–${s.endTime}).`,
+                            'error'
+                        );
+                        return;
+                    }
                 }
             }
         }
@@ -2285,19 +2428,6 @@ function calculateShiftHours(startTime, endTime) {
     
     const diffMinutes = endMinutes - startMinutes;
     return diffMinutes / 60; // Convert to hours
-}
-
-/** True if two HH:MM ranges overlap (same calendar day). */
-function shiftTimeRangesOverlap(startA, endA, startB, endB) {
-    const toMin = (t) => {
-        const [h, m] = String(t || '0:0').split(':').map(Number);
-        return (h || 0) * 60 + (m || 0);
-    };
-    const a0 = toMin(startA);
-    const a1 = toMin(endA);
-    const b0 = toMin(startB);
-    const b1 = toMin(endB);
-    return a0 < b1 && a1 > b0;
 }
 
 // Get week start date (Monday) as YYYY-MM-DD string (local time, no UTC drift)
