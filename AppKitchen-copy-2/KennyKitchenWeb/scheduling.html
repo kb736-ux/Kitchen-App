@@ -247,6 +247,35 @@
         </div>
     </div>
 
+    <!-- Create Position (same flow as Employees page; IDs wired in employees.js) -->
+    <div class="modal-overlay" id="create-position-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Create New Position</h3>
+                <button type="button" class="modal-close" id="close-create-position" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="position-name">Position name</label>
+                    <input type="text" id="position-name" class="form-control" placeholder="e.g. Expo Lead">
+                </div>
+                <div class="form-group">
+                    <label for="position-responsibilities">Responsibilities <span style="font-weight:400;color:#718096;">(optional)</span></label>
+                    <textarea id="position-responsibilities" class="form-control" rows="3" placeholder="Briefly describe the key responsibilities (optional)"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancel-create-position">Cancel</button>
+                <button type="button" class="btn-primary" id="submit-create-position">
+                    <i class="fas fa-check"></i>
+                    Create Position
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Assign Task Modal (used by recipes.js recipe assignment flow) -->
     <div class="modal-overlay" id="assign-task-modal">
         <div class="modal">

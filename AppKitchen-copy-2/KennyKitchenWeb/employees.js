@@ -983,9 +983,10 @@ function setupEmployeeModals() {
             openEmployeesModal(employeeModal, 'employee-full-name');
         });
     }
-    if (createPositionBtn && positionModal) {
-        createPositionBtn.addEventListener('click', () => openEmployeesModal(positionModal, 'position-name'));
-    }
+    const createPositionBtnScheduling = document.getElementById('create-position-btn');
+    [createPositionBtn, createPositionBtnScheduling].filter(Boolean).forEach((btn) => {
+        btn.addEventListener('click', () => openEmployeesModal(positionModal, 'position-name'));
+    });
 
     // Close buttons
     const closeEmployeeBtn = document.getElementById('close-create-employee');
@@ -1016,9 +1017,10 @@ function setupEmployeeModals() {
     submitEmployeeBtn?.addEventListener('click', handleCreateEmployeeSubmit);
     submitPositionBtn?.addEventListener('click', handleCreatePositionSubmit);
 
-    // Overlay click closes
-    [employeeModal, positionModal].forEach(modal => {
-        modal?.addEventListener('click', e => {
+    // Overlay click closes (stopPropagation on inner .modal so backdrop clicks work)
+    [employeeModal, positionModal].forEach((modal) => {
+        modal?.querySelector('.modal')?.addEventListener('click', (e) => e.stopPropagation());
+        modal?.addEventListener('click', (e) => {
             if (e.target === modal) closeEmployeesModal(modal);
         });
     });
@@ -1502,6 +1504,10 @@ function handleCreatePositionSubmit() {
 
     if (nameInput) nameInput.value = '';
     if (respInput) respInput.value = '';
+
+    if (typeof window.kkRefreshSchedulingPositionSelects === 'function') {
+        void window.kkRefreshSchedulingPositionSelects();
+    }
 
     showEmployeeToast(`Position "${positionName}" created.`, 'success');
 }

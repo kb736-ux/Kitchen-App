@@ -848,6 +848,9 @@ async function syncSupabaseShiftsToGrid() {
         if (!dayKey) return;
 
         const empName = row.employee_name;
+        const matrixKey =
+            (typeof rosterKeyMatchingShiftEmployee === 'function' && rosterKeyMatchingShiftEmployee(empName)) ||
+            empName;
         const rS = rs(row.start_time);
         const rE = rs(row.end_time);
 
@@ -856,7 +859,7 @@ async function syncSupabaseShiftsToGrid() {
 
         // Skip if already in shiftData for this week (prevents duplicates on initial load)
         const alreadyLocal = Object.entries(window.shiftData || {}).some(([key, list]) =>
-            normEmployeeKey(key) === normEmployeeKey(empName) &&
+            normEmployeeKey(key) === normEmployeeKey(matrixKey) &&
             (list || []).some(s =>
                 s.day === dayKey &&
                 s.weekStart === weekStart &&
@@ -874,13 +877,15 @@ async function syncSupabaseShiftsToGrid() {
         const posLabel = row.position || 'Line Cook';
         const hours = calculateShiftHours(rawStart, rawEnd);
 
-        const card = createShiftCard(empName, posSlug, timeDisplay, dayKey, hours, posLabel, { compact: true });
+        const card = createShiftCard(matrixKey || empName, posSlug, timeDisplay, dayKey, hours, posLabel, {
+            compact: true,
+        });
         if (!card) return;
 
         card.dataset.shiftId = row.id;
 
-        if (!window.shiftData[empName]) window.shiftData[empName] = [];
-        window.shiftData[empName].push({
+        if (!window.shiftData[matrixKey]) window.shiftData[matrixKey] = [];
+        window.shiftData[matrixKey].push({
             day: dayKey,
             shiftDate: row.shift_date,
             startTime: rawStart,
@@ -1071,12 +1076,46 @@ function decodeEmployeeKeyAttr(raw) {
 function findScheduleCell(dayKey, employeeDisplayName) {
     const matrix = document.getElementById('schedule-matrix');
     if (!matrix || !dayKey || !employeeDisplayName) return null;
+    const want = normEmployeeKey(employeeDisplayName);
+    if (!want) return null;
     const cells = matrix.querySelectorAll(`.sched-matrix-cell[data-day="${dayKey}"]`);
     for (const c of cells) {
         const decoded = decodeEmployeeKeyAttr(c.getAttribute('data-employee-name'));
-        if (decoded === employeeDisplayName) return c;
+        if (normEmployeeKey(decoded) === want) return c;
     }
     return null;
+}
+
+/**
+ * Matrix rows use roster keys from getEmployeePositions(); DB shift rows may use another spelling
+ * (e.g. slug vs "First Last"). Returns the actual data-employee-key string for a row, or ''.
+ */
+function rosterKeyMatchingShiftEmployee(rawFromDbOrSelect) {
+    const raw = String(rawFromDbOrSelect || '').trim();
+    if (!raw) return '';
+    const label =
+        typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(raw) : raw;
+    const want = normEmployeeKey(label || raw);
+    if (!want) return '';
+    const rows = document.querySelectorAll('#schedule-matrix .sched-matrix-row[data-employee-key]');
+    for (const row of rows) {
+        const k = decodeEmployeeKeyAttr(row.getAttribute('data-employee-key'));
+        if (!k) continue;
+        if (normEmployeeKey(k) === want) return k;
+    }
+    return '';
+}
+
+/** Key for window.shiftData / employeeHours so it matches matrix row data-employee-key (roster canonical). */
+function scheduleStorageKeyForAssign(employeeSelectValue) {
+    const slug = String(employeeSelectValue || '').trim();
+    if (!slug) return '';
+    const display = typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(slug) : slug;
+    if (typeof rosterKeyMatchingShiftEmployee === 'function') {
+        const rk = rosterKeyMatchingShiftEmployee(slug) || rosterKeyMatchingShiftEmployee(display);
+        if (rk) return rk;
+    }
+    return display || slug;
 }
 
 function updateMatrixRowHours() {
@@ -1259,8 +1298,7 @@ function setupScheduleMatrixDelegation() {
 // Modal Handlers
 function setupModalHandlers() {
     const assignShiftBtn = document.getElementById('assign-shift-btn');
-    const createPositionBtn = document.getElementById('create-position-btn');
-    
+
     if (assignShiftBtn) {
         assignShiftBtn.addEventListener('click', async () => {
             if (typeof loadEmployeePositionsFromSupabase === 'function') {
@@ -1271,12 +1309,8 @@ function setupModalHandlers() {
         });
     }
     
-    if (createPositionBtn) {
-        createPositionBtn.addEventListener('click', () => {
-            showComingSoon('Create Position functionality');
-        });
-    }
-    
+    // Create Position: modal + handlers live in employees.js (create-position-btn + submit-create-position)
+
     // Calendar / History view — opens calendar; load shifts from Supabase so past days show
     let calendarViewMonth = new Date();
     const calendarHistoryBtn = document.getElementById('calendar-history-btn');
@@ -1465,8 +1499,15 @@ function updateAssignShiftConfirmState() {
 const DEFAULT_EMPLOYEES = [];
 const EMPLOYEE_VALUE_MAP = {};
 
+/** Match mobile `normalizeShiftEmployeeName`: hyphens/underscores ↔ spaces so DB "Kenny-crocodile" matches roster "Kenny Crocodile". */
 function normEmployeeKey(s) {
-    return String(s || '').trim().toLowerCase();
+    return String(s || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\u2010-\u2015]/g, '-')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /** Fuzzy match: "Rohan" matches "Rohan Kumar" and vice versa (first-name or full-name). */
@@ -1664,6 +1705,8 @@ async function populatePositionSelect() {
     if (positionSelect) positionSelect.innerHTML = opts;
     if (shiftDetailsPosition) shiftDetailsPosition.innerHTML = opts;
 }
+
+window.kkRefreshSchedulingPositionSelects = populatePositionSelect;
 
 // Update employee dropdown to show which employees have approved drops or time off
 async function updateEmployeeDropdownForDay() {
@@ -2008,6 +2051,7 @@ async function assignShift() {
         }
 
         const employeeName = getEmployeeDisplayName(employee);
+        const scheduleKey = scheduleStorageKeyForAssign(employee);
         const repeat = getAssignShiftRepeatOptionsFromDom();
         const shiftDatesYmd = buildRecurringShiftDates(selectedDate, repeat);
         const todayStr = getTodayLocalYmd();
@@ -2062,7 +2106,7 @@ async function assignShift() {
             }
             const wk = getWeekStart(new Date(dateStr + 'T12:00:00'));
             const dk = getDayKeyForDate(dateStr);
-            const existingShifts = (window.shiftData[employeeName] || []).filter((s) => s.day === dk && s.weekStart === wk);
+            const existingShifts = (window.shiftData[scheduleKey] || []).filter((s) => s.day === dk && s.weekStart === wk);
             for (const s of existingShifts) {
                 if (shiftTimeRangesOverlap(startTime, endTime, s.startTime, s.endTime)) {
                     showNotification(
@@ -2076,7 +2120,7 @@ async function assignShift() {
 
         const shiftHours = calculateShiftHours(startTime, endTime);
         const weekStartFirst = getWeekStart(new Date(shiftDatesYmd[0] + 'T12:00:00'));
-        const currentHours = getEmployeeWeeklyHours(employeeName, weekStartFirst);
+        const currentHours = getEmployeeWeeklyHours(scheduleKey, weekStartFirst);
         const newTotalHours = currentHours + shiftHours;
 
         if (newTotalHours > 40) {
@@ -2097,7 +2141,9 @@ async function assignShift() {
 
 /** @param {string[]} shiftDatesYmd - YYYY-MM-DD for each occurrence (first = selected day) */
 function proceedWithShiftAssignment(employee, position, startTime, endTime, shiftHours, shiftDatesYmd) {
-    const employeeName = getEmployeeDisplayName(employee);
+    const employeeSlug = String(employee || '').trim();
+    const employeeName = typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(employeeSlug) : employeeSlug;
+    const storageKey = scheduleStorageKeyForAssign(employeeSlug);
 
     const formatTime = (time24) => {
         const [hours, minutes] = time24.split(':');
@@ -2119,12 +2165,12 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
     const visibleWeekStartStr = getWeekStart(currentWeekStart);
     const metaByIndex = [];
 
-    if (!window.shiftData[employeeName]) window.shiftData[employeeName] = [];
+    if (!window.shiftData[storageKey]) window.shiftData[storageKey] = [];
 
     shiftDatesYmd.forEach((shiftDate) => {
         const dayKey = getDayKeyForDate(shiftDate);
         const weekStartStr = getWeekStart(new Date(shiftDate + 'T12:00:00'));
-        window.shiftData[employeeName].push({
+        window.shiftData[storageKey].push({
             day: dayKey,
             shiftDate,
             startTime,
@@ -2133,13 +2179,13 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
             weekStart: weekStartStr,
             position: position
         });
-        if (!window.employeeHours[employeeName]) window.employeeHours[employeeName] = {};
-        if (!window.employeeHours[employeeName][weekStartStr]) window.employeeHours[employeeName][weekStartStr] = 0;
-        window.employeeHours[employeeName][weekStartStr] += shiftHours;
+        if (!window.employeeHours[storageKey]) window.employeeHours[storageKey] = {};
+        if (!window.employeeHours[storageKey][weekStartStr]) window.employeeHours[storageKey][weekStartStr] = 0;
+        window.employeeHours[storageKey][weekStartStr] += shiftHours;
 
         let card = null;
         if (weekStartStr === visibleWeekStartStr) {
-            card = createShiftCard(employee, position, formattedTime, dayKey, shiftHours, positionLabel, {
+            card = createShiftCard(storageKey, position, formattedTime, dayKey, shiftHours, positionLabel, {
                 compact: true,
             });
         }
@@ -2147,7 +2193,7 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
     });
     persistShiftData();
 
-    const gridWeekHours = window.employeeHours[employeeName][visibleWeekStartStr] || 0;
+    const gridWeekHours = getEmployeeWeeklyHours(storageKey, visibleWeekStartStr);
     const n = shiftDatesYmd.length;
     if (n === 1) {
         showNotification(`Shift assigned to ${employeeName}. Total hours this week: ${gridWeekHours.toFixed(1)}`, 'success');
@@ -2198,7 +2244,7 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
                     const globalIdx = i + j;
                     const meta = metaByIndex[globalIdx];
                     if (!meta || !row) continue;
-                    const empShifts = window.shiftData[employeeName] || [];
+                    const empShifts = window.shiftData[storageKey] || [];
                     const entry = empShifts.find((s) =>
                         s.shiftDate === meta.shiftDate &&
                         s.startTime === startTime &&
@@ -2453,12 +2499,30 @@ function hideDayPopup() {
     if (popup) popup.hidden = true;
 }
 
-// Get employee's total hours for a week
+// Get employee's total hours for a week (shiftData from Supabase sync + legacy employeeHours buckets)
 function getEmployeeWeeklyHours(employeeName, weekStart) {
-    if (!window.employeeHours[employeeName] || !window.employeeHours[employeeName][weekStart]) {
-        return 0;
-    }
-    return window.employeeHours[employeeName][weekStart];
+    const want = normEmployeeKey(employeeName);
+    if (!weekStart || !want) return 0;
+    let fromData = 0;
+    Object.entries(window.shiftData || {}).forEach(([k, list]) => {
+        if (normEmployeeKey(k) !== want) return;
+        (list || []).forEach((s) => {
+            if (s.weekStart !== weekStart) return;
+            const h =
+                typeof s.hours === 'number' && !Number.isNaN(s.hours)
+                    ? s.hours
+                    : calculateShiftHours(s.startTime, s.endTime);
+            fromData += h;
+        });
+    });
+    if (fromData > 0) return fromData;
+    let fromLegacy = 0;
+    Object.entries(window.employeeHours || {}).forEach(([k, weeks]) => {
+        if (normEmployeeKey(k) !== want) return;
+        const n = weeks && weeks[weekStart];
+        if (typeof n === 'number' && !Number.isNaN(n)) fromLegacy += n;
+    });
+    return fromLegacy;
 }
 
 // Initialize hours from existing shifts on page load
@@ -2551,7 +2615,11 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     };
 
     const rawEmp = String(employee || '').trim();
+    const matrixEmp =
+        (typeof rosterKeyMatchingShiftEmployee === 'function' && rosterKeyMatchingShiftEmployee(rawEmp)) ||
+        '';
     const bucketName =
+        (matrixEmp && typeof getEmployeeDisplayName === 'function' && getEmployeeDisplayName(matrixEmp)) ||
         (typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(rawEmp) : null) ||
         employeeNames[rawEmp.toLowerCase()] ||
         (rawEmp ? rawEmp.charAt(0).toUpperCase() + rawEmp.slice(1) : '');
@@ -2562,7 +2630,7 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
             .replace(/-/g, ' ')
             .replace(/\b\w/g, (c) => c.toUpperCase());
 
-    const dayColumn = findScheduleCell(day, bucketName);
+    const dayColumn = findScheduleCell(day, matrixEmp || bucketName);
     if (!dayColumn) {
         console.warn('[Scheduling] No schedule cell for employee', bucketName, 'day', day);
         return null;

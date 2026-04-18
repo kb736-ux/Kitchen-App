@@ -84,21 +84,41 @@ This is almost always **stale JavaScript on the device** or **Expo Go talking to
 2. **Full reset (do this first)**  
    Stop Metro (Ctrl+C), then from **this** folder (`MyReactNativeApp`):
    ```bash
-   npx expo start --tunnel --clear
+   npm run start:clear
    ```
    In **Expo Go**: shake device → **Reload** (or kill Expo Go and scan the QR again).
 
 3. **Same project folder**  
    Make sure the terminal running Expo is `.../AppKitchen-copy-2/MyReactNativeApp` — not another copy of the repo elsewhere.
 
-4. **Tunnel vs LAN**  
-   `--tunnel` can lag or stick to an old session. If Mac and phone are on the **same Wi‑Fi**, try **without** tunnel:
+4. **`expo start --tunnel` fails (`Cannot read properties of undefined (reading 'body')`)**  
+   Expo’s built-in tunnel uses shared ngrok capacity; when that service is overloaded or blocked, the CLI throws this error. **Prefer one of these instead:**
+   - **Android emulator (same Mac):** only one Metro can own **8081**. Stop other Expo windows, then:
+     ```bash
+     npx expo start --android
+     ```
+     No tunnel needed.
+   - **Phone on same Wi‑Fi as Mac:**
+     ```bash
+     npm run start:lan
+     ```
+     Scan the **LAN** QR code (not tunnel).
+   - **Physical Android over USB:** with USB debugging on, run:
+     ```bash
+     adb reverse tcp:8081 tcp:8081
+     npm run start:localhost
+     ```
+     Open the project in Expo Go using the **localhost** URL Metro prints.
+   - **Different networks:** use your own tunnel (e.g. install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) or ngrok v3, expose port **8081**, then set `EXPO_PACKAGER_PROXY_URL` to that HTTPS URL and run `npm run start:lan` — see [expo/expo#43335](https://github.com/expo/expo/issues/43335) for community steps).
+
+5. **Tunnel vs LAN**  
+   If Mac and phone are on the **same Wi‑Fi**, use LAN and avoid `--tunnel`:
    ```bash
-   npx expo start --clear
+   npm run start:lan
    ```
    Use the **LAN** URL/QR from the terminal.
 
-5. **Watchman (Mac)**  
+6. **Watchman (Mac)**  
    If files never trigger a rebundle:
    ```bash
    watchman watch-del-all

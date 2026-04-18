@@ -3,7 +3,6 @@ import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicat
 import { useState, useEffect, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import HomePage from './components/HomePage';
@@ -23,24 +22,45 @@ import { EmployeeProvider, useEmployee } from './EmployeeContext';
 import LoginScreen from './LoginScreen';
 import { JS_BUNDLE_BUILD } from './constants/buildInfo';
 
-// Show notifications even when app is in the foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+/** Expo Go on Android (SDK 53+) cannot load expo-notifications — use a dev build for push there. */
+function canUseExpoPushModule() {
+  return !(Constants.appOwnership === 'expo' && Platform.OS === 'android');
+}
+
+let notificationsModule;
+function getNotifications() {
+  if (!canUseExpoPushModule()) return null;
+  if (notificationsModule === undefined) {
+    try {
+      notificationsModule = require('expo-notifications');
+    } catch {
+      notificationsModule = null;
+    }
+  }
+  return notificationsModule;
+}
+
+const Notifications = getNotifications();
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 async function registerForPushNotifications(orgId, employeeName, userEmail) {
-    if (!Device.isDevice) {
+  const N = getNotifications();
+  if (!N || !Device.isDevice) {
     return;
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  const { status: existingStatus } = await N.getPermissionsAsync();
   let finalStatus = existingStatus;
   if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
+    const { status } = await N.requestPermissionsAsync();
     finalStatus = status;
   }
   if (finalStatus !== 'granted') {
@@ -53,8 +73,8 @@ async function registerForPushNotifications(orgId, employeeName, userEmail) {
       Constants.expoConfig?.extra?.eas?.projectId ??
       Constants.easConfig?.projectId;
     const tokenData = projectId
-      ? await Notifications.getExpoPushTokenAsync({ projectId })
-      : await Notifications.getExpoPushTokenAsync();
+      ? await N.getExpoPushTokenAsync({ projectId })
+      : await N.getExpoPushTokenAsync();
     const token = tokenData.data;
 
     // Resolve canonical employee_name from profile so web and mobile use the same key.
@@ -89,9 +109,9 @@ async function registerForPushNotifications(orgId, employeeName, userEmail) {
   }
 
   if (Platform.OS === 'android') {
-    Notifications.setNotificationChannelAsync('default', {
+    N.setNotificationChannelAsync('default', {
       name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
+      importance: N.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
     });
   }
@@ -626,25 +646,28 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     }
     boot();
 
-    // Listen for incoming notifications while app is open
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('[Notification received]', notification);
-      if (notification?.request?.content?.data?.type) {
-        Vibration.vibrate(500);
-      }
-    });
-    // Listen for notification taps — navigate to Tasks or Schedule
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification?.request?.content?.data;
-      if (data?.type === 'task_assigned') {
-        setActiveTab('Tasks');
-        markTaskNotifsRead(orgIdRef.current);
-      } else if (data?.type === 'chat_message') {
-        setActiveTab('Chat');
-      } else {
-        setActiveTab('Schedule');
-      }
-    });
+    const N = getNotifications();
+    if (N) {
+      // Listen for incoming notifications while app is open
+      notificationListener.current = N.addNotificationReceivedListener(notification => {
+        console.log('[Notification received]', notification);
+        if (notification?.request?.content?.data?.type) {
+          Vibration.vibrate(500);
+        }
+      });
+      // Listen for notification taps — navigate to Tasks or Schedule
+      responseListener.current = N.addNotificationResponseReceivedListener((response) => {
+        const data = response.notification?.request?.content?.data;
+        if (data?.type === 'task_assigned') {
+          setActiveTab('Tasks');
+          markTaskNotifsRead(orgIdRef.current);
+        } else if (data?.type === 'chat_message') {
+          setActiveTab('Chat');
+        } else {
+          setActiveTab('Schedule');
+        }
+      });
+    }
 
     return () => {
       notificationListener.current?.remove();
