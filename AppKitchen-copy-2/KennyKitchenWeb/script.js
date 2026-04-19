@@ -2049,6 +2049,8 @@ async function notifyTaskAssignedFromWeb(employeeName, taskDescription) {
                 title: 'New Task Assigned',
                 body: `You've been assigned: ${taskDescription}`,
                 sound: 'default',
+                priority: 'high',
+                channelId: 'default',
                 data: { type: 'task_assigned' },
             }),
         }).catch((err) => console.warn('[Push] send failed:', err?.message || err));

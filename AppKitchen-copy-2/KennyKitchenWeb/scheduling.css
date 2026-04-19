@@ -285,8 +285,14 @@
 }
 
 .shift-card.shift-card--compact {
-    padding: 0.5rem 0.6rem;
+    padding: 0.45rem 0.5rem 0.45rem 0.25rem;
     margin: 0;
+}
+
+.shift-card.shift-card--compact .shift-card-drag-handle {
+    padding: 0.15rem 0.1rem;
+    margin-top: 0.05rem;
+    font-size: 0.75rem;
 }
 
 .shift-card.shift-card--compact .shift-header {
@@ -382,11 +388,44 @@
 .shift-card {
     background: white;
     border-radius: 12px;
-    padding: 1rem;
+    padding: 0.65rem 0.75rem 0.65rem 0.35rem;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     border-left: 4px solid #4CAF50;
     transition: all 0.3s ease;
     cursor: pointer;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.35rem;
+}
+
+.shift-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.shift-card-drag-handle {
+    flex-shrink: 0;
+    padding: 0.2rem 0.15rem;
+    margin-top: 0.1rem;
+    cursor: grab;
+    color: #a0aec0;
+    line-height: 1;
+    border-radius: 6px;
+    touch-action: none;
+    user-select: none;
+}
+
+.shift-card-drag-handle:active {
+    cursor: grabbing;
+    color: #4CAF50;
+    background: rgba(76, 175, 80, 0.12);
+}
+
+.sched-matrix-cell.sched-matrix-cell--drop-hover {
+    outline: 2px dashed rgba(76, 175, 80, 0.85);
+    outline-offset: -3px;
+    background: rgba(76, 175, 80, 0.08);
 }
 
 .shift-card:hover {

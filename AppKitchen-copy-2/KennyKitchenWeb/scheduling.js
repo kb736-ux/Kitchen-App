@@ -780,7 +780,14 @@ async function sendPushToEmployee(employeeName, title, body) {
         .eq('employee_name', employeeName)
         .maybeSingle();
     if (!data?.token) return;
-    const payload = { to: data.token, title, body, sound: 'default' };
+    const payload = {
+        to: data.token,
+        title,
+        body,
+        sound: 'default',
+        priority: 'high',
+        channelId: 'default',
+    };
     if (title === 'New Task Assigned') payload.data = { type: 'task_assigned' };
     fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
@@ -943,6 +950,8 @@ async function syncSupabaseShiftsToGrid() {
 
         const card = createShiftCard(matrixKey || empName, posSlug, timeDisplay, dayKey, hours, posLabel, {
             compact: true,
+            start24: rawStart,
+            end24: rawEnd,
         });
         if (!card) return;
 
@@ -1036,6 +1045,8 @@ async function sendShiftNotification(employeeName, day, timeStr) {
                 title: 'Hey, you were assigned new shifts!',
                 body: 'Check your schedule to see your new shifts.',
                 sound: 'default',
+                priority: 'high',
+                channelId: 'default',
                 data: { type: 'shift_assigned', screen: 'Schedule' },
             }),
         });
@@ -1192,6 +1203,333 @@ function updateMatrixRowHours() {
     });
 }
 
+function bumpEmployeeHoursBucket(bucketKey, weekStart, deltaHours) {
+    if (!bucketKey || !weekStart || typeof deltaHours !== 'number' || deltaHours === 0) return;
+    if (!window.employeeHours[bucketKey]) window.employeeHours[bucketKey] = {};
+    const cur = window.employeeHours[bucketKey][weekStart] || 0;
+    window.employeeHours[bucketKey][weekStart] = Math.max(0, cur + deltaHours);
+}
+
+/** Validate moving a shift (same times) onto target roster row + date. */
+async function validateShiftDropTarget(targetStorageKey, targetDateStr, start24, end24, excludeShiftId) {
+    const todayStr = getTodayLocalYmd();
+    if (!targetDateStr || targetDateStr < todayStr) {
+        return { ok: false, message: 'Cannot place a shift on a past date.' };
+    }
+    const targetDisplay =
+        typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(targetStorageKey) : targetStorageKey;
+    if (isEmployeeDropping(targetDisplay, targetDateStr)) {
+        return { ok: false, message: `${targetDisplay} has an approved drop on that day.` };
+    }
+    if (window.supabaseClient && window.ORG_ID) {
+        if (await employeeHasApprovedTimeOffOnDate(targetDisplay, targetDateStr)) {
+            return { ok: false, message: `${targetDisplay} has time off that day.` };
+        }
+        const supOv = await employeeHasSupabaseShiftOverlap(
+            targetDisplay,
+            targetDateStr,
+            start24,
+            end24,
+            excludeShiftId || null
+        );
+        if (supOv.overlap) {
+            const o = supOv.other || {};
+            return {
+                ok: false,
+                message: `Target already has a shift that overlaps (${o.start_time || '?'}–${o.end_time || '?'}).`,
+            };
+        }
+    }
+    const wk = getWeekStart(new Date(targetDateStr + 'T12:00:00'));
+    const dk = getDayKeyForDate(targetDateStr);
+    const rs = normShiftTimeHM;
+    const existing = (window.shiftData[targetStorageKey] || []).filter((s) => {
+        if (s.day !== dk || s.weekStart !== wk) return false;
+        if (excludeShiftId && s.shiftId && String(s.shiftId) === String(excludeShiftId)) return false;
+        return true;
+    });
+    for (const s of existing) {
+        if (shiftTimeRangesOverlap(start24, end24, s.startTime, s.endTime)) {
+            return { ok: false, message: `${targetDisplay} already has a shift that overlaps that time.` };
+        }
+    }
+    const prevStr = addCalendarDaysYmd(targetDateStr, -1);
+    for (const s of (window.shiftData[targetStorageKey] || []).filter((x) => x.shiftDate === prevStr)) {
+        if (excludeShiftId && s.shiftId && String(s.shiftId) === String(excludeShiftId)) continue;
+        if (!isOvernightShiftTimes(s.startTime, s.endTime)) continue;
+        if (shiftOverlapsPriorDayOvernightSpill(s.startTime, s.endTime, start24, end24)) {
+            return { ok: false, message: `Overlaps an overnight shift from the previous day.` };
+        }
+    }
+    if (isOvernightShiftTimes(start24, end24)) {
+        const nextStr = addCalendarDaysYmd(targetDateStr, 1);
+        for (const s of (window.shiftData[targetStorageKey] || []).filter((x) => x.shiftDate === nextStr)) {
+            if (excludeShiftId && s.shiftId && String(s.shiftId) === String(excludeShiftId)) continue;
+            if (overnightTailOverlapsFollowingDayShift(end24, s.startTime, s.endTime)) {
+                return { ok: false, message: `Overnight shift would overlap the next morning.` };
+            }
+        }
+    }
+    return { ok: true, targetDisplay };
+}
+
+async function unlinkTasksFromShiftForDrag(shiftId) {
+    if (!shiftId || !window.supabaseClient || !window.ORG_ID) return { ok: true };
+    const { error } = await window.supabaseClient
+        .from('tasks')
+        .update({ shift_id: null })
+        .eq('org_id', window.ORG_ID)
+        .eq('shift_id', shiftId);
+    if (error && !/shift_id|column|does not exist|42703/i.test(error.message || '')) {
+        return { ok: false, error: error.message };
+    }
+    return { ok: true };
+}
+
+async function executeShiftDragMove(card, targetCell, dragPayload) {
+    const targetDateStr = targetCell?.dataset?.date;
+    const targetStorageKey = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-employee-name'));
+    const start24 = dragPayload.start24;
+    const end24 = dragPayload.end24;
+    const excludeShiftId = dragPayload.shiftId || null;
+    const sourceStorageKey = dragPayload.sourceStorageKey;
+
+    if (!targetDateStr || !targetStorageKey || !start24 || !end24 || !sourceStorageKey) {
+        showNotification('Could not move shift (missing data).', 'error');
+        return;
+    }
+    const sourceCell = card.closest('.sched-matrix-cell');
+    const sourceDateStr = sourceCell?.dataset?.date;
+    if (
+        sourceDateStr === targetDateStr &&
+        normEmployeeKey(sourceStorageKey) === normEmployeeKey(targetStorageKey)
+    ) {
+        return;
+    }
+
+    const v = await validateShiftDropTarget(targetStorageKey, targetDateStr, start24, end24, excludeShiftId);
+    if (!v.ok) {
+        showNotification(v.message, 'error');
+        return;
+    }
+    const targetDisplay = v.targetDisplay;
+
+    const rs = normShiftTimeHM;
+    const sourceList = window.shiftData[sourceStorageKey];
+    if (!sourceList || !Array.isArray(sourceList)) {
+        showNotification('Could not find this shift in local data.', 'error');
+        return;
+    }
+    let idx = -1;
+    if (excludeShiftId) {
+        idx = sourceList.findIndex((s) => s.shiftId && String(s.shiftId) === String(excludeShiftId));
+    }
+    if (idx === -1) {
+        const srcDay = sourceCell?.dataset?.day;
+        const srcWeek = sourceDateStr ? getWeekStart(new Date(sourceDateStr + 'T12:00:00')) : '';
+        idx = sourceList.findIndex(
+            (s) =>
+                s.day === srcDay &&
+                s.weekStart === srcWeek &&
+                rs(s.startTime) === rs(start24) &&
+                rs(s.endTime) === rs(end24)
+        );
+    }
+    if (idx === -1) {
+        showNotification('Could not find this shift to move.', 'error');
+        return;
+    }
+
+    const entry = { ...sourceList[idx] };
+    const hours = entry.hours != null ? entry.hours : calculateShiftHours(start24, end24);
+    const oldWeek = entry.weekStart;
+    const newWeek = getWeekStart(new Date(targetDateStr + 'T12:00:00'));
+    const newDay = getDayKeyForDate(targetDateStr);
+    const positionLabel =
+        typeof entry.position === 'string' && entry.position.trim()
+            ? entry.position.trim()
+            : (card.querySelector('.shift-position')?.textContent || '').trim() || 'Line Cook';
+
+    if (excludeShiftId && window.supabaseClient && window.ORG_ID) {
+        const empId =
+            typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(targetDisplay) : null;
+        const { error: updErr } = await window.supabaseClient
+            .from('shifts')
+            .update({
+                shift_date: targetDateStr,
+                employee_name: targetDisplay,
+                employee_id: empId,
+            })
+            .eq('id', excludeShiftId);
+        if (updErr) {
+            showNotification('Could not update shift: ' + updErr.message, 'error');
+            return;
+        }
+        const unl = await unlinkTasksFromShiftForDrag(excludeShiftId);
+        if (!unl.ok) {
+            showNotification('Shift moved but tasks could not be unlinked: ' + (unl.error || ''), 'error');
+        }
+    }
+
+    sourceList.splice(idx, 1);
+    if (sourceList.length === 0) delete window.shiftData[sourceStorageKey];
+    bumpEmployeeHoursBucket(sourceStorageKey, oldWeek, -hours);
+
+    entry.day = newDay;
+    entry.shiftDate = targetDateStr;
+    entry.weekStart = newWeek;
+    entry.hours = hours;
+    entry.position = positionLabel;
+
+    if (!window.shiftData[targetStorageKey]) window.shiftData[targetStorageKey] = [];
+    window.shiftData[targetStorageKey].push(entry);
+    bumpEmployeeHoursBucket(targetStorageKey, newWeek, hours);
+
+    const host = targetCell.querySelector('.sched-cell-shifts');
+    if (host) {
+        host.appendChild(card);
+    }
+
+    card.dataset.shiftStorageKey = targetStorageKey;
+    card.dataset.employeeName = targetDisplay;
+    const av = card.querySelector('.employee-avatar');
+    const nm = card.querySelector('.employee-name');
+    if (av) av.textContent = targetDisplay ? targetDisplay.charAt(0).toUpperCase() : '?';
+    if (nm) nm.textContent = targetDisplay;
+
+    const isPastCol = targetDateStr && targetDateStr < getTodayLocalYmd();
+    const hint = card.querySelector('.shift-card-hint');
+    if (hint) {
+        hint.innerHTML = isPastCol
+            ? '<i class="fas fa-eye"></i> Click to view tasks for this shift'
+            : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
+    }
+
+    if (
+        normEmployeeKey(sourceStorageKey) !== normEmployeeKey(targetStorageKey) &&
+        window.supabaseClient &&
+        window.ORG_ID
+    ) {
+        try {
+            const { data: existing } = await window.supabaseClient
+                .from('employee_positions')
+                .select('positions')
+                .eq('org_id', window.ORG_ID)
+                .eq('employee_name', targetDisplay)
+                .maybeSingle();
+            const plist = existing?.positions || [];
+            if (!plist.includes(positionLabel)) {
+                await window.supabaseClient.from('employee_positions').upsert(
+                    {
+                        org_id: window.ORG_ID,
+                        employee_name: targetDisplay,
+                        positions: [...plist, positionLabel],
+                        updated_at: new Date().toISOString(),
+                    },
+                    { onConflict: 'org_id,employee_name' }
+                );
+            }
+        } catch (err) {
+            console.warn('[Drag] employee_positions upsert:', err?.message || err);
+        }
+    }
+
+    updateShiftCardTaskIndicator(card, targetDisplay);
+    persistShiftData();
+    updateMatrixRowHours();
+    showNotification(`Shift moved to ${targetDisplay} on ${formatDateForDisplay(targetDateStr)} (tasks not carried over).`, 'success');
+}
+
+function setupScheduleMatrixDragAndDrop() {
+    const root = document.getElementById('schedule-matrix');
+    if (!root || root.dataset.dragBound === '1') return;
+    root.dataset.dragBound = '1';
+
+    root.addEventListener('dragstart', (e) => {
+        const handle = e.target.closest('.shift-card-drag-handle');
+        if (!handle) return;
+        const card = handle.closest('.shift-card');
+        if (!card) return;
+        const cell = card.closest('.sched-matrix-cell');
+        if (!cell || cell.classList.contains('sched-matrix-cell-past')) {
+            e.preventDefault();
+            return;
+        }
+        const row = card.closest('.sched-matrix-row');
+        const sourceStorageKey =
+            (card.dataset.shiftStorageKey || '').trim() ||
+            (row ? decodeEmployeeKeyAttr(row.getAttribute('data-employee-key')) : '');
+        const start24 = card.dataset.startTime24 || '';
+        const end24 = card.dataset.endTime24 || '';
+        if (!sourceStorageKey || !start24 || !end24) {
+            e.preventDefault();
+            return;
+        }
+        const payload = {
+            shiftId: card.dataset.shiftId || '',
+            sourceStorageKey,
+            start24,
+            end24,
+            positionSlug: card.dataset.positionSlug || '',
+        };
+        try {
+            e.dataTransfer.setData('application/json', JSON.stringify(payload));
+            e.dataTransfer.effectAllowed = 'move';
+        } catch (_) {
+            e.preventDefault();
+            return;
+        }
+        card.classList.add('dragging');
+        root.dataset.dragActiveCardId = String(Math.random());
+        window._kkDragSourceCard = card;
+    });
+
+    root.addEventListener('dragend', (e) => {
+        const handle = e.target.closest('.shift-card-drag-handle');
+        if (!handle) return;
+        const card = handle.closest('.shift-card');
+        if (card) card.classList.remove('dragging');
+        delete root.dataset.dragActiveCardId;
+        delete window._kkDragSourceCard;
+        root.querySelectorAll('.sched-matrix-cell--drop-hover').forEach((c) => c.classList.remove('sched-matrix-cell--drop-hover'));
+    });
+
+    root.addEventListener('dragover', (e) => {
+        const cell = e.target.closest('.sched-matrix-cell');
+        if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+
+    root.addEventListener('dragenter', (e) => {
+        const cell = e.target.closest('.sched-matrix-cell');
+        if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
+        cell.classList.add('sched-matrix-cell--drop-hover');
+    });
+
+    root.addEventListener('dragleave', (e) => {
+        const cell = e.target.closest('.sched-matrix-cell');
+        if (!cell) return;
+        if (!cell.contains(e.relatedTarget)) cell.classList.remove('sched-matrix-cell--drop-hover');
+    });
+
+    root.addEventListener('drop', async (e) => {
+        const cell = e.target.closest('.sched-matrix-cell');
+        if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
+        e.preventDefault();
+        cell.classList.remove('sched-matrix-cell--drop-hover');
+        let payload = null;
+        try {
+            payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
+        } catch (_) {
+            return;
+        }
+        const card = window._kkDragSourceCard;
+        if (!card || !payload.sourceStorageKey) return;
+        await executeShiftDragMove(card, cell, payload);
+    });
+}
+
 async function renderScheduleMatrix() {
     const root = document.getElementById('schedule-matrix');
     if (!root) return;
@@ -1313,6 +1651,7 @@ async function updateScheduleMatrixAndSync() {
     }
     updateMatrixRowHours();
     setupScheduleMatrixDelegation();
+    setupScheduleMatrixDragAndDrop();
 }
 
 /** Legacy name used elsewhere in this file — refresh week matrix + Supabase shifts */
@@ -1336,7 +1675,7 @@ function setupScheduleMatrixDelegation() {
             return;
         }
         const card = e.target.closest('.shift-card');
-        if (!card || e.target.closest('.task-warning')) return;
+        if (!card || e.target.closest('.task-warning') || e.target.closest('.shift-card-drag-handle')) return;
         const cell = card.closest('.sched-matrix-cell');
         const cardDay = cell?.dataset?.day || 'monday';
         const posEl = card.querySelector('.shift-position');
@@ -1745,6 +2084,17 @@ async function populateEmployeeSelectFromOrg() {
     await populatePositionSelect();
 }
 
+/** Collapse known duplicate spellings so the assign-shift list shows one option (DB may still hold the typo). */
+function canonicalPositionLabelForSchedulingDropdown(raw) {
+    const t = String(raw || '').trim();
+    if (!t) return '';
+    const aliases = {
+        sever: 'Server',
+    };
+    const hit = aliases[t.toLowerCase()];
+    return hit || t;
+}
+
 async function populatePositionSelect() {
     const positionSelect = document.getElementById('position-select');
     const shiftDetailsPosition = document.getElementById('shift-details-position');
@@ -1756,10 +2106,13 @@ async function populatePositionSelect() {
 
     let positions = new Set();
 
+    const addPos = (p) => {
+        const c = canonicalPositionLabelForSchedulingDropdown(p);
+        if (c) positions.add(c);
+    };
+
     if (typeof window.kkGetOrgPositionLabelsForScheduling === 'function') {
-        window.kkGetOrgPositionLabelsForScheduling().forEach((p) => {
-            if (p) positions.add(p);
-        });
+        window.kkGetOrgPositionLabelsForScheduling().forEach((p) => addPos(p));
     }
 
     if (window.supabaseClient && window.ORG_ID) {
@@ -1778,7 +2131,7 @@ async function populatePositionSelect() {
             }
             (arr || []).forEach((p) => {
                 const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
-                if (label) positions.add(label);
+                addPos(label);
             });
         });
 
@@ -1787,8 +2140,7 @@ async function populatePositionSelect() {
             .select('position')
             .eq('org_id', window.ORG_ID);
         (shiftRows || []).forEach((row) => {
-            const label = String(row?.position || '').trim();
-            if (label) positions.add(label);
+            addPos(String(row?.position || '').trim());
         });
     }
 
@@ -2330,6 +2682,8 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
         if (weekStartStr === visibleWeekStartStr) {
             card = createShiftCard(storageKey, position, formattedTime, dayKey, shiftHours, positionLabel, {
                 compact: true,
+                start24: startTime,
+                end24: endTime,
             });
         }
         metaByIndex.push({ card, shiftDate, dayKey, weekStartStr });
@@ -2722,7 +3076,8 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     const compact = !!(options && options.compact);
     // Create shift card
     const shiftCard = document.createElement('div');
-    shiftCard.className = `shift-card ${String(position || '').replace(/\s+/g, '-').toLowerCase()}`;
+    const posSlug = String(position || '').replace(/\s+/g, '-').toLowerCase();
+    shiftCard.className = `shift-card ${posSlug}`;
     if (compact) shiftCard.classList.add('shift-card--compact');
     
     const employeeNames = {
@@ -2760,6 +3115,14 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
             .replace(/-/g, ' ')
             .replace(/\b\w/g, (c) => c.toUpperCase());
 
+    let start24 = options.start24;
+    let end24 = options.end24;
+    if (!start24 || !end24) {
+        const parts = String(time || '').split('-').map((s) => s.trim());
+        start24 = parts[0] ? parseTo24h(parts[0]) : '';
+        end24 = parts[1] ? parseTo24h(parts[1]) : '';
+    }
+
     const dayColumn = findScheduleCell(day, matrixEmp || bucketName);
     if (!dayColumn) {
         console.warn('[Scheduling] No schedule cell for employee', bucketName, 'day', day);
@@ -2775,18 +3138,27 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
         : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
     
     shiftCard.innerHTML = `
-        <div class="shift-header">
-            <span class="shift-position">${escapeHtml(prettyPos)}</span>
-            <span class="shift-time">${escapeHtml(time)}</span>
+        <span class="shift-card-drag-handle" draggable="true" title="Drag to another day or employee" aria-label="Drag to move shift">
+            <i class="fas fa-grip-vertical" aria-hidden="true"></i>
+        </span>
+        <div class="shift-card-body">
+            <div class="shift-header">
+                <span class="shift-position">${escapeHtml(prettyPos)}</span>
+                <span class="shift-time">${escapeHtml(time)}</span>
+            </div>
+            <div class="shift-employee">
+                <div class="employee-avatar">${bucketName ? bucketName.charAt(0).toUpperCase() : '?'}</div>
+                <span class="employee-name">${escapeHtml(bucketName)}</span>
+            </div>
+            <div class="shift-card-hint">${hintHtml}</div>
         </div>
-        <div class="shift-employee">
-            <div class="employee-avatar">${bucketName ? bucketName.charAt(0).toUpperCase() : '?'}</div>
-            <span class="employee-name">${escapeHtml(bucketName)}</span>
-        </div>
-        <div class="shift-card-hint">${hintHtml}</div>
     `;
 
     shiftCard.dataset.employeeName = bucketName;
+    shiftCard.dataset.shiftStorageKey = rawEmp || matrixEmp || bucketName;
+    shiftCard.dataset.startTime24 = start24;
+    shiftCard.dataset.endTime24 = end24;
+    shiftCard.dataset.positionSlug = posSlug;
 
     // Check if employee has tasks and update visual indicator
     updateShiftCardTaskIndicator(shiftCard, bucketName);
@@ -3056,7 +3428,7 @@ function setupShiftInteractions() {
         card.dataset.hasShiftDetailsHandler = 'true';
 
         card.addEventListener('click', function(e) {
-            if (e.target.closest('.task-warning')) return;
+            if (e.target.closest('.task-warning') || e.target.closest('.shift-card-drag-handle')) return;
             const dayColumn = card.closest('.sched-matrix-cell');
             const cardDay = dayColumn?.dataset.day || 'monday';
             const posEl = card.querySelector('.shift-position');

@@ -68,6 +68,18 @@ async function registerForPushNotifications(orgId, employeeName, userEmail) {
     return;
   }
 
+  // Android: create channel before token / pushes so FCM uses MAX importance + vibration.
+  if (Platform.OS === 'android') {
+    await N.setNotificationChannelAsync('default', {
+      name: 'Sheek',
+      importance: N.AndroidImportance.MAX,
+      vibrationPattern: [0, 400, 200, 400],
+      enableVibrate: true,
+      showBadge: true,
+      sound: 'default',
+    });
+  }
+
   try {
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ??
@@ -106,14 +118,6 @@ async function registerForPushNotifications(orgId, employeeName, userEmail) {
     else console.log('[Notifications] Push token saved:', token);
   } catch (e) {
     console.warn('[Notifications] Could not get push token:', e.message);
-  }
-
-  if (Platform.OS === 'android') {
-    N.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: N.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-    });
   }
 }
 

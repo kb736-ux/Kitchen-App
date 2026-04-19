@@ -835,6 +835,8 @@ function handleSendDM() {
                                 body: JSON.stringify({
                                     to: tokenRow.token,
                                     sound: 'default',
+                                    priority: 'high',
+                                    channelId: 'default',
                                     title: `New message from ${currentSender.senderDisplay}`,
                                     body: message,
                                     data: { type: 'chat_message', channelId: recipientThreadId }
@@ -1303,6 +1305,8 @@ function handleSendMessage() {
                                 body: JSON.stringify({
                                     to: token,
                                     sound: 'default',
+                                    priority: 'high',
+                                    channelId: 'default',
                                     title: chatType === 'group' || chatType === 'announcements' ? `New message in ${chatType === 'group' ? 'group' : 'announcements'} from ${currentSender.senderDisplay}` : `New message from ${currentSender.senderDisplay}`,
                                     body: message,
                                     data: { type: 'chat_message', channelId: chatId }
