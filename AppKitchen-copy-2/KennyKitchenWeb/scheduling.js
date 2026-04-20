@@ -55,6 +55,9 @@ function persistShiftData() {
 if (typeof window.calendarShiftsByDate === 'undefined') {
     window.calendarShiftsByDate = {};
 }
+if (typeof window.calendarApprovedTimeOffByDate === 'undefined') {
+    window.calendarApprovedTimeOffByDate = {};
+}
 
 // ── Announcements ─────────────────────────────────────────────────────────────
 async function loadRecentAnnouncements() {
@@ -1273,17 +1276,61 @@ async function validateShiftDropTarget(targetStorageKey, targetDateStr, start24,
     return { ok: true, targetDisplay };
 }
 
-async function unlinkTasksFromShiftForDrag(shiftId) {
-    if (!shiftId || !window.supabaseClient || !window.ORG_ID) return { ok: true };
-    const { error } = await window.supabaseClient
-        .from('tasks')
-        .update({ shift_id: null })
-        .eq('org_id', window.ORG_ID)
-        .eq('shift_id', shiftId);
-    if (error && !/shift_id|column|does not exist|42703/i.test(error.message || '')) {
-        return { ok: false, error: error.message };
+async function listDuplicableTasksForShift(sourceDisplayName, sourceShiftId) {
+    const seen = new Set();
+    const out = [];
+    const addText = (text) => {
+        const t = String(text || '').trim();
+        if (!t) return;
+        const key = t.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(t);
+    };
+
+    if (sourceShiftId && window.supabaseClient && window.ORG_ID) {
+        try {
+            const { data, error } = await window.supabaseClient
+                .from('tasks')
+                .select('text, status, completed_at')
+                .eq('org_id', window.ORG_ID)
+                .eq('shift_id', sourceShiftId);
+            if (!error && data?.length) {
+                data.forEach((row) => {
+                    if (!schedulingTaskRowCompleted(row)) addText(row.text);
+                });
+            }
+        } catch (e) {
+            console.warn('[DragDuplicate] task lookup failed:', e?.message || e);
+        }
     }
-    return { ok: true };
+
+    if (typeof window.kitchenTasks !== 'undefined' && Array.isArray(window.kitchenTasks)) {
+        window.kitchenTasks.forEach((task) => {
+            if (schedulingTaskRowCompleted(task)) return;
+            if (!task.assignee || !assigneeMatchesEmployeeName(task.assignee, sourceDisplayName)) return;
+            if (!sourceShiftId || String(task.shift_id || '') !== String(sourceShiftId)) return;
+            addText(task.description);
+        });
+    }
+
+    return out;
+}
+
+async function duplicateTasksForShift(employeeName, newShiftId, taskDescriptions) {
+    let failed = 0;
+    let lastErr = '';
+    for (const desc of taskDescriptions || []) {
+        const r = await addTaskToProgress(employeeName, desc, {
+            shiftId: newShiftId || null,
+            suppressNotify: true,
+        });
+        if (r && r.ok === false) {
+            failed += 1;
+            lastErr = r.error || '';
+        }
+    }
+    return { failed, lastErr };
 }
 
 async function executeShiftDragMove(card, targetCell, dragPayload) {
@@ -1291,11 +1338,11 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
     const targetStorageKey = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-employee-name'));
     const start24 = dragPayload.start24;
     const end24 = dragPayload.end24;
-    const excludeShiftId = dragPayload.shiftId || null;
+    const sourceShiftId = dragPayload.shiftId || null;
     const sourceStorageKey = dragPayload.sourceStorageKey;
 
     if (!targetDateStr || !targetStorageKey || !start24 || !end24 || !sourceStorageKey) {
-        showNotification('Could not move shift (missing data).', 'error');
+        showNotification('Could not duplicate shift (missing data).', 'error');
         return;
     }
     const sourceCell = card.closest('.sched-matrix-cell');
@@ -1307,7 +1354,7 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
         return;
     }
 
-    const v = await validateShiftDropTarget(targetStorageKey, targetDateStr, start24, end24, excludeShiftId);
+    const v = await validateShiftDropTarget(targetStorageKey, targetDateStr, start24, end24, null);
     if (!v.ok) {
         showNotification(v.message, 'error');
         return;
@@ -1321,8 +1368,8 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
         return;
     }
     let idx = -1;
-    if (excludeShiftId) {
-        idx = sourceList.findIndex((s) => s.shiftId && String(s.shiftId) === String(excludeShiftId));
+    if (sourceShiftId) {
+        idx = sourceList.findIndex((s) => s.shiftId && String(s.shiftId) === String(sourceShiftId));
     }
     if (idx === -1) {
         const srcDay = sourceCell?.dataset?.day;
@@ -1336,74 +1383,77 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
         );
     }
     if (idx === -1) {
-        showNotification('Could not find this shift to move.', 'error');
+        showNotification('Could not find this shift to duplicate.', 'error');
         return;
     }
 
-    const entry = { ...sourceList[idx] };
-    const hours = entry.hours != null ? entry.hours : calculateShiftHours(start24, end24);
-    const oldWeek = entry.weekStart;
+    const sourceEntry = { ...sourceList[idx] };
+    const hours = sourceEntry.hours != null ? sourceEntry.hours : calculateShiftHours(start24, end24);
     const newWeek = getWeekStart(new Date(targetDateStr + 'T12:00:00'));
     const newDay = getDayKeyForDate(targetDateStr);
     const positionLabel =
-        typeof entry.position === 'string' && entry.position.trim()
-            ? entry.position.trim()
+        typeof sourceEntry.position === 'string' && sourceEntry.position.trim()
+            ? sourceEntry.position.trim()
             : (card.querySelector('.shift-position')?.textContent || '').trim() || 'Line Cook';
+    const positionSlug =
+        dragPayload.positionSlug ||
+        String(positionLabel || 'line-cook').toLowerCase().replace(/\s+/g, '-');
+    const sourceDisplay =
+        (card.dataset.employeeName || card.querySelector('.employee-name')?.textContent || '').trim() ||
+        (typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(sourceStorageKey) : sourceStorageKey);
+    let newShiftId = null;
 
-    if (excludeShiftId && window.supabaseClient && window.ORG_ID) {
+    if (window.supabaseClient && window.ORG_ID) {
         const empId =
             typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(targetDisplay) : null;
-        const { error: updErr } = await window.supabaseClient
+        const { data: insRows, error: insErr } = await window.supabaseClient
             .from('shifts')
-            .update({
+            .insert({
+                org_id: window.ORG_ID,
                 shift_date: targetDateStr,
+                start_time: start24,
+                end_time: end24,
+                position: positionLabel,
                 employee_name: targetDisplay,
                 employee_id: empId,
             })
-            .eq('id', excludeShiftId);
-        if (updErr) {
-            showNotification('Could not update shift: ' + updErr.message, 'error');
+            .select('id')
+            .limit(1);
+        if (insErr) {
+            showNotification('Could not duplicate shift: ' + insErr.message, 'error');
             return;
         }
-        const unl = await unlinkTasksFromShiftForDrag(excludeShiftId);
-        if (!unl.ok) {
-            showNotification('Shift moved but tasks could not be unlinked: ' + (unl.error || ''), 'error');
-        }
+        newShiftId = insRows?.[0]?.id || null;
     }
 
-    sourceList.splice(idx, 1);
-    if (sourceList.length === 0) delete window.shiftData[sourceStorageKey];
-    bumpEmployeeHoursBucket(sourceStorageKey, oldWeek, -hours);
-
-    entry.day = newDay;
-    entry.shiftDate = targetDateStr;
-    entry.weekStart = newWeek;
-    entry.hours = hours;
-    entry.position = positionLabel;
+    const entry = {
+        ...sourceEntry,
+        day: newDay,
+        shiftDate: targetDateStr,
+        weekStart: newWeek,
+        hours,
+        position: positionLabel,
+    };
+    if (newShiftId) entry.shiftId = newShiftId;
+    else delete entry.shiftId;
 
     if (!window.shiftData[targetStorageKey]) window.shiftData[targetStorageKey] = [];
     window.shiftData[targetStorageKey].push(entry);
     bumpEmployeeHoursBucket(targetStorageKey, newWeek, hours);
 
-    const host = targetCell.querySelector('.sched-cell-shifts');
-    if (host) {
-        host.appendChild(card);
+    const formattedTime = `${formatTo12h(start24)} - ${formatTo12h(end24)}`;
+    const newCard = createShiftCard(targetStorageKey, positionSlug, formattedTime, newDay, hours, positionLabel, {
+        compact: true,
+        start24,
+        end24,
+    });
+    if (!newCard) {
+        persistShiftData();
+        updateMatrixRowHours();
+        showNotification(`Shift duplicated for ${targetDisplay}, but the new card could not be rendered.`, 'warning');
+        return;
     }
-
-    card.dataset.shiftStorageKey = targetStorageKey;
-    card.dataset.employeeName = targetDisplay;
-    const av = card.querySelector('.employee-avatar');
-    const nm = card.querySelector('.employee-name');
-    if (av) av.textContent = targetDisplay ? targetDisplay.charAt(0).toUpperCase() : '?';
-    if (nm) nm.textContent = targetDisplay;
-
-    const isPastCol = targetDateStr && targetDateStr < getTodayLocalYmd();
-    const hint = card.querySelector('.shift-card-hint');
-    if (hint) {
-        hint.innerHTML = isPastCol
-            ? '<i class="fas fa-eye"></i> Click to view tasks for this shift'
-            : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
-    }
+    if (newShiftId) newCard.dataset.shiftId = newShiftId;
 
     if (
         normEmployeeKey(sourceStorageKey) !== normEmployeeKey(targetStorageKey) &&
@@ -1434,10 +1484,31 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
         }
     }
 
-    updateShiftCardTaskIndicator(card, targetDisplay);
+    let taskCopyMessage = '';
+    const duplicableTasks = sourceShiftId ? await listDuplicableTasksForShift(sourceDisplay, sourceShiftId) : [];
+    if (newShiftId && duplicableTasks.length) {
+        const shouldCopy = window.confirm(
+            `Duplicate ${duplicableTasks.length} task${duplicableTasks.length === 1 ? '' : 's'} for this copied shift too?`
+        );
+        if (shouldCopy) {
+            const copyRes = await duplicateTasksForShift(targetDisplay, newShiftId, duplicableTasks);
+            if (copyRes.failed > 0) {
+                taskCopyMessage = ` ${duplicableTasks.length - copyRes.failed} task(s) copied, ${copyRes.failed} failed.`;
+            } else {
+                taskCopyMessage = ` ${duplicableTasks.length} task(s) copied too.`;
+            }
+        } else {
+            taskCopyMessage = ' Tasks were not copied.';
+        }
+    }
+
+    updateShiftCardTaskIndicator(newCard, targetDisplay);
     persistShiftData();
     updateMatrixRowHours();
-    showNotification(`Shift moved to ${targetDisplay} on ${formatDateForDisplay(targetDateStr)} (tasks not carried over).`, 'success');
+    showNotification(
+        `Shift duplicated to ${targetDisplay} on ${formatDateForDisplay(targetDateStr)}.${taskCopyMessage}`,
+        'success'
+    );
 }
 
 function setupScheduleMatrixDragAndDrop() {
@@ -1474,7 +1545,7 @@ function setupScheduleMatrixDragAndDrop() {
         };
         try {
             e.dataTransfer.setData('application/json', JSON.stringify(payload));
-            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.effectAllowed = 'copy';
         } catch (_) {
             e.preventDefault();
             return;
@@ -1498,7 +1569,7 @@ function setupScheduleMatrixDragAndDrop() {
         const cell = e.target.closest('.sched-matrix-cell');
         if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+        e.dataTransfer.dropEffect = 'copy';
     });
 
     root.addEventListener('dragenter', (e) => {
@@ -1723,7 +1794,10 @@ function setupModalHandlers() {
             openModal('calendar-history-modal');
             hideDayPopup();
             renderCalendar(calendarViewMonth);
-            loadCalendarShiftsFromSupabase(calendarViewMonth).then(() => renderCalendar(calendarViewMonth));
+            Promise.all([
+                loadCalendarShiftsFromSupabase(calendarViewMonth),
+                loadCalendarApprovedTimeOffFromSupabase(calendarViewMonth),
+            ]).then(() => renderCalendar(calendarViewMonth));
         });
     }
     const calendarPrevBtn = document.getElementById('calendar-prev-month');
@@ -1731,13 +1805,19 @@ function setupModalHandlers() {
     if (calendarPrevBtn) {
         calendarPrevBtn.addEventListener('click', () => {
             calendarViewMonth.setMonth(calendarViewMonth.getMonth() - 1);
-            loadCalendarShiftsFromSupabase(calendarViewMonth).then(() => renderCalendar(calendarViewMonth));
+            Promise.all([
+                loadCalendarShiftsFromSupabase(calendarViewMonth),
+                loadCalendarApprovedTimeOffFromSupabase(calendarViewMonth),
+            ]).then(() => renderCalendar(calendarViewMonth));
         });
     }
     if (calendarNextBtn) {
         calendarNextBtn.addEventListener('click', () => {
             calendarViewMonth.setMonth(calendarViewMonth.getMonth() + 1);
-            loadCalendarShiftsFromSupabase(calendarViewMonth).then(() => renderCalendar(calendarViewMonth));
+            Promise.all([
+                loadCalendarShiftsFromSupabase(calendarViewMonth),
+                loadCalendarApprovedTimeOffFromSupabase(calendarViewMonth),
+            ]).then(() => renderCalendar(calendarViewMonth));
         });
     }
     const calendarDayPopupClose = document.getElementById('calendar-day-popup-close');
@@ -2857,6 +2937,55 @@ async function loadCalendarShiftsFromSupabase(monthDate) {
     });
 }
 
+async function loadCalendarApprovedTimeOffFromSupabase(monthDate) {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const first = new Date(year, month, 1);
+    const last = new Date(year, month + 1, 0);
+    const startStr = formatLocalYmd(first);
+    const endStr = formatLocalYmd(last);
+    const { data: rows, error } = await window.supabaseClient
+        .from('shift_requests')
+        .select('employee_name, time_off_start_date, time_off_end_date')
+        .eq('org_id', window.ORG_ID)
+        .eq('status', 'approved')
+        .eq('request_type', 'time_off');
+    if (error) {
+        console.warn('[Supabase] loadCalendarApprovedTimeOffFromSupabase failed:', error.message);
+        return;
+    }
+    if (!window.calendarApprovedTimeOffByDate) window.calendarApprovedTimeOffByDate = {};
+    for (let d = new Date(first.getTime()); d <= last; d.setDate(d.getDate() + 1)) {
+        const ds = formatLocalYmd(d);
+        delete window.calendarApprovedTimeOffByDate[ds];
+    }
+    (rows || []).forEach((row) => {
+        const employeeName = String(row.employee_name || '').trim();
+        const start = row.time_off_start_date;
+        const end = row.time_off_end_date || start;
+        if (!employeeName || !start || !end) return;
+        const clippedStart = start < startStr ? startStr : start;
+        const clippedEnd = end > endStr ? endStr : end;
+        if (clippedStart > clippedEnd) return;
+        for (
+            let d = new Date(clippedStart + 'T12:00:00');
+            formatLocalYmd(d) <= clippedEnd;
+            d.setDate(d.getDate() + 1)
+        ) {
+            const ds = formatLocalYmd(d);
+            if (!window.calendarApprovedTimeOffByDate[ds]) window.calendarApprovedTimeOffByDate[ds] = [];
+            window.calendarApprovedTimeOffByDate[ds].push(employeeName);
+        }
+    });
+}
+
+function getCalendarApprovedTimeOffForDate(dateStr) {
+    return Array.isArray(window.calendarApprovedTimeOffByDate?.[dateStr])
+        ? window.calendarApprovedTimeOffByDate[dateStr]
+        : [];
+}
+
 // Get all shifts for a given date (YYYY-MM-DD): prefer Supabase-loaded calendar cache, else shiftData
 function getShiftsForDate(dateStr) {
     if (window.calendarShiftsByDate && window.calendarShiftsByDate[dateStr] && window.calendarShiftsByDate[dateStr].length > 0) {
@@ -2917,13 +3046,23 @@ function renderCalendar(monthDate) {
     for (let day = 1; day <= daysInMonth; day++) {
         const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
         const shifts = getShiftsForDate(dateStr);
+        const approvedTimeOff = getCalendarApprovedTimeOffForDate(dateStr);
         const isToday = dateStr === todayStr;
         const hasShifts = shifts.length > 0;
-        const classes = ['calendar-day', hasShifts ? 'calendar-day-has-shifts' : '', isToday ? 'calendar-day-today' : ''].filter(Boolean).join(' ');
+        const hasApprovedTimeOff = approvedTimeOff.length > 0;
+        const classes = [
+            'calendar-day',
+            hasShifts ? 'calendar-day-has-shifts' : '',
+            hasApprovedTimeOff ? 'calendar-day-has-time-off' : '',
+            isToday ? 'calendar-day-today' : '',
+        ].filter(Boolean).join(' ');
         html += `<td class="${classes}" data-date="${dateStr}" role="button" tabindex="0">`;
         html += `<span class="calendar-day-num">${day}</span>`;
         if (hasShifts) {
             html += `<span class="calendar-day-dot" aria-hidden="true"></span>`;
+        }
+        if (hasApprovedTimeOff) {
+            html += `<span class="calendar-day-time-off-dot" aria-hidden="true"></span>`;
         }
         html += '</td>';
         cellIndex++;
@@ -2961,8 +3100,9 @@ function showDayPopup(dateStr) {
     const isToday = dateStr === getTodayLocalYmd();
     titleEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + (isToday ? ' (Today)' : '');
     const shifts = getShiftsForDate(dateStr);
-    if (shifts.length === 0) {
-        contentEl.innerHTML = '<p class="calendar-day-no-shifts">No shifts recorded for this day.</p>';
+    const approvedTimeOff = getCalendarApprovedTimeOffForDate(dateStr);
+    if (shifts.length === 0 && approvedTimeOff.length === 0) {
+        contentEl.innerHTML = '<p class="calendar-day-no-shifts">No shifts or approved time off recorded for this day.</p>';
     } else {
         const formatTime12 = (time24) => {
             const [h, m] = (time24 || '00:00').split(':').map(Number);
@@ -2970,10 +3110,32 @@ function showDayPopup(dateStr) {
             const ampm = h >= 12 ? 'pm' : 'am';
             return m ? `${h12}:${String(m).padStart(2, '0')}${ampm}` : `${h12}${ampm}`;
         };
-        contentEl.innerHTML = '<ul class="calendar-day-employee-list">' + shifts.map(s => {
-            const timeStr = `${formatTime12(s.startTime)} – ${formatTime12(s.endTime)}`;
-            return `<li><strong>${escapeHtml(s.employeeName)}</strong> — ${timeStr} <span class="calendar-day-hours">(${Number(s.hours).toFixed(1)}h)</span></li>`;
-        }).join('') + '</ul>';
+        const parts = [];
+        if (approvedTimeOff.length > 0) {
+            const names = [...new Set(approvedTimeOff.map((name) => String(name || '').trim()).filter(Boolean))];
+            parts.push(
+                '<div class="calendar-day-section calendar-day-section-time-off">' +
+                    '<div class="calendar-day-section-title">Approved Time Off</div>' +
+                    '<ul class="calendar-day-employee-list">' +
+                    names.map((name) => `<li><strong>${escapeHtml(name)}</strong> — off</li>`).join('') +
+                    '</ul>' +
+                '</div>'
+            );
+        }
+        if (shifts.length > 0) {
+            parts.push(
+                '<div class="calendar-day-section">' +
+                    '<div class="calendar-day-section-title">Shifts</div>' +
+                    '<ul class="calendar-day-employee-list">' +
+                    shifts.map(s => {
+                        const timeStr = `${formatTime12(s.startTime)} – ${formatTime12(s.endTime)}`;
+                        return `<li><strong>${escapeHtml(s.employeeName)}</strong> — ${timeStr} <span class="calendar-day-hours">(${Number(s.hours).toFixed(1)}h)</span></li>`;
+                    }).join('') +
+                    '</ul>' +
+                '</div>'
+            );
+        }
+        contentEl.innerHTML = parts.join('');
     }
     popup.hidden = false;
 }
@@ -4340,6 +4502,7 @@ function schedulingTaskRowCompleted(task) {
 // Add task to Kitchen Progress section (shared function). Returns { ok, error?, skipped?, localOnly? }.
 async function addTaskToProgress(employeeName, taskDescription, options = {}) {
     const shiftIdOpt = options && options.shiftId ? String(options.shiftId) : null;
+    const suppressNotify = !!(options && options.suppressNotify);
     if (typeof window.kitchenTasks === 'undefined') {
         window.kitchenTasks = [];
     }
@@ -4440,7 +4603,7 @@ async function addTaskToProgress(employeeName, taskDescription, options = {}) {
         } catch (_) {}
 
         if (typeof loadStoredTasks === 'function') loadStoredTasks();
-        notifyTaskAssigned(employeeName, taskDescription);
+        if (!suppressNotify) notifyTaskAssigned(employeeName, taskDescription);
     }
     return { ok: true };
 }
