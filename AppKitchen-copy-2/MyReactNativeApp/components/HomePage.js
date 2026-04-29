@@ -78,6 +78,8 @@ const HomePage = ({
   const { employeeName, displayName, employeeId, authUserId, email, firstName, lastName, defaultEmployeeName, authLoading } = useEmployee();
   const welcomeName = (profileData?.displayName || displayName || employeeName || '').trim() || employeeName;
   const [shiftDates, setShiftDates] = useState(new Set());
+  /** YYYY-MM-DD in visible week where current user has approved time off */
+  const [timeOffDates, setTimeOffDates] = useState(new Set());
   const [announcements, setAnnouncements] = useState([]);
   const [recentRequests, setRecentRequests] = useState([]);
   const [newShiftNotifCount, setNewShiftNotifCount] = useState(0);
@@ -94,6 +96,7 @@ const HomePage = ({
   useEffect(() => {
     if (!orgId || authLoading) return;
     fetchWeekShifts();
+    fetchApprovedTimeOffWeek();
     fetchAnnouncements();
     fetchRecentRequests();
     fetchNewShiftNotifCount();
@@ -119,6 +122,7 @@ const HomePage = ({
       if (state === 'active' && orgId) {
         fetchNewShiftNotifCount();
         fetchRecentRequests();
+        fetchApprovedTimeOffWeek();
       }
     });
     return () => sub?.remove();
@@ -181,23 +185,9 @@ const HomePage = ({
     setAvatarLoadFailed(false);
   }, [profileData?.avatarUrl]);
 
-  async function fetchWeekShifts() {
-    const today = new Date();
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-
-    const { data } = await supabase
-      .from('shifts')
-      .select('shift_date, employee_name, employee_id')
-      .eq('org_id', orgId)
-      .gte('shift_date', fmt(monday))
-      .lte('shift_date', fmt(sunday));
-
+  function buildHomeNameCandidates() {
     const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
-    const candidates = Array.from(
+    return Array.from(
       new Set(
         [
           employeeName,
@@ -214,11 +204,90 @@ const HomePage = ({
           .filter(Boolean)
       )
     );
+  }
+
+  function getVisibleWeekRange() {
+    const today = new Date();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { monday, sunday, weekStart: fmt(monday), weekEnd: fmt(sunday), fmt };
+  }
+
+  async function fetchWeekShifts() {
+    const { monday, sunday, fmt } = getVisibleWeekRange();
+
+    const { data } = await supabase
+      .from('shifts')
+      .select('shift_date, employee_name, employee_id')
+      .eq('org_id', orgId)
+      .gte('shift_date', fmt(monday))
+      .lte('shift_date', fmt(sunday));
+
+    const candidates = buildHomeNameCandidates();
     const dates = new Set();
     (data || []).forEach((row) => {
       if (shiftRowMatchesEmployee(row, employeeId, candidates, authUserId)) dates.add(row.shift_date);
     });
     setShiftDates(dates);
+  }
+
+  async function fetchApprovedTimeOffWeek() {
+    if (!orgId || authLoading) return;
+    const { weekStart, weekEnd, fmt } = getVisibleWeekRange();
+    const candidates = buildHomeNameCandidates();
+
+    const { data, error } = await supabase
+      .from('shift_requests')
+      .select('employee_name, time_off_start_date, time_off_end_date, status')
+      .eq('org_id', orgId)
+      .eq('request_type', 'time_off')
+      .in('status', ['approved', 'accepted']);
+
+    if (error) {
+      console.warn('[Home] fetchApprovedTimeOffWeek failed:', error.message);
+      setTimeOffDates(new Set());
+      return;
+    }
+
+    const dates = new Set();
+    (data || []).forEach((row) => {
+      if (
+        !shiftRowMatchesEmployee(
+          { employee_name: row.employee_name, employee_id: null },
+          employeeId,
+          candidates,
+          authUserId
+        )
+      ) {
+        return;
+      }
+      const start = row.time_off_start_date;
+      const end = row.time_off_end_date || start;
+      if (!start) return;
+      let s = start;
+      let e = end;
+      if (s > e) {
+        const t = s;
+        s = e;
+        e = t;
+      }
+      const clipStart = s < weekStart ? weekStart : s;
+      const clipEnd = e > weekEnd ? weekEnd : e;
+      if (clipStart > clipEnd) return;
+
+      let curStr = clipStart;
+      while (curStr <= clipEnd) {
+        dates.add(curStr);
+        const next = new Date(curStr + 'T12:00:00');
+        next.setDate(next.getDate() + 1);
+        curStr = fmt(next);
+      }
+    });
+    setTimeOffDates(dates);
   }
 
   async function fetchAnnouncements() {
@@ -450,6 +519,8 @@ const HomePage = ({
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const isShiftDay = !!todayShift;
+  const todayYmd = weekDates.find((w) => w.isToday)?.dateStr || '';
+  const isApprovedTimeOffToday = !!(todayYmd && timeOffDates.has(todayYmd));
   /** Task progress / urgent only on scheduled shift days (tasks are hidden when off shift). */
   const showWorkMode = isShiftDay;
   const urgentTasks = showWorkMode ? (urgentTasksProp || []).filter(t => t.is_urgent && !t.completed) : [];
@@ -500,6 +571,7 @@ const HomePage = ({
       <View style={styles.weekContainer}>
         {weekDates.map((item, i) => {
           const hasShift = shiftDates.has(item.dateStr);
+          const hasTimeOff = timeOffDates.has(item.dateStr);
           return (
             <TouchableOpacity
               key={i}
@@ -508,12 +580,22 @@ const HomePage = ({
               activeOpacity={0.7}
             >
               <Text style={styles.dayText}>{item.day}</Text>
-              <View style={[
-                styles.dateCircle,
-                hasShift && styles.dateCircleShift,
-                item.isToday && styles.dateCircleToday,
-              ]}>
-                <Text style={[styles.dateNum, (hasShift || item.isToday) && styles.dateNumActive]}>
+              <View
+                style={[
+                  styles.dateCircle,
+                  hasShift && styles.dateCircleShift,
+                  hasTimeOff && !hasShift && styles.dateCircleTimeOff,
+                  item.isToday && !hasShift && !hasTimeOff && styles.dateCircleToday,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dateNum,
+                    hasShift && styles.dateNumActive,
+                    hasTimeOff && !hasShift && styles.dateNumActive,
+                    item.isToday && !hasShift && !hasTimeOff && styles.dateNumActive,
+                  ]}
+                >
                   {item.date}
                 </Text>
               </View>
@@ -738,11 +820,17 @@ const HomePage = ({
               })
             )}
           </View>
-        ) : (
+        ) : isApprovedTimeOffToday ? (
           <View style={styles.offDayCard}>
             <Text style={styles.offDayEmoji}>☀️</Text>
             <Text style={styles.offDayTitle}>You're off today</Text>
-            <Text style={styles.offDaySub}>No shifts scheduled — enjoy your time off!</Text>
+            <Text style={styles.offDaySub}>Approved time off — enjoy your day!</Text>
+          </View>
+        ) : (
+          <View style={styles.offDayCard}>
+            <Text style={styles.offDayEmoji}>📅</Text>
+            <Text style={styles.offDayTitle}>No shift today</Text>
+            <Text style={styles.offDaySub}>You're not scheduled for a shift. Open Schedule to see the full calendar.</Text>
           </View>
         )}
 
@@ -907,6 +995,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   dateCircleShift: { backgroundColor: '#4CAF50' },
+  dateCircleTimeOff: { backgroundColor: '#e53e3e' },
   dateCircleToday: { backgroundColor: '#2d3748' },
   dateNum: { fontSize: 15, fontWeight: '600', color: '#2d3748' },
   dateNumActive: { color: 'white' },

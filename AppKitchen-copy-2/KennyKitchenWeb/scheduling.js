@@ -1333,6 +1333,101 @@ async function duplicateTasksForShift(employeeName, newShiftId, taskDescriptions
     return { failed, lastErr };
 }
 
+/** Safari / some browsers need text/plain; application/json may be empty on drop. */
+function parseScheduleDragPayload(dataTransfer) {
+    if (!dataTransfer) return null;
+    const tryParse = (raw) => {
+        if (!raw || typeof raw !== 'string') return null;
+        const s = raw.trim();
+        if (!s) return null;
+        try {
+            return JSON.parse(s);
+        } catch (_) {
+            return null;
+        }
+    };
+    return (
+        tryParse(dataTransfer.getData('application/json')) ||
+        tryParse(dataTransfer.getData('text/plain'))
+    );
+}
+
+/**
+ * shiftData may be keyed by roster slug, display name, or matrix row key — resolve the bucket + row index.
+ * Duplicate flow only reads the row; it does not remove from the source bucket.
+ */
+function findShiftSourceEntryForDuplicate(sourceStorageKey, sourceShiftId, sourceCell, start24, end24) {
+    const rs = normShiftTimeHM;
+    const srcDay = sourceCell?.dataset?.day;
+    const sourceDateStr = sourceCell?.dataset?.date;
+    const srcWeek = sourceDateStr ? getWeekStart(new Date(sourceDateStr + 'T12:00:00')) : '';
+
+    const candidateKeys = new Set();
+    if (sourceStorageKey) candidateKeys.add(sourceStorageKey);
+    const disp =
+        typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(sourceStorageKey) : '';
+    if (disp) candidateKeys.add(disp);
+    Object.keys(window.shiftData || {}).forEach((k) => {
+        if (!k) return;
+        if (normEmployeeKey(k) === normEmployeeKey(sourceStorageKey)) candidateKeys.add(k);
+        if (disp && normEmployeeKey(k) === normEmployeeKey(disp)) candidateKeys.add(k);
+    });
+
+    for (const key of candidateKeys) {
+        const sourceList = window.shiftData[key];
+        if (!Array.isArray(sourceList)) continue;
+        let idx = -1;
+        if (sourceShiftId) {
+            idx = sourceList.findIndex((s) => s.shiftId && String(s.shiftId) === String(sourceShiftId));
+        }
+        if (idx === -1 && srcDay && srcWeek) {
+            idx = sourceList.findIndex(
+                (s) =>
+                    s.day === srcDay &&
+                    s.weekStart === srcWeek &&
+                    rs(s.startTime) === rs(start24) &&
+                    rs(s.endTime) === rs(end24)
+            );
+        }
+        if (idx !== -1) return { sourceList, idx, resolvedKey: key };
+    }
+    return null;
+}
+
+function clearScheduleDuplicateAwaitMode() {
+    window._kkDuplicateAwait = null;
+    document.body.classList.remove('sched-await-duplicate-drop');
+}
+
+function enterScheduleDuplicateAwaitModeFromCard(card) {
+    if (!card) return;
+    const cell = card.closest('.sched-matrix-cell');
+    if (!cell || cell.classList.contains('sched-matrix-cell-past')) {
+        showNotification('Cannot copy a shift from a past day.', 'error');
+        return;
+    }
+    const row = card.closest('.sched-matrix-row');
+    const sourceStorageKey =
+        (card.dataset.shiftStorageKey || '').trim() ||
+        (row ? decodeEmployeeKeyAttr(row.getAttribute('data-employee-key')) : '');
+    const start24 = card.dataset.startTime24 || '';
+    const end24 = card.dataset.endTime24 || '';
+    if (!sourceStorageKey || !start24 || !end24) {
+        showNotification('This shift is missing copy data. Refresh the page and try again.', 'error');
+        return;
+    }
+    const payload = {
+        shiftId: card.dataset.shiftId || '',
+        sourceStorageKey,
+        start24,
+        end24,
+        positionSlug: card.dataset.positionSlug || '',
+    };
+    window._kkDuplicateAwait = { card, payload };
+    document.body.classList.add('sched-await-duplicate-drop');
+    showNotification('Tap another day/person cell to place a copy (Esc to cancel).', 'info');
+}
+
 async function executeShiftDragMove(card, targetCell, dragPayload) {
     const targetDateStr = targetCell?.dataset?.date;
     const targetStorageKey = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-employee-name'));
@@ -1361,33 +1456,18 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
     }
     const targetDisplay = v.targetDisplay;
 
-    const rs = normShiftTimeHM;
-    const sourceList = window.shiftData[sourceStorageKey];
-    if (!sourceList || !Array.isArray(sourceList)) {
-        showNotification('Could not find this shift in local data.', 'error');
+    const found = findShiftSourceEntryForDuplicate(
+        sourceStorageKey,
+        sourceShiftId,
+        sourceCell,
+        start24,
+        end24
+    );
+    if (!found) {
+        showNotification('Could not find this shift in local data. Try refreshing the week.', 'error');
         return;
     }
-    let idx = -1;
-    if (sourceShiftId) {
-        idx = sourceList.findIndex((s) => s.shiftId && String(s.shiftId) === String(sourceShiftId));
-    }
-    if (idx === -1) {
-        const srcDay = sourceCell?.dataset?.day;
-        const srcWeek = sourceDateStr ? getWeekStart(new Date(sourceDateStr + 'T12:00:00')) : '';
-        idx = sourceList.findIndex(
-            (s) =>
-                s.day === srcDay &&
-                s.weekStart === srcWeek &&
-                rs(s.startTime) === rs(start24) &&
-                rs(s.endTime) === rs(end24)
-        );
-    }
-    if (idx === -1) {
-        showNotification('Could not find this shift to duplicate.', 'error');
-        return;
-    }
-
-    const sourceEntry = { ...sourceList[idx] };
+    const sourceEntry = { ...found.sourceList[found.idx] };
     const hours = sourceEntry.hours != null ? sourceEntry.hours : calculateShiftHours(start24, end24);
     const newWeek = getWeekStart(new Date(targetDateStr + 'T12:00:00'));
     const newDay = getDayKeyForDate(targetDateStr);
@@ -1516,6 +1596,53 @@ function setupScheduleMatrixDragAndDrop() {
     if (!root || root.dataset.dragBound === '1') return;
     root.dataset.dragBound = '1';
 
+    document.addEventListener(
+        'keydown',
+        (e) => {
+            if (e.key !== 'Escape' || !window._kkDuplicateAwait) return;
+            clearScheduleDuplicateAwaitMode();
+            showNotification('Copy cancelled.', 'info');
+        },
+        true
+    );
+
+    root.addEventListener(
+        'dblclick',
+        (e) => {
+            const handle = e.target.closest('.shift-card-drag-handle');
+            if (!handle) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const card = handle.closest('.shift-card');
+            if (card) enterScheduleDuplicateAwaitModeFromCard(card);
+        },
+        true
+    );
+
+    root.addEventListener(
+        'click',
+        (e) => {
+            if (!window._kkDuplicateAwait) return;
+            if (e.target.closest('.sched-cell-add')) return;
+            if (e.target.closest('.shift-card-drag-handle')) return;
+            const cell = e.target.closest('.sched-matrix-cell');
+            if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const { card, payload } = window._kkDuplicateAwait;
+            clearScheduleDuplicateAwaitMode();
+            void (async () => {
+                try {
+                    await executeShiftDragMove(card, cell, payload);
+                } catch (err) {
+                    console.error('[Duplicate]', err);
+                    showNotification(err?.message || 'Could not duplicate shift.', 'error');
+                }
+            })();
+        },
+        true
+    );
+
     root.addEventListener('dragstart', (e) => {
         const handle = e.target.closest('.shift-card-drag-handle');
         if (!handle) return;
@@ -1544,7 +1671,9 @@ function setupScheduleMatrixDragAndDrop() {
             positionSlug: card.dataset.positionSlug || '',
         };
         try {
-            e.dataTransfer.setData('application/json', JSON.stringify(payload));
+            const json = JSON.stringify(payload);
+            e.dataTransfer.setData('application/json', json);
+            e.dataTransfer.setData('text/plain', json);
             e.dataTransfer.effectAllowed = 'copy';
         } catch (_) {
             e.preventDefault();
@@ -1555,10 +1684,8 @@ function setupScheduleMatrixDragAndDrop() {
         window._kkDragSourceCard = card;
     });
 
-    root.addEventListener('dragend', (e) => {
-        const handle = e.target.closest('.shift-card-drag-handle');
-        if (!handle) return;
-        const card = handle.closest('.shift-card');
+    root.addEventListener('dragend', () => {
+        const card = window._kkDragSourceCard;
         if (card) card.classList.remove('dragging');
         delete root.dataset.dragActiveCardId;
         delete window._kkDragSourceCard;
@@ -1589,15 +1716,15 @@ function setupScheduleMatrixDragAndDrop() {
         if (!cell || !cell.dataset.date || cell.classList.contains('sched-matrix-cell-past')) return;
         e.preventDefault();
         cell.classList.remove('sched-matrix-cell--drop-hover');
-        let payload = null;
-        try {
-            payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
-        } catch (_) {
-            return;
-        }
+        const payload = parseScheduleDragPayload(e.dataTransfer);
         const card = window._kkDragSourceCard;
-        if (!card || !payload.sourceStorageKey) return;
-        await executeShiftDragMove(card, cell, payload);
+        if (!card || !payload?.sourceStorageKey) return;
+        try {
+            await executeShiftDragMove(card, cell, payload);
+        } catch (err) {
+            console.error('[Drop duplicate]', err);
+            showNotification(err?.message || 'Could not duplicate shift.', 'error');
+        }
     });
 }
 
@@ -1663,6 +1790,15 @@ async function renderScheduleMatrix() {
     today.setHours(0, 0, 0, 0);
     const todayStr = getTodayLocalYmd();
 
+    let timeOffRows = [];
+    if (window.supabaseClient && window.ORG_ID) {
+        try {
+            timeOffRows = await fetchApprovedTimeOffRequestsForOrg();
+        } catch (_) {
+            timeOffRows = [];
+        }
+    }
+
     let headerHtml =
         '<div class="sched-matrix-row sched-matrix-header-row"><div class="sched-corner-cell">Employee</div>';
     DAY_NAMES.forEach((dayKey, index) => {
@@ -1697,6 +1833,9 @@ async function renderScheduleMatrix() {
             let cellCls = 'sched-matrix-cell';
             if (dateStr === todayStr) cellCls += ' sched-matrix-cell-today';
             else if (d < today) cellCls += ' sched-matrix-cell-past';
+            if (employeeCoveredByTimeOffRows(timeOffRows, disp, dateStr)) {
+                cellCls += ' sched-matrix-cell-time-off';
+            }
             bodyHtml += `<div class="${cellCls}" data-day="${dayKey}" data-date="${dateStr}" data-employee-name="${enc}">
         <button type="button" class="sched-cell-add" title="Add shift" aria-label="Add shift"><i class="fas fa-plus"></i></button>
         <div class="sched-cell-shifts"></div>
@@ -3300,7 +3439,7 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
         : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
     
     shiftCard.innerHTML = `
-        <span class="shift-card-drag-handle" draggable="true" title="Drag to another day or employee" aria-label="Drag to move shift">
+        <span class="shift-card-drag-handle" draggable="true" title="Drag grip to copy to another day or person. Double-click grip, then click a cell (Esc to cancel)." aria-label="Drag or double-click to copy shift">
             <i class="fas fa-grip-vertical" aria-hidden="true"></i>
         </span>
         <div class="shift-card-body">

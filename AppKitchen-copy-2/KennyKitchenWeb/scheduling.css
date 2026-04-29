@@ -246,6 +246,22 @@
     background: #f7fafc;
 }
 
+/* Approved time off for this employee on this calendar day (from shift_requests) */
+.sched-matrix-cell.sched-matrix-cell-time-off {
+    background: linear-gradient(180deg, rgba(229, 62, 62, 0.12) 0%, #fff 42%);
+    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.32);
+}
+
+.sched-matrix-cell.sched-matrix-cell-today.sched-matrix-cell-time-off {
+    background: linear-gradient(180deg, rgba(229, 62, 62, 0.18) 0%, rgba(255, 255, 255, 0.95) 45%);
+    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.45);
+}
+
+.sched-matrix-cell.sched-matrix-cell-past.sched-matrix-cell-time-off {
+    background: linear-gradient(180deg, rgba(229, 62, 62, 0.1) 0%, #f7fafc 42%);
+    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.28);
+}
+
 .sched-cell-add {
     position: absolute;
     top: 6px;
@@ -426,6 +442,16 @@
     outline: 2px dashed rgba(76, 175, 80, 0.85);
     outline-offset: -3px;
     background: rgba(76, 175, 80, 0.08);
+}
+
+/* Double-click grip → tap cell to duplicate (fallback when HTML5 drag is unavailable). */
+body.sched-await-duplicate-drop #schedule-matrix .sched-matrix-cell:not(.sched-matrix-cell-past) {
+    cursor: copy;
+}
+
+body.sched-await-duplicate-drop #schedule-matrix {
+    box-shadow: inset 0 0 0 2px rgba(76, 175, 80, 0.35);
+    border-radius: 8px;
 }
 
 .shift-card:hover {
