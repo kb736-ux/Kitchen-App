@@ -276,55 +276,6 @@
         </div>
     </div>
 
-    <!-- Assign Task Modal (used by recipes.js recipe assignment flow) -->
-    <div class="modal-overlay" id="assign-task-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <h3 id="assign-task-title">Assign Task</h3>
-                <button class="modal-close" onclick="closeModal('assign-task-modal')">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="task-employee-select">Employee</label>
-                    <select id="task-employee-select" class="form-control">
-                        <option value="">Select Employee</option>
-                    </select>
-                </div>
-                <div class="form-group" id="existing-tasks-group" style="display: none;">
-                    <label><i class="fas fa-list-check"></i> Currently Assigned Tasks</label>
-                    <div id="existing-tasks-list" class="existing-tasks-container">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Add New Tasks</label>
-                    <div id="task-list" class="task-list"></div>
-                    <button type="button" class="btn-add-task" id="add-task-row">
-                        <i class="fas fa-plus-circle"></i>
-                        Add task
-                    </button>
-                </div>
-                <div class="form-group">
-                    <label>Or select from active recipes:</label>
-                    <div id="active-recipes-list" class="recipes-select-list"></div>
-                </div>
-                <div class="form-group">
-                    <label>Or select from common tasks:</label>
-                    <div class="common-tasks-list">
-                        <button type="button" class="task-option-btn" data-task="Prep vegetables">Prep vegetables</button>
-                        <button type="button" class="task-option-btn" data-task="Clean station">Clean station</button>
-                        <button type="button" class="task-option-btn" data-task="Restock supplies">Restock supplies</button>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeModal('assign-task-modal')">Cancel</button>
-                <button class="btn-primary" onclick="assignTask()">Assign Task</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Combined Edit Shift & Assign Task Modal -->
     <div class="modal-overlay" id="shift-details-modal">
         <div class="modal shift-details-modal">
@@ -507,12 +458,10 @@
     <script src="tokens.js"></script>
     <script src="supabase-config.js?v=20260414-implicit"></script>
     <script src="subscriptionPlans.js?v=1"></script>
-    <script src="stripeBilling.js?v=1"></script>
     <script src="auth.js?v=20250308"></script>
     <script src="adminSettings.js"></script>
     <script src="employees.js?v=20260411-profile-roster"></script>
     <script src="script.js"></script>
-    <script src="recipes.js"></script>
     <script src="scheduling.js?v=20260910-ampm-chips"></script>
 </body>
 </html>

@@ -1134,7 +1134,6 @@ function initializeScheduling() {
     setupWeekNavigation();
     setupModalHandlers();
     setupTaskAssignment();
-    checkEmployeeTasks();
     initializeEmployeeHours();
 }
 
@@ -1676,7 +1675,6 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
         }
     }
 
-    updateShiftCardTaskIndicator(newCard, targetDisplay);
     persistShiftData();
     updateMatrixRowHours();
     showNotification(
@@ -1979,7 +1977,7 @@ function setupScheduleMatrixDelegation() {
             return;
         }
         const card = e.target.closest('.shift-card');
-        if (!card || e.target.closest('.task-warning') || e.target.closest('.shift-card-drag-handle')) return;
+        if (!card || e.target.closest('.shift-card-drag-handle')) return;
         const cell = card.closest('.sched-matrix-cell');
         const cardDay = cell?.dataset?.day || 'monday';
         const posEl = card.querySelector('.shift-position');
@@ -2214,7 +2212,6 @@ function setupModalHandlers() {
                 taskSyncError = r.error || 'Unknown error';
             }
         }
-        if (descriptions.length) updateEmployeeShiftCards(displayName);
         _shiftModalContext = null;
         closeModal('shift-details-modal');
         if (taskSyncFailed > 0) {
@@ -2242,9 +2239,6 @@ function updateAssignShiftConfirmState() {
     confirmBtn.disabled = !!isPast;
     if (pastDayMsg) pastDayMsg.style.display = isPast ? 'block' : 'none';
 }
-
-const DEFAULT_EMPLOYEES = [];
-const EMPLOYEE_VALUE_MAP = {};
 
 /** Match mobile `normalizeShiftEmployeeName`: hyphens/underscores ↔ spaces so DB "Kenny-crocodile" matches roster "Kenny Crocodile". */
 function normEmployeeKey(s) {
@@ -2383,7 +2377,6 @@ async function populateEmployeeSelectFromOrg() {
             .filter(Boolean)
             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     }
-    if (names.length === 0) names = DEFAULT_EMPLOYEES;
 
     const labelMap = await buildEmployeePositionDisplayLabelMap();
 
@@ -3245,12 +3238,6 @@ function getShiftsForDate(dateStr) {
     return results;
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // Calendar view: current month grid, Mon–Sun
 const CALENDAR_DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -3545,8 +3532,6 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     shiftCard.dataset.endTime24 = end24;
     shiftCard.dataset.positionSlug = posSlug;
 
-    updateShiftCardTaskIndicator(shiftCard, bucketName);
-
     shiftsHost.appendChild(shiftCard);
 
     return shiftCard;
@@ -3628,11 +3613,10 @@ function openShiftDetailsModal(shiftCard, employee, position, time, day) {
 
     if (!modal || !empInput || !taskList) return;
 
-    const NAMES = { kenny:'Kenny', rohan:'Rohan', jake:'Jake', natalie:'Natalie',
-                    sam:'Sam', sophia:'Sophia', aria:'Aria', alex:'Alex' };
     const fromCard = (shiftCard && shiftCard.dataset && shiftCard.dataset.employeeName || '').trim();
-    const empKey = (employee || '').toLowerCase();
-    const displayName = fromCard || NAMES[empKey] || (employee && employee.charAt(0).toUpperCase() + employee.slice(1));
+    const displayName = fromCard
+        || (typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(employee) : '')
+        || (employee || '');
 
     const parts = time.split('-').map(s => s.trim());
     const start24 = parts[0] ? parseTo24h(parts[0]) : '';
@@ -3855,11 +3839,6 @@ function getNotificationColor(type) {
     return colors[type] || '#4299e1';
 }
 
-// Coming Soon placeholder
-function showComingSoon(feature) {
-    showNotification(`${feature} coming soon!`, 'info');
-}
-
 // Check if employee has approved drop for a specific date
 function isEmployeeDropping(employeeName, dateString) {
     const drops = window.approvedDrops || {};
@@ -3887,41 +3866,10 @@ function formatDateForDisplay(dateString) {
 
 // Task Assignment
 function setupTaskAssignment() {
-    const taskList = document.getElementById('task-list');
-    const addRowBtn = document.getElementById('add-task-row');
-
-    if (taskList && addRowBtn) {
-        addRowBtn.addEventListener('click', () => {
-            addTaskRow(taskList);
-        });
-    }
-
-    // When user changes employee in Assign Task modal, reload existing tasks
-    const taskEmployeeSelect = document.getElementById('task-employee-select');
-    if (taskEmployeeSelect) {
-        taskEmployeeSelect.addEventListener('change', () => {
-            const modal = document.getElementById('assign-task-modal');
-            const existingList = document.getElementById('existing-tasks-list');
-            const existingGroup = document.getElementById('existing-tasks-group');
-            const employeeName = taskEmployeeSelect.value ? getEmployeeDisplayName(taskEmployeeSelect.value) : null;
-            if (modal) modal.dataset.employeeName = employeeName || '';
-            if (employeeName && existingList && existingGroup) {
-                loadExistingTasksForEmployee(employeeName, existingList, existingGroup);
-            }
-        });
-    }
-
-    // Load active recipes
-    loadActiveRecipes();
-
-    // Common task buttons - use the task list from whichever modal is open
     document.querySelectorAll('.task-option-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const taskDesc = this.dataset.task;
-            const shiftModal = document.getElementById('shift-details-modal');
-            const listEl = shiftModal?.classList.contains('active')
-                ? document.getElementById('shift-details-task-list')
-                : document.getElementById('task-list');
+            const listEl = document.getElementById('shift-details-task-list');
             if (!listEl) return;
 
             const active = document.activeElement;
@@ -3945,64 +3893,13 @@ function setupTaskAssignment() {
         });
     });
 
-    // Recipe assignment options modal handlers
     document.getElementById('assign-prep-only')?.addEventListener('click', () => handleRecipeAssignment('prep'));
     document.getElementById('assign-active-only')?.addEventListener('click', () => handleRecipeAssignment('active'));
     document.getElementById('assign-both')?.addEventListener('click', () => handleRecipeAssignment('both'));
 }
 
-// Load active recipes from recipes page
-async function loadActiveRecipes() {
-    const recipesList = document.getElementById('active-recipes-list');
-    if (!recipesList) return;
-
-    // Get recipes from global recipesData if available, or from DOM
-    let activeRecipes = [];
-    
-    if (typeof window.recipesData !== 'undefined' && Object.keys(window.recipesData).length > 0) {
-        activeRecipes = Object.values(window.recipesData).filter(r => r.name && isRecipeMarkedActive(r));
-    } else {
-        // Fallback: try to get from recipes page DOM if available
-        try {
-            const recipeCards = document.querySelectorAll('.recipes-active .recipe-card');
-            recipeCards.forEach(card => {
-                const name = card.querySelector('.recipe-name')?.textContent?.trim();
-                if (name) {
-                    activeRecipes.push({ name });
-                }
-            });
-        } catch (e) {
-            activeRecipes = [];
-        }
-    }
-    if (activeRecipes.length === 0) {
-        activeRecipes = await fetchActiveRecipesFromSupabase();
-    }
-
-    recipesList.innerHTML = '';
-    if (activeRecipes.length === 0) {
-        recipesList.innerHTML = '<p style="color: #718096; font-size: 0.9rem; padding: 0.5rem;">No active recipes available.</p>';
-        return;
-    }
-
-    activeRecipes.forEach(recipe => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'recipe-select-btn';
-        btn.textContent = recipe.name;
-        btn.dataset.recipeName = recipe.name;
-        btn.addEventListener('click', function() {
-            openRecipeAssignmentModal(recipe.name);
-        });
-        recipesList.appendChild(btn);
-    });
-}
-
-// Make loadActiveRecipes globally available so recipes.js can call it
-window.loadActiveRecipes = loadActiveRecipes;
-
 let pendingRecipeAssignment = null;
-let pendingRecipeAssignmentTargetList = null; // task list to add to (assign vs edit shift)
+let pendingRecipeAssignmentTargetList = null;
 
 function openRecipeAssignmentModal(recipeName, targetTaskList) {
     const modal = document.getElementById('recipe-assignment-modal');
@@ -4012,7 +3909,7 @@ function openRecipeAssignmentModal(recipeName, targetTaskList) {
     if (!modal || !titleEl || !textEl) return;
 
     pendingRecipeAssignment = recipeName;
-    pendingRecipeAssignmentTargetList = targetTaskList || document.getElementById('task-list');
+    pendingRecipeAssignmentTargetList = targetTaskList || document.getElementById('shift-details-task-list');
     titleEl.textContent = `Assign ${recipeName}`;
     textEl.textContent = `What would you like to assign for ${recipeName}?`;
     const qtyInput = document.getElementById('recipe-assignment-qty');
@@ -4027,7 +3924,7 @@ function handleRecipeAssignment(type) {
     const recipeName = pendingRecipeAssignment;
     const qtyInput = document.getElementById('recipe-assignment-qty');
     const qty = Math.max(1, parseInt(qtyInput?.value, 10) || 1);
-    const taskList = pendingRecipeAssignmentTargetList || document.getElementById('task-list');
+    const taskList = pendingRecipeAssignmentTargetList || document.getElementById('shift-details-task-list');
     if (!taskList) return;
 
     const tasks = [];
@@ -4145,65 +4042,6 @@ function openOvertimeWarningModal(employeeName, currentHours, shiftHours, newTot
     });
     
     openModal('overtime-warning-modal');
-}
-
-async function populateTaskEmployeeSelect() {
-    const select = document.getElementById('task-employee-select');
-    if (!select) return;
-
-    let names = [];
-    if (typeof loadEmployeePositionsFromSupabase === 'function' && window.supabaseClient && window.ORG_ID) {
-        try {
-            await loadEmployeePositionsFromSupabase();
-        } catch (_) {}
-    }
-    if (typeof getEmployeePositions === 'function') {
-        names = Object.keys(getEmployeePositions() || {})
-            .map((k) => (k || '').trim())
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    }
-    if (names.length === 0) names = DEFAULT_EMPLOYEES;
-
-    const labelMap = await buildEmployeePositionDisplayLabelMap();
-
-    select.innerHTML = '<option value="">Select Employee</option>' + names.map(n => {
-        const val = EMPLOYEE_VALUE_MAP[n] || n.toLowerCase().replace(/\s+/g, '-');
-        const nk = normEmployeeKey(n);
-        const displayText = labelMap.get(nk) || n;
-        return `<option value="${val}">${escapeHtml(displayText)}</option>`;
-    }).join('');
-}
-
-async function openAssignTaskModal(employeeName, day) {
-    const modal = document.getElementById('assign-task-modal');
-    const titleEl = document.getElementById('assign-task-title');
-    const employeeSelect = document.getElementById('task-employee-select');
-    const taskList = document.getElementById('task-list');
-    const existingTasksGroup = document.getElementById('existing-tasks-group');
-    const existingTasksList = document.getElementById('existing-tasks-list');
-    
-    if (!modal || !titleEl || !employeeSelect || !taskList) return;
-    
-    titleEl.textContent = 'Assign Task';
-    taskList.innerHTML = '';
-    modal.dataset.day = day || '';
-    
-    if (typeof loadEmployeePositionsFromSupabase === 'function') {
-        await loadEmployeePositionsFromSupabase();
-    }
-    await populateTaskEmployeeSelect();
-    
-    const val = employeeName ? (EMPLOYEE_VALUE_MAP[employeeName] || employeeName.toLowerCase().replace(/\s+/g, '-')) : '';
-    const option = Array.from(employeeSelect.options).find(o => o.value === val);
-    if (option) employeeSelect.value = val;
-    const selectedName = getEmployeeDisplayName(employeeSelect.value) || employeeName;
-    modal.dataset.employeeName = selectedName;
-    
-    loadExistingTasksForEmployee(selectedName, existingTasksList, existingTasksGroup);
-    openModal('assign-task-modal');
-    loadActiveRecipes();
-    employeeSelect?.focus();
 }
 
 /** Show only open assignments in scheduling modals — not completed history. */
@@ -4389,17 +4227,12 @@ function createExistingTaskItem(employeeName, taskDescription, isCompleted, shif
         if (confirm(`Remove task "${taskDescription}" from ${employeeName}?`)) {
             removeTask(employeeName, taskDescription, shiftId);
             const shiftModal = document.getElementById('shift-details-modal');
-            const assignModal = document.getElementById('assign-task-modal');
             let listEl, groupEl, empName, modalShiftId = null;
             if (shiftModal?.classList.contains('active')) {
                 listEl = document.getElementById('shift-details-existing-tasks-list');
                 groupEl = document.getElementById('shift-details-existing-tasks-group');
                 empName = shiftModal.dataset.employeeName;
                 modalShiftId = shiftModal.dataset.shiftId || null;
-            } else if (assignModal) {
-                listEl = document.getElementById('existing-tasks-list');
-                groupEl = document.getElementById('existing-tasks-group');
-                empName = assignModal.dataset.employeeName;
             }
             if (empName && listEl && groupEl) {
                 loadExistingTasksForEmployee(empName, listEl, groupEl, {
@@ -4534,68 +4367,7 @@ function updateTaskInProgressList(employeeName, taskDescription, isCompleted) {
     if (typeof loadStoredTasks === 'function') loadStoredTasks();
 }
 
-async function assignTask() {
-    const modal = document.getElementById('assign-task-modal');
-    const employeeSelect = document.getElementById('task-employee-select');
-    // Use actual employee_name from dropdown (so mobile can match by profile.employee_name)
-    const selectedOpt = employeeSelect?.options[employeeSelect?.selectedIndex];
-    const rawVal = (selectedOpt?.textContent || selectedOpt?.text || '').trim()
-        || (employeeSelect?.value ? getEmployeeDisplayName(employeeSelect.value) : null)
-        || (modal?.dataset.employeeName || null);
-    const employeeName = (rawVal && rawVal !== 'Select Employee') ? rawVal : null;
-    const taskInputs = modal ? modal.querySelectorAll('.task-input') : null;
-    
-    if (!employeeName || !employeeSelect?.value) {
-        showNotification('Please select an employee.', 'error');
-        return;
-    }
-    
-    if (!taskInputs || taskInputs.length === 0) {
-        showNotification('Please add at least one task.', 'error');
-        return;
-    }
-
-    const descriptions = Array.from(taskInputs)
-        .map(input => input.value.trim())
-        .filter(Boolean);
-
-    if (descriptions.length === 0) {
-        showNotification('Please enter at least one task description.', 'error');
-        const firstInput = modal.querySelector('.task-input');
-        if (firstInput) firstInput.focus();
-        return;
-    }
-    
-    let failed = 0;
-    let lastErr = '';
-    for (const desc of descriptions) {
-        const r = await addTaskToProgress(employeeName, desc);
-        if (r && r.ok === false) {
-            failed += 1;
-            lastErr = r.error || '';
-        }
-    }
-
-    updateEmployeeShiftCards(employeeName);
-
-    const existingTasksList = document.getElementById('existing-tasks-list');
-    const existingTasksGroup = document.getElementById('existing-tasks-group');
-    if (existingTasksList && existingTasksGroup) {
-        loadExistingTasksForEmployee(employeeName, existingTasksList, existingTasksGroup);
-    }
-
-    closeModal('assign-task-modal');
-    if (failed > 0) {
-        showNotification(`${failed} task(s) failed to save: ${lastErr || 'database error'}. Apply tasks RLS policies in Supabase.`, 'error');
-    } else {
-        const message = descriptions.length === 1
-            ? `Task "${descriptions[0]}" assigned to ${employeeName}.`
-            : `${descriptions.length} tasks assigned to ${employeeName}.`;
-        showNotification(message, 'success');
-    }
-}
-
-// Helper to add a new task row to the assign-task modal
+// Helper to add a new task row
 function addTaskRow(listEl) {
     const row = document.createElement('div');
     row.className = 'task-row';
@@ -4782,9 +4554,6 @@ function removeTask(employeeName, taskDescription, shiftId = null) {
     }
     
     if (typeof loadStoredTasks === 'function') loadStoredTasks();
-    if (typeof updateEmployeeShiftCards === 'function') {
-        updateEmployeeShiftCards(employeeName);
-    }
     
     // Show notification
     if (typeof showNotification === 'function') {
@@ -4930,9 +4699,6 @@ function handleTaskCheckboxChange(taskItem, checkbox) {
     }
 
     if (typeof loadStoredTasks === 'function') loadStoredTasks();
-    if (employeeName && typeof updateEmployeeShiftCards === 'function') {
-        updateEmployeeShiftCards(employeeName);
-    }
 }
 
 // Update read-only task status for other users
@@ -4993,20 +4759,10 @@ function checkAllTasksComplete(employeeName) {
                 item.style.transform = 'translateX(-20px)';
                 setTimeout(() => {
                     item.remove();
-                    // Update shift cards on scheduling page
-                    if (typeof updateEmployeeShiftCards === 'function') {
-                        setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-                    }
                 }, 400);
             });
         }, 1000);
     }
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // Make checkbox handlers globally available
@@ -5039,90 +4795,6 @@ function assigneeMatchesEmployeeName(assignee, employeeName) {
     if (raw.startsWith(`${me} `) || raw.endsWith(` ${me}`) || raw.includes(` ${me} `)) return true;
     if (me.startsWith(`${raw} `) || me.endsWith(` ${raw}`) || me.includes(` ${raw} `)) return true;
     return false;
-}
-
-/** Up to `max` task lines for shift-card preview (same matching rules as employeeHasTasks). */
-function getEmployeeTasksForCardPreview(employeeName, max = 3) {
-    const out = [];
-    if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
-        for (const task of window.kitchenTasks) {
-            if (
-                kitchenTaskIsActive(task) &&
-                task.assignee &&
-                assigneeMatchesEmployeeName(task.assignee, employeeName) &&
-                task.description
-            ) {
-                out.push({ text: task.description, completed: !!task.completed });
-                if (out.length >= max) break;
-            }
-        }
-    }
-    return out;
-}
-
-// Check if employee has assigned tasks
-function employeeHasTasks(employeeName) {
-    // Check in window.kitchenTasks
-    if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
-        const hasTask = window.kitchenTasks.some(task =>
-            kitchenTaskIsActive(task) &&
-            task.assignee &&
-            assigneeMatchesEmployeeName(task.assignee, employeeName)
-        );
-        if (hasTask) return true;
-    }
-
-    // Also check in DOM (Kitchen Progress section) if on home page
-    const progressList = document.querySelector('.progress-list');
-    if (progressList) {
-        const taskItems = progressList.querySelectorAll('.progress-item');
-        for (const item of taskItems) {
-            const isCompleted = item.dataset.completed === 'true' || item.classList.contains('task-completed');
-            if (isCompleted) continue;
-            const assigneeEl = item.querySelector('.task-assignee');
-            if (assigneeEl && assigneeMatchesEmployeeName(assigneeEl.textContent, employeeName)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-// Shift cards are clean — no task warnings or previews pulled from global employee tasks.
-// Tasks are managed separately; shifts and tasks are independent.
-function updateShiftCardTaskIndicator(shiftCard, employeeName) {
-    const existingWarning = shiftCard.querySelector('.task-warning');
-    if (existingWarning) existingWarning.remove();
-    const existingPreview = shiftCard.querySelector('.shift-task-preview');
-    if (existingPreview) existingPreview.remove();
-    shiftCard.classList.remove('no-tasks-warning');
-}
-
-// Check all shift cards for task status
-function checkEmployeeTasks() {
-    const shiftCards = document.querySelectorAll('.shift-card');
-    shiftCards.forEach(card => {
-        const employeeName = card.dataset.employeeName || card.querySelector('.employee-name')?.textContent.trim();
-        if (employeeName) {
-            // Store employee name if not already stored
-            if (!card.dataset.employeeName) {
-                card.dataset.employeeName = employeeName;
-            }
-            updateShiftCardTaskIndicator(card, employeeName);
-        }
-    });
-}
-
-// Update all shift cards for a specific employee
-function updateEmployeeShiftCards(employeeName) {
-    const shiftCards = document.querySelectorAll('.shift-card');
-    shiftCards.forEach(card => {
-        const cardEmployeeName = card.dataset.employeeName || card.querySelector('.employee-name')?.textContent.trim();
-        if (cardEmployeeName && assigneeMatchesEmployeeName(cardEmployeeName, employeeName)) {
-            updateShiftCardTaskIndicator(card, cardEmployeeName.trim());
-        }
-    });
 }
 
 // Add CSS for notifications
@@ -5168,28 +4840,6 @@ notificationStyles.textContent = `
     
     .notification-close:hover {
         background: rgba(255, 255, 255, 0.2);
-    }
-
-    .shift-task-preview {
-        margin-top: 0.35rem;
-        padding-top: 0.35rem;
-        border-top: 1px solid rgba(0, 0, 0, 0.08);
-        font-size: 0.72rem;
-        line-height: 1.25;
-        color: rgba(0, 0, 0, 0.65);
-        display: flex;
-        flex-direction: column;
-        gap: 0.2rem;
-    }
-    .shift-task-preview-line {
-        display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .shift-task-preview-line.completed {
-        text-decoration: line-through;
-        opacity: 0.65;
     }
 `;
 document.head.appendChild(notificationStyles);
@@ -5243,7 +4893,6 @@ window.addEventListener('supabase-ready', async function () {
     window.kitchenTasks = nextKitchenTasks;
     localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
     if (typeof loadStoredTasks === 'function') loadStoredTasks();
-    if (typeof checkEmployeeTasks === 'function') checkEmployeeTasks();
 
     if (document.getElementById('schedule-matrix') && typeof updateScheduleMatrixAndSync === 'function') {
         void updateScheduleMatrixAndSync();

@@ -116,6 +116,11 @@ async function applyTaskCompletionToInventory(taskText, isCompleted) {
 /** Product nav/header title — always Sheek (not orgs.name from DB). */
 const KK_APP_BRAND_NAME = 'Sheek';
 
+function isHomeDashboardPage() {
+    const file = (window.location.pathname || '').split('/').pop() || '';
+    return file === '' || file === 'index.html';
+}
+
 async function updateOrgBranding() {
     try {
         const orgName = KK_APP_BRAND_NAME;
@@ -193,34 +198,39 @@ async function initOrgSwitcher() {
 
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    initializeDashboard();
-    updateCurrentTime();
-    loadStoredTasks();
-    loadUrgentTasks();
-    
-    // Add event listeners
+    const isHome = isHomeDashboardPage();
+    if (isHome) {
+        initializeDashboard();
+        updateCurrentTime();
+        loadStoredTasks();
+        loadUrgentTasks();
+        setupNotificationActions();
+        setupProgressFinishButtons();
+        setupTaskFilter();
+        setupShiftEmployeeClicks();
+        setupUrgentTaskInput();
+        populateDashboardNotificationList();
+    }
+
     setupNavigationTabs();
-    setupNotificationActions();
-    setupProgressFinishButtons();
-    setupTaskFilter();
-    setupShiftEmployeeClicks();
     setupNotificationBell();
-    setupUrgentTaskInput();
-    populateDashboardNotificationList();
     updateOrgBranding();
     initOrgSwitcher();
 
-    // Update task displays after a short delay to ensure user profile is loaded
-    setTimeout(() => {
-        updateTaskDisplayForCurrentUser();
-    }, 100);
+    if (isHome) {
+        setTimeout(() => {
+            updateTaskDisplayForCurrentUser();
+        }, 100);
+    }
 });
 window.addEventListener('supabase-ready', function() {
-    populateDashboardNotificationList();
+    if (isHomeDashboardPage()) {
+        populateDashboardNotificationList();
+        loadPendingTaskTransferRequests();
+        startNotificationPolling();
+    }
     updateOrgBranding();
     initOrgSwitcher();
-    loadPendingTaskTransferRequests();
-    startNotificationPolling();
 });
 
 // Initialize dashboard functionality
@@ -289,72 +299,12 @@ function setupNavigationTabs() {
     });
 }
 
-// Handle tab switching
+// Handle tab switching — live pages navigate via href; do not toast "coming soon"
 function handleTabSwitch(tabName) {
-    console.log(`Switching to ${tabName} tab`);
-    
-    // Add visual feedback
     const dashboardHeader = document.querySelector('.dashboard-header h1');
-    
-    switch(tabName) {
-        case 'home':
-            dashboardHeader.textContent = 'Dashboard Overview';
-            break;
-        case 'scheduling':
-            dashboardHeader.textContent = 'Scheduling Management';
-            showComingSoon('Scheduling features coming soon!');
-            break;
-        case 'recipes':
-            dashboardHeader.textContent = 'Recipe Management';
-            showComingSoon('Recipe management features coming soon!');
-            break;
-        case 'employees':
-            dashboardHeader.textContent = 'Employee Management';
-            showComingSoon('Employee management features coming soon!');
-            break;
-        case 'chat':
-            dashboardHeader.textContent = 'Team Chat';
-            showComingSoon('Team chat features coming soon!');
-            break;
-        default:
-            dashboardHeader.textContent = 'Dashboard Overview';
+    if (tabName === 'home' && dashboardHeader) {
+        dashboardHeader.textContent = 'Dashboard Overview';
     }
-}
-
-// Show coming soon message
-function showComingSoon(message) {
-    // Create temporary notification
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: ${SheekColors.primary};
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        z-index: 10000;
-        font-weight: 600;
-        transform: translateX(400px);
-        transition: transform 0.3s ease;
-    `;
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    // Animate in
-    setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-    }, 100);
-    
-    // Remove after 3 seconds
-    setTimeout(() => {
-        notification.style.transform = 'translateX(400px)';
-        setTimeout(() => {
-            document.body.removeChild(notification);
-        }, 300);
-    }, 3000);
 }
 
 // Setup notification actions
@@ -658,11 +608,6 @@ function loadStoredTasks() {
                         progressList.appendChild(taskItem);
             }
         });
-        
-        // Trigger update of shift cards if on scheduling page
-        if (typeof checkEmployeeTasks === 'function') {
-            setTimeout(() => checkEmployeeTasks(), 100);
-        }
     }
     
     updateProgressListEmptyState();
@@ -958,9 +903,6 @@ if (typeof window.removeTask === 'undefined') {
         }
         
         if (typeof loadStoredTasks === 'function') loadStoredTasks();
-        if (typeof updateEmployeeShiftCards === 'function') {
-            updateEmployeeShiftCards(employeeName);
-        }
         
         // Show notification
         if (typeof showNotification === 'function') {
@@ -1152,9 +1094,6 @@ if (typeof handleTaskCheckboxChange === 'undefined') {
         }
 
         if (typeof loadStoredTasks === 'function') loadStoredTasks();
-        if (employeeName && typeof updateEmployeeShiftCards === 'function') {
-            updateEmployeeShiftCards(employeeName);
-        }
     }
 }
 
@@ -1183,9 +1122,6 @@ if (typeof checkAllTasksComplete === 'undefined') {
                         item.style.transform = 'translateX(-20px)';
                         setTimeout(() => {
                             item.remove();
-                            if (typeof updateEmployeeShiftCards === 'function') {
-                                setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-                            }
                         }, 400);
                     });
                 }, 1000);
@@ -1206,9 +1142,6 @@ if (typeof checkAllTasksComplete === 'undefined') {
                     item.style.transform = 'translateX(-20px)';
                     setTimeout(() => {
                         item.remove();
-                        if (typeof updateEmployeeShiftCards === 'function') {
-                            setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-                        }
                     }, 400);
                 });
             }, 1000);
@@ -1275,9 +1208,6 @@ function markTaskComplete(progressItem) {
 
     setTimeout(() => {
         if (typeof loadStoredTasks === 'function') loadStoredTasks();
-        if (employeeName && typeof updateEmployeeShiftCards === 'function') {
-            setTimeout(() => updateEmployeeShiftCards(employeeName), 100);
-        }
     }, 1500);
 }
 
@@ -2254,14 +2184,13 @@ async function loadTodayShifts() {
         }
         shiftList.appendChild(item);
     });
-
-    if (typeof updateEmployeeShiftCards === 'function') updateEmployeeShiftCards();
 }
 
 // ── Supabase task sync (home/dashboard page) ──────────────────────────────────
 // When Supabase is ready, fetch the latest task list from the DB and re-render
 // the progress list so the manager sees live status from employee mobile updates.
 window.addEventListener('supabase-ready', async function () {
+    if (!isHomeDashboardPage()) return;
     if (!window.supabaseClient || !window.ORG_ID) return;
 
     if (typeof loadEmployeePositionsFromSupabase === 'function') {

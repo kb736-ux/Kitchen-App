@@ -199,14 +199,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   const [selectedTransferTarget, setSelectedTransferTarget] = useState(null);
   const [transferSearch, setTransferSearch] = useState('');
 
-  // Notifications state
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifPanel, setShowNotifPanel] = useState(false);
-
   useEffect(() => {
     if (orgId) {
       fetchShifts();
-      fetchNotifications();
       fetchOrgProfiles();
     } else {
       setLoading(false);
@@ -257,27 +252,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     setOrgProfiles(data || []);
   }
 
-  async function fetchNotifications() {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('org_id', orgId)
-      .eq('employee_name', employeeName)
-      .order('created_at', { ascending: false })
-      .limit(30);
-    if (!error) {
-      // Open-shift alerts are disabled in-app for now (manager web may still create these rows).
-      setNotifications((data || []).filter((n) => n.type !== 'open_shift'));
-    }
-  }
-
-  async function markAllRead() {
-    const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-    if (unreadIds.length === 0) return;
-    await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  }
-
   async function fetchShifts(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -318,7 +292,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     }
   }
 
-  const onRefresh = () => { fetchShifts(true); fetchNotifications(); };
+  const onRefresh = () => { fetchShifts(true); };
 
   const shiftNameCandidates = useMemo(
     () =>
@@ -1049,74 +1023,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Notification Panel */}
-      <Modal
-        visible={showNotifPanel}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowNotifPanel(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowNotifPanel(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { maxHeight: '75%' }]}>
-            <View style={styles.shiftModalHandle} />
-
-            <View style={styles.notifPanelHeader}>
-              <Text style={styles.notifPanelTitle}>Notifications</Text>
-              <TouchableOpacity onPress={() => setShowNotifPanel(false)}>
-                <Ionicons name="close" size={22} color="#4a5568" />
-              </TouchableOpacity>
-            </View>
-
-            {notifications.length === 0 ? (
-              <View style={styles.notifEmpty}>
-                <Ionicons name="notifications-off-outline" size={40} color="#e2e8f0" />
-                <Text style={styles.notifEmptyText}>No notifications yet</Text>
-              </View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {notifications.map((notif) => {
-                  const d = new Date(notif.created_at);
-                  const timeAgo = (() => {
-                    const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-                    if (diff < 60) return 'just now';
-                    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-                    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-                    return `${Math.floor(diff / 86400)}d ago`;
-                  })();
-                  return (
-                    <TouchableOpacity
-                      key={notif.id}
-                      style={[styles.notifRow, !notif.read && styles.notifRowUnread]}
-                      onPress={() => {
-                        setShowNotifPanel(false);
-                        fetchShifts();
-                      }}
-                      activeOpacity={0.75}
-                    >
-                      <View style={[styles.notifIconBg, !notif.read && styles.notifIconBgUnread]}>
-                        <Ionicons
-                          name={notif.type === 'shift_assigned' ? 'calendar' : 'information-circle'}
-                          size={18}
-                          color={notif.read ? '#718096' : Colors.primary}
-                        />
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={[styles.notifTitle, !notif.read && styles.notifTitleUnread]}>
-                          {notif.title}
-                        </Text>
-                        <Text style={styles.notifBody}>{notif.body}</Text>
-                        <Text style={styles.notifTime}>{timeAgo}</Text>
-                      </View>
-                      {!notif.read && <View style={styles.notifDot} />}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       {/* Shift Action Modal */}
       <Modal
         visible={showShiftModal}
@@ -1461,7 +1367,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e2e8f0',
   },
   headerTitle: { fontSize: 22, fontWeight: '700', color: '#2d3748' },
-  notificationIcon: { padding: 8 },
   content: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
 
   // Calendar
@@ -1538,38 +1443,6 @@ const styles = StyleSheet.create({
   shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
   repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
   staffPosition: { fontSize: 15, color: Colors.primary, fontWeight: '500' },
-
-  // Bell badge
-  notifBadge: {
-    position: 'absolute', top: 4, right: 4,
-    backgroundColor: Colors.error, borderRadius: 8,
-    minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 3,
-  },
-  notifBadgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
-
-  // Notification panel
-  notifPanelHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
-  },
-  notifPanelTitle: { fontSize: 20, fontWeight: '700', color: '#2d3748' },
-  notifEmpty: { alignItems: 'center', paddingVertical: 40, gap: 12 },
-  notifEmptyText: { fontSize: 14, color: '#a0aec0' },
-  notifRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
-  },
-  notifRowUnread: { backgroundColor: Colors.primarySoft, marginHorizontal: -24, paddingHorizontal: 24, borderRadius: 0 },
-  notifIconBg: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: '#f7fafc', justifyContent: 'center', alignItems: 'center',
-  },
-  notifIconBgUnread: { backgroundColor: Colors.primarySoft },
-  notifTitle: { fontSize: 14, fontWeight: '600', color: '#4a5568' },
-  notifTitleUnread: { color: '#2d3748' },
-  notifBody: { fontSize: 13, color: '#718096', marginTop: 2 },
-  notifTime: { fontSize: 11, color: '#a0aec0', marginTop: 4 },
-  notifDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary, marginTop: 6, marginLeft: 8 },
 
   // Shift action modal
   shiftModalHandle: {
