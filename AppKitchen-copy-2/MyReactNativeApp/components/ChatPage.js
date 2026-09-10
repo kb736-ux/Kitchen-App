@@ -135,6 +135,10 @@ class KitchenChat {
     return merged;
   }
 
+  static HEAD_SCAN_LIMIT = 400;
+  static THREAD_LIMIT_DM = 80;
+  static THREAD_LIMIT_GROUP = 80;
+
   static async resolveIsManager(client, userId, orgId) {
     if (!client || !userId) return false;
     try {
@@ -229,11 +233,14 @@ const ChatPage = ({ orgId }) => {
 
   useEffect(() => {
     if (!employeeName) return;
+    let cancelled = false;
     (async () => {
-      const list = await loadEmployees();
+      const listP = loadEmployees();
       fetchAnnouncements();
-      if (list) fetchDmThreads(false, list);
-      else fetchDmThreads();
+      const headsP = fetchConversationHeads();
+      const [list, heads] = await Promise.all([listP, headsP]);
+      if (cancelled) return;
+      applyDmThreads(heads.rows, list, { complete: !!heads.complete });
     })();
 
     pollRef.current = setInterval(() => {
@@ -244,7 +251,10 @@ const ChatPage = ({ orgId }) => {
         fetchMessages(ch, false);
       }
     }, 20000);
-    return () => clearInterval(pollRef.current);
+    return () => {
+      cancelled = true;
+      clearInterval(pollRef.current);
+    };
   }, [employeeName, displayName, employeeId, firstName, lastName, email, authUserId]);
 
   // Re-fetch when switching channels
@@ -513,25 +523,36 @@ const ChatPage = ({ orgId }) => {
 
   const fetchAnnouncements = async () => {
     if (!activeOrgId) return;
-    const { data } = await supabase
+    let { data, error } = await supabase
       .from('announcements')
-      .select('*')
+      .select('id, created_by, created_by_id, message, created_at')
       .eq('org_id', activeOrgId)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(80);
-    if (!data) return;
-    const fp = KitchenChat.fingerprint(data, ['id', 'message', 'created_at']);
+    if (error && /created_by_id/i.test(error.message || '')) {
+      const fallback = await supabase
+        .from('announcements')
+        .select('id, created_by, message, created_at')
+        .eq('org_id', activeOrgId)
+        .order('created_at', { ascending: false })
+        .limit(80);
+      data = fallback.data;
+      error = fallback.error;
+    }
+    if (error || !data) return;
+    const chronological = data.slice().reverse();
+    const fp = KitchenChat.fingerprint(chronological, ['id', 'message', 'created_at']);
     if (fp === announcementsFpRef.current) return;
     announcementsFpRef.current = fp;
     setAnnouncements((prev) => KitchenChat.mergePending(
       prev.map((a) => ({ ...a, text: a.message })),
-      data.map((a) => ({ ...a, text: a.message }))
+      chronological.map((a) => ({ ...a, text: a.message }))
     ).map((row) => ({
       ...row,
       message: row.message || row.text,
     })));
-    if (data.length > 0) {
-      const latest = data[data.length - 1];
+    if (chronological.length > 0) {
+      const latest = chronological[chronological.length - 1];
       setChannelPreviews(prev => ({
         ...prev,
         announcements: latest.message,
@@ -546,13 +567,14 @@ const ChatPage = ({ orgId }) => {
     if (showLoader && existing.length === 0) setLoading(true);
     const { data } = await supabase
       .from('messages')
-      .select('*')
+      .select('id, channel_id, sender, text, created_at, employee_id')
       .eq('org_id', activeOrgId)
       .eq('channel_id', channelId)
-      .order('created_at', { ascending: true })
-      .limit(channelId.startsWith('dm:') ? 200 : 100);
+      .order('created_at', { ascending: false })
+      .limit(channelId.startsWith('dm:') ? KitchenChat.THREAD_LIMIT_DM : KitchenChat.THREAD_LIMIT_GROUP);
+    const chronological = (data || []).slice().reverse();
     if (data) {
-      const merged = KitchenChat.mergePending(existing, data);
+      const merged = KitchenChat.mergePending(existing, chronological);
       const fp = KitchenChat.fingerprint(merged, ['id', 'text', 'created_at']);
       const prevFp = KitchenChat.fingerprint(existing, ['id', 'text', 'created_at']);
       if (fp !== prevFp) {
@@ -583,8 +605,30 @@ const ChatPage = ({ orgId }) => {
     }
   };
 
-  const fetchDmThreads = async (showLoader = false, employeesOverride = null) => {
-    if (!employeeName || !activeOrgId) return;
+  const fetchConversationHeads = async () => {
+    if (!activeOrgId) return { rows: [], complete: false };
+    try {
+      const rpc = await supabase.rpc('kk_chat_conversation_heads', { p_org_id: activeOrgId });
+      if (!rpc.error && Array.isArray(rpc.data)) return { rows: rpc.data, complete: true };
+    } catch (_) { /* RPC not deployed — scan recent rows instead */ }
+    const { data } = await supabase
+      .from('messages')
+      .select('id, channel_id, sender, text, created_at, employee_id')
+      .eq('org_id', activeOrgId)
+      .order('created_at', { ascending: false })
+      .limit(KitchenChat.HEAD_SCAN_LIMIT);
+    const seen = new Set();
+    const heads = [];
+    for (const row of data || []) {
+      if (!row.channel_id || seen.has(row.channel_id)) continue;
+      seen.add(row.channel_id);
+      heads.push(row);
+    }
+    return { rows: heads, complete: false };
+  };
+
+  const applyDmThreads = (rows, employeesOverride = null, { complete } = {}) => {
+    if (!employeeName) return;
     const empList = employeesOverride ?? employeesRef.current ?? employees;
     const resolveById = (id) => {
       const normalized = normalizeId(id);
@@ -607,21 +651,13 @@ const ChatPage = ({ orgId }) => {
     );
     if (employeeId) myProfileIds.add(normalizeId(employeeId));
     if (authUserId) myProfileIds.add(normalizeId(authUserId));
-    if (showLoader) setLoading(true);
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('org_id', activeOrgId)
-      .order('created_at', { ascending: false });
-    if (showLoader) setLoading(false);
-    if (!data) return;
 
     const channelById = new Map();
     const participantMap = {};
     const latestByChannel = {};
     const latestSenderByChannel = {};
 
-    for (const row of data) {
+    for (const row of rows || []) {
       const cid = row.channel_id;
       if (!cid) continue;
       if (cid.startsWith('dm:') && cid.indexOf(':', 3) > 3) {
@@ -667,21 +703,37 @@ const ChatPage = ({ orgId }) => {
       }
     }
 
-    const channels = Array.from(channelById.values());
-    const nextFp = KitchenChat.fingerprint(channels, ['id', 'name', 'preview', 'avatarUrl']);
+    const incoming = Array.from(channelById.values());
     myProfileIdsRef.current = myProfileIds;
-    if (nextFp !== threadsFpRef.current) {
+    setDmChannels((prev) => {
+      const channels = complete
+        ? incoming
+        : (() => {
+            const byId = new Map((prev || []).map((c) => [c.id, c]));
+            incoming.forEach((c) => byId.set(c.id, c));
+            return Array.from(byId.values());
+          })();
+      const nextFp = KitchenChat.fingerprint(channels, ['id', 'name', 'preview', 'avatarUrl']);
+      if (nextFp === threadsFpRef.current) return prev;
       threadsFpRef.current = nextFp;
-      setDmChannels(channels);
-    }
+      return channels;
+    });
     setDmParticipantByChannel(participantMap);
     setChannelPreviews(prev => {
       const next = { ...prev };
-      channels.forEach(c => { next[c.id] = c.preview; });
+      incoming.forEach(c => { next[c.id] = c.preview; });
       return next;
     });
     setChannelLastTs(prev => ({ ...prev, ...latestByChannel }));
     setChannelLastSenderId(prev => ({ ...prev, ...latestSenderByChannel }));
+  };
+
+  const fetchDmThreads = async (showLoader = false, employeesOverride = null, headsOverride = null) => {
+    if (!employeeName || !activeOrgId) return;
+    if (showLoader) setLoading(true);
+    const headResult = headsOverride || await fetchConversationHeads();
+    if (showLoader) setLoading(false);
+    applyDmThreads(headResult.rows, employeesOverride, { complete: !!headResult.complete });
   };
 
   const sendMessage = async () => {

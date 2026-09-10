@@ -1,4 +1,5 @@
-// Chat — list + thread. Server rows are merged; the DOM is not rebuilt unless content changed.
+// Chat — list + thread. Heads first, hydrate the open thread only.
+// Server rows are merged; the DOM is not rebuilt unless content changed.
 
 class KitchenChatIds {
     static uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -59,6 +60,7 @@ class KitchenChatStore {
         this.threads = { announcements: [] };
         this.meta = {};
         this.insertMap = {};
+        this.hydrated = { announcements: false };
         this.sidebarFingerprint = '';
         this.threadFingerprints = {};
         this.activeId = 'announcements';
@@ -104,20 +106,49 @@ class KitchenChatStore {
         const nextFp = KitchenChatStore.threadFingerprint(merged);
         this.threads[id] = merged;
         if (extraMeta) this.meta[id] = { ...(this.meta[id] || {}), ...extraMeta };
+        const last = merged[merged.length - 1];
+        if (last?.text) this.meta[id] = { ...(this.meta[id] || {}), preview: last.text, lastTs: last.ts };
         return prevFp !== nextFp;
     }
 
-    dropMissingServerThreads(serverIds) {
-        if (!serverIds) return false;
+    // Latest-per-channel row for the sidebar. Never replaces a hydrated history
+    // with a single stub — that was the flicker in PR #4.
+    applyHead(id, head, extraMeta) {
+        if (extraMeta) this.meta[id] = { ...(this.meta[id] || {}), ...extraMeta };
+        if (head?.text) this.meta[id] = { ...(this.meta[id] || {}), preview: head.text, lastTs: head.ts };
+        if (this.hydrated[id]) {
+            if (!head) return false;
+            const msgs = this.threads[id] || [];
+            if (head.serverId && msgs.some((m) => m.serverId && m.serverId === head.serverId)) return false;
+            const withoutPending = msgs.filter((m) => !m.pending);
+            return this.mergeIncoming(id, [...withoutPending, head], extraMeta);
+        }
+        return this.mergeIncoming(id, head ? [head] : [], extraMeta);
+    }
+
+    hydrateIncoming(id, incoming, extraMeta) {
+        const changed = this.mergeIncoming(id, incoming, extraMeta);
+        this.hydrated[id] = true;
+        return changed;
+    }
+
+    markHydrated(id) {
+        this.hydrated[id] = true;
+    }
+
+    dropMissingServerThreads(serverIds, { complete } = {}) {
+        if (!serverIds || !complete) return false;
         let changed = false;
         Object.keys(this.threads).forEach((id) => {
             if (id === 'announcements') return;
             if (serverIds.has(id)) return;
             if (this.keepPending(id).length) return;
+            if (this.hydrated[id]) return;
             delete this.threads[id];
             delete this.meta[id];
             delete this.insertMap[id];
             delete this.threadFingerprints[id];
+            delete this.hydrated[id];
             changed = true;
         });
         return changed;
@@ -144,9 +175,13 @@ class KitchenChatStore {
     sidebarItems() {
         const ids = Object.keys(this.threads).filter((id) => {
             if (id === 'announcements') return true;
-            return (this.threads[id] || []).length > 0;
+            return (this.threads[id] || []).length > 0 || !!(this.meta[id]?.preview);
         });
-        ids.sort((a, b) => KitchenChatStore.latestTs(this.threads[b]) - KitchenChatStore.latestTs(this.threads[a]));
+        ids.sort((a, b) => {
+            const tb = Date.parse(this.meta[b]?.lastTs || '') || KitchenChatStore.latestTs(this.threads[b]);
+            const ta = Date.parse(this.meta[a]?.lastTs || '') || KitchenChatStore.latestTs(this.threads[a]);
+            return tb - ta;
+        });
         return ids.map((id) => {
             const messages = this.threads[id] || [];
             const last = messages[messages.length - 1];
@@ -154,7 +189,7 @@ class KitchenChatStore {
                 id,
                 type: KitchenChatIds.channelType(id),
                 title: this.titleFor(id),
-                preview: last?.text || '',
+                preview: this.meta[id]?.preview || last?.text || '',
                 avatar: this.meta[id]?.avatar || null,
             };
         });
@@ -220,15 +255,20 @@ class KitchenChat {
         this.adminAvatarUrl = null;
         this.syncing = false;
         this.syncQueued = false;
+        this.syncQueuedOpts = null;
         this.syncTimer = null;
         this.realtime = null;
         this.realtimeTimer = null;
+        this.hydrating = {};
         this.initialized = false;
         this.meIds = new Set();
         this.senderMeta = { senderKey: 'You', senderDisplay: 'You', senderAvatar: null, employeeId: null };
     }
 
     static POLL_MS = 20000;
+    static THREAD_LIMIT = 80;
+    static ANNOUNCEMENT_LIMIT = 80;
+    static HEAD_SCAN_LIMIT = 400;
 
     static escape(text) {
         const div = document.createElement('div');
@@ -483,88 +523,129 @@ class KitchenChat {
         };
     }
 
-    async loadMessages() {
-        if (!window.supabaseClient || !window.ORG_ID) return;
+    classifyChannel(row) {
+        const channelId = (row?.channel_id || '').trim();
+        if (!channelId) return null;
+        let threadId = channelId;
+        let meta = null;
+
+        if (channelId.startsWith('dm:') && channelId.indexOf(':', 3) > 3) {
+            const rest = channelId.slice(3);
+            const idx = rest.indexOf(':');
+            const leftId = idx > -1 ? KitchenChatIds.normalize(rest.slice(0, idx)) : '';
+            const rightId = idx > -1 ? KitchenChatIds.normalize(rest.slice(idx + 1)) : '';
+            if (!KitchenChatIds.isUuid(leftId) || !KitchenChatIds.isUuid(rightId) || leftId === rightId) return null;
+            if (!this.meIds.has(leftId) && !this.meIds.has(rightId)) return null;
+            const participantId = KitchenChatIds.parseDmParticipant(channelId, this.meIds);
+            if (!participantId) return null;
+            const meAnchor = this.meAnchor();
+            if (!meAnchor) return null;
+            const canonicalId = KitchenChatIds.buildSortedDmChannelId(meAnchor, participantId);
+            if (!canonicalId) return null;
+            threadId = canonicalId;
+            const target = this.profileById(participantId);
+            meta = {
+                name: this.displayName(participantId, this.store.meta[threadId]?.name || 'Direct Message'),
+                avatar: (target?.avatar_url || '').trim() || this.store.meta[threadId]?.avatar || null,
+            };
+        } else if (channelId.startsWith('group-')) {
+            meta = {
+                name: this.store.meta[threadId]?.name || KitchenChatIds.groupTitle(channelId),
+                avatar: null,
+            };
+        } else {
+            return null;
+        }
+
+        return { threadId, insertChannelId: channelId, meta };
+    }
+
+    uniqueHeads(rows) {
+        const seen = new Set();
+        const heads = [];
+        (rows || []).forEach((row) => {
+            const channelId = (row?.channel_id || '').trim();
+            if (!channelId || seen.has(channelId)) return;
+            seen.add(channelId);
+            heads.push(row);
+        });
+        return heads;
+    }
+
+    async fetchConversationHeadRows() {
+        if (!window.supabaseClient || !window.ORG_ID) return { rows: [], complete: false };
+        try {
+            const rpc = await window.supabaseClient.rpc('kk_chat_conversation_heads', { p_org_id: window.ORG_ID });
+            if (!rpc.error && Array.isArray(rpc.data)) {
+                return { rows: rpc.data, complete: true };
+            }
+        } catch (_) { /* RPC not deployed — scan recent rows instead */ }
+
         const { data, error } = await window.supabaseClient
             .from('messages')
             .select('id, channel_id, sender, text, created_at, employee_id')
             .eq('org_id', window.ORG_ID)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false })
+            .limit(KitchenChat.HEAD_SCAN_LIMIT);
         if (error) {
-            console.warn('[Supabase] Chat load failed:', error.message);
-            return;
+            console.warn('[Supabase] Chat heads load failed:', error.message);
+            return { rows: [], complete: false };
         }
-
-        this.refreshMe();
-        const byChannel = {};
-        const serverIds = new Set();
-
-        (data || []).forEach((m) => {
-            const channelId = (m.channel_id || '').trim();
-            if (!channelId) return;
-            let threadId = channelId;
-            let insertChannelId = channelId;
-
-            if (channelId.startsWith('dm:') && channelId.indexOf(':', 3) > 3) {
-                const rest = channelId.slice(3);
-                const idx = rest.indexOf(':');
-                const leftId = idx > -1 ? KitchenChatIds.normalize(rest.slice(0, idx)) : '';
-                const rightId = idx > -1 ? KitchenChatIds.normalize(rest.slice(idx + 1)) : '';
-                if (!KitchenChatIds.isUuid(leftId) || !KitchenChatIds.isUuid(rightId) || leftId === rightId) return;
-                if (!this.meIds.has(leftId) && !this.meIds.has(rightId)) return;
-                const participantId = KitchenChatIds.parseDmParticipant(channelId, this.meIds);
-                if (!participantId) return;
-                const meAnchor = this.meAnchor();
-                if (!meAnchor) return;
-                const canonicalId = KitchenChatIds.buildSortedDmChannelId(meAnchor, participantId);
-                if (!canonicalId) return;
-                threadId = canonicalId;
-                insertChannelId = canonicalId;
-                const target = this.profileById(participantId);
-                this.store.meta[threadId] = {
-                    name: this.displayName(participantId, this.store.meta[threadId]?.name || 'Direct Message'),
-                    avatar: (target?.avatar_url || '').trim() || this.store.meta[threadId]?.avatar || null,
-                };
-            } else if (channelId.startsWith('group-')) {
-                this.store.meta[threadId] = {
-                    name: this.store.meta[threadId]?.name || KitchenChatIds.groupTitle(channelId),
-                    avatar: null,
-                };
-            } else {
-                return;
-            }
-
-            if (!byChannel[threadId]) byChannel[threadId] = [];
-            this.store.insertMap[threadId] = insertChannelId;
-            byChannel[threadId].push(this.mapServerMessage(m, threadId));
-            serverIds.add(threadId);
-        });
-
-        Object.keys(byChannel).forEach((id) => this.store.mergeIncoming(id, byChannel[id]));
-        if (this.meIds.size > 0) this.store.dropMissingServerThreads(serverIds);
+        return { rows: this.uniqueHeads(data), complete: false };
     }
 
-    async loadAnnouncements() {
-        if (!window.supabaseClient || !window.ORG_ID) return;
+    applyConversationHeads(rows, complete) {
+        this.refreshMe();
+        const serverIds = new Set();
+        const seenThread = new Set();
+        const ordered = (rows || []).slice().sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
+        ordered.forEach((m) => {
+            const classified = this.classifyChannel(m);
+            if (!classified) return;
+            if (seenThread.has(classified.threadId)) return;
+            seenThread.add(classified.threadId);
+            serverIds.add(classified.threadId);
+            this.store.insertMap[classified.threadId] = classified.insertChannelId;
+            this.store.applyHead(
+                classified.threadId,
+                this.mapServerMessage(m, classified.threadId),
+                classified.meta
+            );
+        });
+        if (complete && this.meIds.size > 0) {
+            this.store.dropMissingServerThreads(serverIds, { complete: true });
+        }
+    }
+
+    async fetchAnnouncementRows() {
+        if (!window.supabaseClient || !window.ORG_ID) return [];
+        const selectFull = 'id, created_by, created_by_id, message, created_at';
+        const selectLite = 'id, created_by, message, created_at';
         let { data, error } = await window.supabaseClient
             .from('announcements')
-            .select('id, created_by, created_by_id, message, created_at')
+            .select(selectFull)
             .eq('org_id', window.ORG_ID)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false })
+            .limit(KitchenChat.ANNOUNCEMENT_LIMIT);
         if (error && /created_by_id/i.test(error.message || '')) {
             const fallback = await window.supabaseClient
                 .from('announcements')
-                .select('id, created_by, message, created_at')
+                .select(selectLite)
                 .eq('org_id', window.ORG_ID)
-                .order('created_at', { ascending: true });
+                .order('created_at', { ascending: false })
+                .limit(KitchenChat.ANNOUNCEMENT_LIMIT);
             data = fallback.data;
             error = fallback.error;
         }
         if (error) {
             console.warn('[Supabase] Announcements load failed:', error.message);
-            return;
+            return [];
         }
-        const incoming = (data || []).map((a) => {
+        return (data || []).slice().reverse();
+    }
+
+    applyAnnouncements(rows) {
+        const incoming = (rows || []).map((a) => {
             const profile = this.profileById(a.created_by_id);
             const created = new Date(a.created_at);
             return {
@@ -579,25 +660,89 @@ class KitchenChat {
             };
         });
         this.store.mergeIncoming('announcements', incoming, { name: 'Announcements' });
+        this.store.markHydrated('announcements');
     }
 
-    async sync() {
+    async loadAnnouncements() {
+        const rows = await this.fetchAnnouncementRows();
+        this.applyAnnouncements(rows);
+    }
+
+    threadChannelIds(id) {
+        const mapped = this.store.insertMap[id] || id;
+        return mapped && mapped !== id ? [mapped, id] : [id];
+    }
+
+    async loadActiveThread(id = this.store.activeId) {
+        if (!id || id === 'announcements') {
+            await this.loadAnnouncements();
+            return;
+        }
+        if (!window.supabaseClient || !window.ORG_ID) return;
+        if (this.hydrating[id]) return this.hydrating[id];
+        this.hydrating[id] = (async () => {
+            const channelIds = this.threadChannelIds(id);
+            let query = window.supabaseClient
+                .from('messages')
+                .select('id, channel_id, sender, text, created_at, employee_id')
+                .eq('org_id', window.ORG_ID)
+                .order('created_at', { ascending: false })
+                .limit(KitchenChat.THREAD_LIMIT);
+            query = channelIds.length === 1
+                ? query.eq('channel_id', channelIds[0])
+                : query.in('channel_id', channelIds);
+            const { data, error } = await query;
+            if (error) {
+                console.warn('[Supabase] Thread load failed:', error.message);
+                return;
+            }
+            const chronological = (data || []).slice().reverse();
+            this.store.hydrateIncoming(id, chronological.map((m) => this.mapServerMessage(m, id)));
+        })().finally(() => { delete this.hydrating[id]; });
+        return this.hydrating[id];
+    }
+
+    async hydrateActive() {
+        const id = this.store.activeId || 'announcements';
+        await this.loadActiveThread(id);
+        this.renderSidebar();
+        if (this.store.activeId === id) this.renderActiveThread();
+    }
+
+    async sync(opts = {}) {
+        const { profiles = false, hydrate = true } = opts;
         if (this.syncing) {
             this.syncQueued = true;
+            this.syncQueuedOpts = {
+                profiles: !!(this.syncQueuedOpts?.profiles || profiles),
+                hydrate: this.syncQueuedOpts?.hydrate !== false && hydrate,
+            };
             return;
         }
         this.syncing = true;
         try {
-            await this.loadProfiles();
-            await this.loadMessages();
-            await this.loadAnnouncements();
+            const needProfiles = profiles || !this.profiles.length;
+            const profilesP = needProfiles ? this.loadProfiles() : Promise.resolve(this.refreshMe());
+            const headsP = this.fetchConversationHeadRows();
+            const annP = this.fetchAnnouncementRows();
+            await profilesP;
+            const [headResult, annRows] = await Promise.all([headsP, annP]);
+            this.applyConversationHeads(headResult.rows, headResult.complete);
+            this.applyAnnouncements(annRows);
             this.renderSidebar();
             this.renderActiveThread();
+            if (hydrate && this.store.activeId && this.store.activeId !== 'announcements') {
+                await this.loadActiveThread(this.store.activeId);
+                this.renderSidebar();
+                this.renderActiveThread();
+            }
         } finally {
             this.syncing = false;
             if (this.syncQueued) {
                 this.syncQueued = false;
-                this.sync();
+                const queued = this.syncQueuedOpts || {};
+                this.syncQueuedOpts = null;
+                this.sync(queued);
             }
         }
     }
@@ -606,7 +751,7 @@ class KitchenChat {
         if (!window.supabaseClient || !window.ORG_ID || this.realtime) return;
         const bump = () => {
             clearTimeout(this.realtimeTimer);
-            this.realtimeTimer = setTimeout(() => this.sync(), 250);
+            this.realtimeTimer = setTimeout(() => this.sync({ hydrate: true }), 250);
         };
         this.realtime = window.supabaseClient
             .channel(`kitchen-chat-${window.ORG_ID}`)
@@ -674,12 +819,14 @@ class KitchenChat {
 
     openConversation(id, { forceScroll } = {}) {
         if (!id) return;
+        const switched = this.store.activeId !== id;
         this.store.activeId = id;
         this.markActive();
         this.renderHeader();
-        this.renderActiveThread({ forceScroll: !!forceScroll });
+        this.renderActiveThread({ forceScroll: forceScroll || switched });
         const input = document.getElementById('chat-message-input');
         if (input) input.focus();
+        this.hydrateActive();
     }
 
     renderHeader() {
@@ -936,7 +1083,7 @@ class KitchenChat {
                 return;
             }
             KitchenChat.toast('Announcement sent.', 'success');
-            await this.sync();
+            await this.sync({ hydrate: true });
             return;
         }
 
@@ -954,7 +1101,7 @@ class KitchenChat {
             KitchenChat.toast(KitchenChat.sendError(error), 'error');
             return;
         }
-        await this.sync();
+        await this.sync({ hydrate: true });
     }
 
     async notifyPush({ chatType, chatId, message, recipientUuid, recipientName, memberIds }) {
@@ -1079,28 +1226,40 @@ class KitchenChat {
         document.body.style.height = '100vh';
 
         this.bindUi();
-        const canCreate = await KitchenChatPermissions.canCreateGroup();
-        KitchenChatPermissions.applyCreateGroupButton(canCreate);
-        await this.sync();
-        await this.populatePeoplePickers();
+        this.renderSidebar();
+        this.renderActiveThread();
+        const permP = KitchenChatPermissions.canCreateGroup().then((canCreate) => {
+            KitchenChatPermissions.applyCreateGroupButton(canCreate);
+        });
+        await this.sync({ profiles: true, hydrate: true });
+        this.populatePeoplePickers();
         this.subscribeRealtime();
-        if (!this.syncTimer) this.syncTimer = setInterval(() => this.sync(), KitchenChat.POLL_MS);
+        if (!this.syncTimer) this.syncTimer = setInterval(() => this.sync({ hydrate: true }), KitchenChat.POLL_MS);
         if (!this.initialized && typeof setupNotificationBell === 'function') setupNotificationBell();
         this.initialized = true;
+        await permP;
     }
 }
 
-window.KitchenChat = KitchenChat;
-window.KitchenChatStore = KitchenChatStore;
-window.KitchenChatPermissions = KitchenChatPermissions;
+if (typeof window !== 'undefined') {
+    window.KitchenChat = KitchenChat;
+    window.KitchenChatStore = KitchenChatStore;
+    window.KitchenChatPermissions = KitchenChatPermissions;
+}
 
-document.addEventListener('DOMContentLoaded', () => {
-    const app = new KitchenChat();
-    window.kitchenChat = app;
-    const boot = () => app.init();
-    window.addEventListener('supabase-ready', boot);
-    window.addEventListener('kk-admin-authenticated', boot);
-    KitchenChatPermissions.applyCreateGroupButton(false);
-    app.bindUi();
-    if (window.supabaseClient && window.ORG_ID) boot();
-});
+if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const app = new KitchenChat();
+        window.kitchenChat = app;
+        const boot = () => app.init();
+        window.addEventListener('supabase-ready', boot);
+        window.addEventListener('kk-admin-authenticated', boot);
+        KitchenChatPermissions.applyCreateGroupButton(false);
+        app.bindUi();
+        if (window.supabaseClient && window.ORG_ID) boot();
+    });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { KitchenChatIds, KitchenChatStore, KitchenChatPermissions, KitchenChat };
+}
