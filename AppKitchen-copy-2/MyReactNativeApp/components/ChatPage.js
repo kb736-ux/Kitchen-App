@@ -8,88 +8,161 @@ import { supabase, ORG_ID } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { Colors } from '../constants/theme';
 
-const BASE_CHANNELS = [
-  {
-    id: 'announcements',
-    name: 'Announcements',
-    icon: 'megaphone',
-    iconColor: '#d97706',
-    iconBg: '#fffbeb',
-    preview: 'Public channel',
-    readOnly: false,
-  },
-];
+class KitchenChat {
+  static BASE_CHANNELS = [
+    {
+      id: 'announcements',
+      name: 'Announcements',
+      icon: 'megaphone',
+      iconColor: '#d97706',
+      iconBg: '#fffbeb',
+      preview: 'Team channel',
+      readOnly: false,
+    },
+  ];
 
-const normalizeName = (name) => (name || '').trim().toLowerCase();
-const normalizeLoose = (name) => normalizeName(name).replace(/[^a-z0-9]/g, '');
-const normalizeId = (value) => String(value || '').trim().toLowerCase();
-const localPart = (value) => String(value || '').split('@')[0].trim();
-const buildPersonName = (row) => {
-  const first = (row?.first_name || '').trim();
-  const last = (row?.last_name || '').trim();
-  return [first, last].filter(Boolean).join(' ').trim();
-};
-const toCanonicalSenderName = (row, fallback = '') =>
-  (
-    buildPersonName(row) ||
-    localPart(row?.email) ||
-    fallback
-  ).trim();
-/** One row per profiles.id — no merged "alias" employees or name-only deduping. */
-const dedupeEmployeesByProfileId = (rows) => {
-  const byId = new Map();
-  (rows || []).forEach((row) => {
-    if (!row?.id) return;
-    const k = normalizeId(row.id);
-    if (!byId.has(k)) byId.set(k, row);
-  });
-  return Array.from(byId.values());
-};
+  static normalizeName(name) {
+    return (name || '').trim().toLowerCase();
+  }
 
-const buildSortedDmChannelId = (idA, idB) => {
-  if (!idA || !idB) return null;
-  const a = String(idA).trim().toLowerCase();
-  const b = String(idB).trim().toLowerCase();
-  return a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`;
-};
+  static normalizeLoose(name) {
+    return KitchenChat.normalizeName(name).replace(/[^a-z0-9]/g, '');
+  }
 
-const parseDmParticipant = (channelId, myIds) => {
-  if (!channelId || !channelId.startsWith('dm:')) return null;
-  const rest = channelId.slice(3);
-  const idx = rest.indexOf(':');
-  if (idx < 0) return null;
-  const a = rest.slice(0, idx);
-  const b = rest.slice(idx + 1);
-  if (!a || !b) return null;
-  const aIsMe = myIds.has(normalizeId(a));
-  const bIsMe = myIds.has(normalizeId(b));
-  if (!aIsMe && !bIsMe) return null;
-  return aIsMe ? normalizeId(b) : normalizeId(a);
-};
+  static normalizeId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
 
-const getInitials = (name) =>
-  (name || '')
-    .split(' ')
-    .filter(Boolean)
-    .map(w => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  static localPart(value) {
+    return String(value || '').split('@')[0].trim();
+  }
 
-const formatTime = (isoStr) => {
-  if (!isoStr) return '';
-  const d = new Date(isoStr);
-  const now = new Date();
-  const diffMs = now - d;
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
+  static personName(row) {
+    const first = (row?.first_name || '').trim();
+    const last = (row?.last_name || '').trim();
+    return [first, last].filter(Boolean).join(' ').trim();
+  }
+
+  static canonicalSenderName(row, fallback = '') {
+    return (
+      KitchenChat.personName(row) ||
+      KitchenChat.localPart(row?.email) ||
+      fallback
+    ).trim();
+  }
+
+  static dedupeByProfileId(rows) {
+    const byId = new Map();
+    (rows || []).forEach((row) => {
+      if (!row?.id) return;
+      const k = KitchenChat.normalizeId(row.id);
+      if (!byId.has(k)) byId.set(k, row);
+    });
+    return Array.from(byId.values());
+  }
+
+  static buildSortedDmChannelId(idA, idB) {
+    if (!idA || !idB) return null;
+    const a = String(idA).trim().toLowerCase();
+    const b = String(idB).trim().toLowerCase();
+    return a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`;
+  }
+
+  static parseDmParticipant(channelId, myIds) {
+    if (!channelId || !channelId.startsWith('dm:')) return null;
+    const rest = channelId.slice(3);
+    const idx = rest.indexOf(':');
+    if (idx < 0) return null;
+    const a = rest.slice(0, idx);
+    const b = rest.slice(idx + 1);
+    if (!a || !b) return null;
+    const aIsMe = myIds.has(KitchenChat.normalizeId(a));
+    const bIsMe = myIds.has(KitchenChat.normalizeId(b));
+    if (!aIsMe && !bIsMe) return null;
+    if (aIsMe && bIsMe) return null;
+    return aIsMe ? KitchenChat.normalizeId(b) : KitchenChat.normalizeId(a);
+  }
+
+  static groupTitle(channelId) {
+    const raw = String(channelId || '').slice(6).replace(/-/g, ' ');
+    return raw.split(' ').filter(Boolean).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ') || 'Group';
+  }
+
+  static groupChannelId(name) {
+    const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return slug ? `group-${slug}` : null;
+  }
+
+  static initials(name) {
+    return (name || '')
+      .split(' ')
+      .filter(Boolean)
+      .map((w) => w[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  }
+
+  static formatTime(isoStr) {
+    if (!isoStr) return '';
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  static fingerprint(rows, keys) {
+    return (rows || []).map((row) => keys.map((k) => String(row?.[k] ?? '')).join('|')).join('\n');
+  }
+
+  static mergePending(previous, incoming) {
+    const pending = (previous || []).filter((m) => String(m?.id || '').startsWith('opt-'));
+    const merged = [...(incoming || [])];
+    pending.forEach((opt) => {
+      const hit = merged.find((m) => (
+        m.text === opt.text
+        && (!opt.employee_id || !m.employee_id || m.employee_id === opt.employee_id)
+      ));
+      if (!hit) merged.push(opt);
+    });
+    return merged;
+  }
+
+  static async resolveIsManager(client, userId, orgId) {
+    if (!client || !userId) return false;
+    try {
+      const [{ data: adminRow }, { data: mgrRows }] = await Promise.all([
+        client.from('admin_users').select('is_admin').eq('user_id', userId).maybeSingle(),
+        client.from('org_members').select('org_id, role').eq('user_id', userId).in('role', ['manager', 'owner']).limit(8),
+      ]);
+      const isAdmin = !!(adminRow && adminRow.is_admin);
+      const isMgr = (mgrRows || []).some((r) => !orgId || r.org_id === orgId);
+      return isAdmin || isMgr;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+const BASE_CHANNELS = KitchenChat.BASE_CHANNELS;
+const normalizeName = (name) => KitchenChat.normalizeName(name);
+const normalizeLoose = (name) => KitchenChat.normalizeLoose(name);
+const normalizeId = (value) => KitchenChat.normalizeId(value);
+const localPart = (value) => KitchenChat.localPart(value);
+const buildPersonName = (row) => KitchenChat.personName(row);
+const toCanonicalSenderName = (row, fallback = '') => KitchenChat.canonicalSenderName(row, fallback);
+const dedupeEmployeesByProfileId = (rows) => KitchenChat.dedupeByProfileId(rows);
+const buildSortedDmChannelId = (idA, idB) => KitchenChat.buildSortedDmChannelId(idA, idB);
+const parseDmParticipant = (channelId, myIds) => KitchenChat.parseDmParticipant(channelId, myIds);
+const getInitials = (name) => KitchenChat.initials(name);
+const formatTime = (isoStr) => KitchenChat.formatTime(isoStr);
 
 const ChatPage = ({ orgId }) => {
   const { employeeName, displayName, employeeId, firstName, lastName, email } = useEmployee();
@@ -107,6 +180,10 @@ const ChatPage = ({ orgId }) => {
   const [dmChannels, setDmChannels] = useState([]);
   const [dmParticipantByChannel, setDmParticipantByChannel] = useState({});
   const [showNewDmModal, setShowNewDmModal] = useState(false);
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupMemberIds, setGroupMemberIds] = useState({});
+  const [isManager, setIsManager] = useState(false);
   const [dmSearchQuery, setDmSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [channelLastTs, setChannelLastTs] = useState({});
@@ -117,6 +194,9 @@ const ChatPage = ({ orgId }) => {
   const myProfileIdsRef = useRef(new Set());
   const employeesRef = useRef([]);
   const activeChannelRef = useRef(null);
+  const channelMessagesRef = useRef({});
+  const announcementsFpRef = useRef('');
+  const threadsFpRef = useRef('');
   const [authUserId, setAuthUserId] = useState(null);
 
   useEffect(() => {
@@ -136,6 +216,16 @@ const ChatPage = ({ orgId }) => {
 
   useEffect(() => { employeesRef.current = employees; }, [employees]);
   useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
+  useEffect(() => { channelMessagesRef.current = channelMessages; }, [channelMessages]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const allowed = await KitchenChat.resolveIsManager(supabase, authUserId, activeOrgId);
+      if (mounted) setIsManager(allowed);
+    })();
+    return () => { mounted = false; };
+  }, [authUserId, activeOrgId]);
 
   useEffect(() => {
     if (!employeeName) return;
@@ -153,9 +243,9 @@ const ChatPage = ({ orgId }) => {
       if (ch && ch !== 'announcements') {
         fetchMessages(ch, false);
       }
-    }, 8000);
+    }, 20000);
     return () => clearInterval(pollRef.current);
-  }, [employeeName, displayName, employeeId, firstName, lastName, email]);
+  }, [employeeName, displayName, employeeId, firstName, lastName, email, authUserId]);
 
   // Re-fetch when switching channels
   useEffect(() => {
@@ -163,7 +253,8 @@ const ChatPage = ({ orgId }) => {
     if (activeChannel === 'announcements') {
       fetchAnnouncements();
     } else {
-      fetchMessages(activeChannel, true);
+      const hasLocal = (channelMessagesRef.current[activeChannel] || []).length > 0;
+      fetchMessages(activeChannel, !hasLocal);
     }
   }, [activeChannel]);
 
@@ -428,58 +519,48 @@ const ChatPage = ({ orgId }) => {
       .eq('org_id', activeOrgId)
       .order('created_at', { ascending: true })
       .limit(80);
-    if (data) {
-      setAnnouncements(data);
-      if (data.length > 0) {
-        const latest = data[data.length - 1];
-        setChannelPreviews(prev => ({
-          ...prev,
-          announcements: latest.message,
-        }));
-        setChannelLastTs(prev => ({ ...prev, announcements: latest.created_at || prev.announcements || null }));
-      }
+    if (!data) return;
+    const fp = KitchenChat.fingerprint(data, ['id', 'message', 'created_at']);
+    if (fp === announcementsFpRef.current) return;
+    announcementsFpRef.current = fp;
+    setAnnouncements((prev) => KitchenChat.mergePending(
+      prev.map((a) => ({ ...a, text: a.message })),
+      data.map((a) => ({ ...a, text: a.message }))
+    ).map((row) => ({
+      ...row,
+      message: row.message || row.text,
+    })));
+    if (data.length > 0) {
+      const latest = data[data.length - 1];
+      setChannelPreviews(prev => ({
+        ...prev,
+        announcements: latest.message,
+      }));
+      setChannelLastTs(prev => ({ ...prev, announcements: latest.created_at || prev.announcements || null }));
     }
   };
 
   const fetchMessages = async (channelId, showLoader = false) => {
-    if (!activeOrgId) return;
-    if (channelId.startsWith('dm:')) {
-      if (showLoader) setLoading(true);
-      const { data } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('org_id', activeOrgId)
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true })
-        .limit(200);
-      if (data) {
-        setChannelMessages(prev => ({ ...prev, [channelId]: data }));
-        if (data.length > 0) {
-          const latest = data[data.length - 1];
-          setChannelPreviews(prev => ({ ...prev, [channelId]: latest.text }));
-          setChannelLastTs(prev => ({ ...prev, [channelId]: latest.created_at || prev[channelId] || null }));
-          setChannelLastSenderId(prev => ({ ...prev, [channelId]: normalizeId(latest.employee_id) }));
-        }
-      }
-      if (showLoader) setLoading(false);
-      return;
-    }
-    if (showLoader) setLoading(true);
+    if (!activeOrgId || !channelId) return;
+    const existing = channelMessagesRef.current[channelId] || [];
+    if (showLoader && existing.length === 0) setLoading(true);
     const { data } = await supabase
       .from('messages')
       .select('*')
       .eq('org_id', activeOrgId)
       .eq('channel_id', channelId)
       .order('created_at', { ascending: true })
-      .limit(100);
+      .limit(channelId.startsWith('dm:') ? 200 : 100);
     if (data) {
-      setChannelMessages(prev => ({ ...prev, [channelId]: data }));
-      if (data.length > 0) {
-        const latest = data[data.length - 1];
-        setChannelPreviews(prev => ({
-          ...prev,
-          [channelId]: latest.text,
-        }));
+      const merged = KitchenChat.mergePending(existing, data);
+      const fp = KitchenChat.fingerprint(merged, ['id', 'text', 'created_at']);
+      const prevFp = KitchenChat.fingerprint(existing, ['id', 'text', 'created_at']);
+      if (fp !== prevFp) {
+        setChannelMessages(prev => ({ ...prev, [channelId]: merged }));
+      }
+      if (merged.length > 0) {
+        const latest = merged[merged.length - 1];
+        setChannelPreviews(prev => ({ ...prev, [channelId]: latest.text }));
         setChannelLastTs(prev => ({ ...prev, [channelId]: latest.created_at || prev[channelId] || null }));
         setChannelLastSenderId(prev => ({ ...prev, [channelId]: normalizeId(latest.employee_id) }));
       }
@@ -547,8 +628,8 @@ const ChatPage = ({ orgId }) => {
         const participantId = parseDmParticipant(cid, myProfileIds);
         if (!participantId) continue;
         const resolvedProfile = resolveById(participantId);
-        if (!resolvedProfile?.id) continue;
-        participantMap[cid] = normalizeId(resolvedProfile.id);
+        if (resolvedProfile?.id) participantMap[cid] = normalizeId(resolvedProfile.id);
+        else participantMap[cid] = participantId;
         if (!channelById.has(cid)) {
           const resolvedName = (
             buildPersonName(resolvedProfile) ||
@@ -568,12 +649,31 @@ const ChatPage = ({ orgId }) => {
           latestSenderByChannel[cid] = normalizeId(row.employee_id);
         }
         latestByChannel[cid] = latestByChannel[cid] || row.created_at || null;
+      } else if (cid.startsWith('group-')) {
+        if (!channelById.has(cid)) {
+          channelById.set(cid, {
+            id: cid,
+            name: KitchenChat.groupTitle(cid),
+            avatarUrl: null,
+            icon: 'people',
+            iconColor: Colors.primary,
+            iconBg: Colors.primarySoft,
+            preview: row.text,
+            readOnly: false,
+          });
+          latestSenderByChannel[cid] = normalizeId(row.employee_id);
+        }
+        latestByChannel[cid] = latestByChannel[cid] || row.created_at || null;
       }
     }
 
     const channels = Array.from(channelById.values());
+    const nextFp = KitchenChat.fingerprint(channels, ['id', 'name', 'preview', 'avatarUrl']);
     myProfileIdsRef.current = myProfileIds;
-    setDmChannels(channels);
+    if (nextFp !== threadsFpRef.current) {
+      threadsFpRef.current = nextFp;
+      setDmChannels(channels);
+    }
     setDmParticipantByChannel(participantMap);
     setChannelPreviews(prev => {
       const next = { ...prev };
@@ -682,6 +782,62 @@ const ChatPage = ({ orgId }) => {
     }
   };
 
+  const createGroup = async () => {
+    if (!isManager) {
+      Alert.alert('Managers only', 'Only managers can create group chats. You can still send a direct message.');
+      return;
+    }
+    const name = groupName.trim();
+    const channelId = KitchenChat.groupChannelId(name);
+    if (!channelId) {
+      Alert.alert('Group name', 'Please enter a group name.');
+      return;
+    }
+    if (!activeOrgId) {
+      Alert.alert('Missing org', 'Could not resolve restaurant. Please reopen the app.');
+      return;
+    }
+    const senderIdentity = await resolveCurrentSenderForWrite();
+    if (!senderIdentity.senderId) {
+      Alert.alert('Profile sync required', 'Unable to resolve your profile. Please reopen the app.');
+      return;
+    }
+    const seed = `${name} created`;
+    const { error } = await supabase.from('messages').insert({
+      org_id: activeOrgId,
+      channel_id: channelId,
+      sender: senderIdentity.senderName,
+      employee_id: senderIdentity.senderId,
+      text: seed,
+    });
+    if (error) {
+      Alert.alert('Could not create group', error.message || 'Please try again.');
+      return;
+    }
+    threadsFpRef.current = '';
+    setDmChannels((prev) => {
+      if (prev.some((c) => c.id === channelId)) return prev;
+      return [
+        ...prev,
+        {
+          id: channelId,
+          name,
+          avatarUrl: null,
+          icon: 'people',
+          iconColor: Colors.primary,
+          iconBg: Colors.primarySoft,
+          preview: seed,
+          readOnly: false,
+        },
+      ];
+    });
+    setChannelPreviews((prev) => ({ ...prev, [channelId]: seed }));
+    setShowNewGroupModal(false);
+    setGroupName('');
+    setGroupMemberIds({});
+    setActiveChannel(channelId);
+  };
+
   const scrollToBottom = () => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
@@ -766,6 +922,21 @@ const ChatPage = ({ orgId }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Messages</Text>
+          {isManager ? (
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={async () => {
+                setGroupName('');
+                setGroupMemberIds({});
+                await loadEmployees();
+                setShowNewGroupModal(true);
+              }}
+              activeOpacity={0.8}
+              accessibilityLabel="New group"
+            >
+              <Ionicons name="people-outline" size={22} color={Colors.primary} />
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.headerIconBtn}
             onPress={async () => {
@@ -774,6 +945,7 @@ const ChatPage = ({ orgId }) => {
               setShowNewDmModal(true);
             }}
             activeOpacity={0.8}
+            accessibilityLabel="New message"
           >
             <Ionicons name="add" size={24} color={Colors.primary} />
           </TouchableOpacity>
@@ -958,6 +1130,69 @@ const ChatPage = ({ orgId }) => {
               >
                 <Text style={styles.dmCancelText}>Cancel</Text>
               </TouchableOpacity>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal
+          visible={showNewGroupModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowNewGroupModal(false)}
+        >
+          <KeyboardAvoidingView
+            style={styles.dmKeyboardWrap}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+          >
+            <TouchableOpacity
+              style={styles.dmOverlay}
+              activeOpacity={1}
+              onPress={() => setShowNewGroupModal(false)}
+            >
+              <TouchableOpacity activeOpacity={1} style={styles.dmSheet}>
+                <View style={styles.dmHandle} />
+                <Text style={styles.dmTitle}>New group</Text>
+                <Text style={styles.dmSubtitle}>Managers can create groups. Everyone else can only DM.</Text>
+                <TextInput
+                  style={[styles.dmSearchInput, { height: 42, marginBottom: 12, borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingHorizontal: 12 }]}
+                  placeholder="Group name"
+                  placeholderTextColor="#a0aec0"
+                  value={groupName}
+                  onChangeText={setGroupName}
+                />
+                <FlatList
+                  data={dedupeEmployeesByProfileId(employees).filter((e) => e?.id && e.id !== employeeId)}
+                  keyExtractor={(item) => item.id}
+                  ItemSeparatorComponent={() => <View style={styles.dmSeparator} />}
+                  renderItem={({ item }) => {
+                    const label = buildPersonName(item) || item.employee_name;
+                    const selected = !!groupMemberIds[item.id];
+                    return (
+                      <TouchableOpacity
+                        style={styles.dmRow}
+                        onPress={() => setGroupMemberIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }))}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.dmAvatar}>
+                          <Text style={styles.dmAvatarText}>{getInitials(label)}</Text>
+                        </View>
+                        <View style={styles.dmInfo}>
+                          <Text style={styles.dmName}>{label}</Text>
+                          <Text style={styles.dmHint}>{selected ? 'Will be notified' : 'Optional'}</Text>
+                        </View>
+                        <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? Colors.primary : '#cbd5e0'} />
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+                <TouchableOpacity style={styles.groupCreateBtn} onPress={createGroup}>
+                  <Text style={styles.groupCreateBtnText}>Create group</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.dmCancel} onPress={() => setShowNewGroupModal(false)}>
+                  <Text style={styles.dmCancelText}>Cancel</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
             </TouchableOpacity>
           </KeyboardAvoidingView>
@@ -1358,6 +1593,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#718096',
     fontWeight: '500',
+  },
+  groupCreateBtn: {
+    marginTop: 12,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  groupCreateBtnText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 15,
   },
   // Chat list search bar
   chatSearchBarContainer: {

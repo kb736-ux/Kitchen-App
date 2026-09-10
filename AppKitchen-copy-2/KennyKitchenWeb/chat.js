@@ -1,1330 +1,1106 @@
-// Chat Page - Direct Messages & Group Chats
-// Display names and avatars are ALWAYS resolved from profiles (source of truth).
-// Message history sender strings are never used for display.
+// Chat — list + thread. Server rows are merged; the DOM is not rebuilt unless content changed.
 
-const CHAT_STORAGE_KEY = 'kennyKitchen_chatMessages';
-const CHAT_CONVOS_KEY = 'kennyKitchen_chatConvos';
-const CHAT_SYNC_INTERVAL_MS = 8000;
-let chatProfiles = [];
-let chatAdminAvatarUrl = null;
-let dmChannelInsertMap = {};
-let dmChannelMeta = {};
+class KitchenChatIds {
+    static uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-function applyResolvedNavIdentity() {
-    const admin = window.currentAdminUser;
-    if (!admin) return;
-    if (typeof window.kkRefreshNavIdentity === 'function') {
-        // auth.js owns top-right identity resolution; avoid chat-specific overrides.
-        window.kkRefreshNavIdentity(admin).catch(() => {});
-        return;
+    static normalize(v) {
+        return (v || '').trim().toLowerCase();
     }
-    const byId = (chatProfiles || []).find(p => p.id === admin.id) || null;
-    const byEmail = (chatProfiles || []).find(p =>
-        normalizeChatKey(p.email) && normalizeChatKey(p.email) === normalizeChatKey(admin.email || '')
-    ) || null;
-    const profile = byId || byEmail;
-    const resolvedName = (
-        profile?.display_name ||
-        profile?.employee_name ||
-        (document.querySelector('.user-profile span')?.textContent || '').trim() ||
-        (admin.email || '').trim()
-    ).trim();
-    const resolvedAvatar = (
-        (profile?.avatar_url || '').trim() ||
-        (chatAdminAvatarUrl || '').trim() ||
-        null
-    );
 
-    const label = document.querySelector('.nav-user .user-profile span');
-    if (label && resolvedName) label.textContent = resolvedName;
-    if (resolvedAvatar) {
-        document.querySelectorAll('.nav-user .user-avatar').forEach((img) => {
-            img.src = resolvedAvatar;
+    static isUuid(v) {
+        return KitchenChatIds.uuidRe.test(KitchenChatIds.normalize(v));
+    }
+
+    static emailLocal(v) {
+        return (v || '').split('@')[0].trim();
+    }
+
+    static buildSortedDmChannelId(idA, idB) {
+        if (!idA || !idB) return null;
+        const a = KitchenChatIds.normalize(idA);
+        const b = KitchenChatIds.normalize(idB);
+        return a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`;
+    }
+
+    static parseDmParticipant(channelId, myIds) {
+        if (!channelId || !channelId.startsWith('dm:')) return null;
+        const rest = channelId.slice(3);
+        const idx = rest.indexOf(':');
+        if (idx < 0) return null;
+        const a = rest.slice(0, idx);
+        const b = rest.slice(idx + 1);
+        if (!a || !b) return null;
+        const aIsMe = myIds.has(KitchenChatIds.normalize(a));
+        const bIsMe = myIds.has(KitchenChatIds.normalize(b));
+        if (!aIsMe && !bIsMe) return null;
+        if (aIsMe && bIsMe) return null;
+        return aIsMe ? KitchenChatIds.normalize(b) : KitchenChatIds.normalize(a);
+    }
+
+    static channelType(id) {
+        if (id === 'announcements') return 'announcements';
+        if (String(id || '').startsWith('group-')) return 'group';
+        return 'dm';
+    }
+
+    static groupTitle(channelId) {
+        const raw = String(channelId || '').slice(6).replace(/-/g, ' ');
+        return raw.split(' ').filter(Boolean).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ') || 'Group';
+    }
+
+    static groupChannelId(name) {
+        const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        return slug ? `group-${slug}` : null;
+    }
+}
+
+class KitchenChatStore {
+    constructor() {
+        this.threads = { announcements: [] };
+        this.meta = {};
+        this.insertMap = {};
+        this.sidebarFingerprint = '';
+        this.threadFingerprints = {};
+        this.activeId = 'announcements';
+        this.generation = 0;
+    }
+
+    static messageFingerprint(msg) {
+        return [
+            msg?.serverId || '',
+            msg?.pending ? 'p' : 's',
+            msg?.failed ? 'f' : '',
+            msg?.senderId || '',
+            msg?.ts || '',
+            msg?.text || '',
+        ].join('|');
+    }
+
+    static threadFingerprint(messages) {
+        return (messages || []).map((m) => KitchenChatStore.messageFingerprint(m)).join('\n');
+    }
+
+    messagesFor(id) {
+        return this.threads[id] || [];
+    }
+
+    keepPending(id) {
+        return (this.threads[id] || []).filter((m) => m.pending);
+    }
+
+    mergeIncoming(id, incoming, extraMeta) {
+        const pending = this.keepPending(id);
+        const merged = (incoming || []).map((m) => ({ ...m, pending: false }));
+        pending.forEach((opt) => {
+            const hit = merged.find((m) => (
+                m.text === opt.text
+                && (!opt.senderId || !m.senderId || m.senderId === opt.senderId)
+                && Math.abs(Date.parse(m.ts || 0) - Date.parse(opt.ts || 0)) < 120000
+            ));
+            if (!hit) merged.push(opt);
+        });
+        merged.sort((a, b) => Date.parse(a.ts || 0) - Date.parse(b.ts || 0));
+        const prevFp = KitchenChatStore.threadFingerprint(this.threads[id]);
+        const nextFp = KitchenChatStore.threadFingerprint(merged);
+        this.threads[id] = merged;
+        if (extraMeta) this.meta[id] = { ...(this.meta[id] || {}), ...extraMeta };
+        return prevFp !== nextFp;
+    }
+
+    dropMissingServerThreads(serverIds) {
+        if (!serverIds) return false;
+        let changed = false;
+        Object.keys(this.threads).forEach((id) => {
+            if (id === 'announcements') return;
+            if (serverIds.has(id)) return;
+            if (this.keepPending(id).length) return;
+            delete this.threads[id];
+            delete this.meta[id];
+            delete this.insertMap[id];
+            delete this.threadFingerprints[id];
+            changed = true;
+        });
+        return changed;
+    }
+
+    pushLocal(id, msg, extraMeta) {
+        if (!this.threads[id]) this.threads[id] = [];
+        this.threads[id] = [...this.threads[id], msg];
+        if (extraMeta) this.meta[id] = { ...(this.meta[id] || {}), ...extraMeta };
+        delete this.threadFingerprints[id];
+        this.sidebarFingerprint = '';
+    }
+
+    markFailed(id, ts, text, errorMessage) {
+        const list = this.threads[id] || [];
+        this.threads[id] = list.map((m) => (
+            m.pending && m.ts === ts && m.text === text
+                ? { ...m, failed: true, errorMessage }
+                : m
+        ));
+        delete this.threadFingerprints[id];
+    }
+
+    sidebarItems() {
+        const ids = Object.keys(this.threads).filter((id) => {
+            if (id === 'announcements') return true;
+            return (this.threads[id] || []).length > 0;
+        });
+        ids.sort((a, b) => KitchenChatStore.latestTs(this.threads[b]) - KitchenChatStore.latestTs(this.threads[a]));
+        return ids.map((id) => {
+            const messages = this.threads[id] || [];
+            const last = messages[messages.length - 1];
+            return {
+                id,
+                type: KitchenChatIds.channelType(id),
+                title: this.titleFor(id),
+                preview: last?.text || '',
+                avatar: this.meta[id]?.avatar || null,
+            };
         });
     }
-}
 
-function normalizeChatKey(v) {
-    return (v || '').trim().toLowerCase();
-}
-
-function normalizeChatLoose(v) {
-    return normalizeChatKey(v).replace(/[^a-z0-9]/g, '');
-}
-
-function emailLocalPart(v) {
-    return (v || '').split('@')[0].trim();
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-function buildSortedDmChannelId(idA, idB) {
-    if (!idA || !idB) return null;
-    const a = (idA || '').trim().toLowerCase();
-    const b = (idB || '').trim().toLowerCase();
-    return a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`;
-}
-
-function parseDmParticipantWeb(channelId, myIds) {
-    if (!channelId || !channelId.startsWith('dm:')) return null;
-    const rest = channelId.slice(3);
-    const idx = rest.indexOf(':');
-    if (idx < 0) return null;
-    const a = rest.slice(0, idx);
-    const b = rest.slice(idx + 1);
-    if (!a || !b) return null;
-    const aIsMe = myIds.has(normalizeChatKey(a));
-    const bIsMe = myIds.has(normalizeChatKey(b));
-    if (!aIsMe && !bIsMe) return null;
-    if (aIsMe && bIsMe) return null;
-    return aIsMe ? normalizeChatKey(b) : normalizeChatKey(a);
-}
-
-/** Stable "me" UUID for canonical DM channel strings (merges auth uid + profile id). */
-function canonicalMeAnchorForDm(myIds, currentSender) {
-    const eid = normalizeChatKey(currentSender?.employeeId || '');
-    if (eid) return eid;
-    const sorted = [...myIds].filter(Boolean).sort();
-    return sorted[0] || '';
-}
-
-function getMyWebProfileIds() {
-    const ids = new Set();
-    const adminId = normalizeChatKey(window.currentAdminUser?.id);
-    const adminEmail = normalizeChatKey(window.currentAdminUser?.email);
-    if (adminId) ids.add(adminId);
-    const meta = resolveCurrentSenderMeta();
-    if (meta.employeeId) ids.add(normalizeChatKey(meta.employeeId));
-    const myDisplayLoose = normalizeChatLoose(meta.senderDisplay || '');
-    (chatProfiles || []).forEach(p => {
-        const matchById = normalizeChatKey(p.user_id) === adminId || normalizeChatKey(p.id) === adminId;
-        const matchByEmail = adminEmail && normalizeChatKey(p.email) === adminEmail;
-        const matchByName = myDisplayLoose && (
-            normalizeChatLoose(p.display_name) === myDisplayLoose ||
-            normalizeChatLoose(p.employee_name) === myDisplayLoose ||
-            normalizeChatLoose(buildProfileDisplayName(p)) === myDisplayLoose
-        );
-        if (matchById || matchByEmail || matchByName) {
-            if (p.id) ids.add(normalizeChatKey(p.id));
-            if (p.user_id) ids.add(normalizeChatKey(p.user_id));
-        }
-    });
-    return ids;
-}
-
-function buildProfileDisplayName(p, fallback = '') {
-    const first = (p?.first_name || '').trim();
-    const last = (p?.last_name || '').trim();
-    const combined = [first, last].filter(Boolean).join(' ').trim();
-    return (combined || p?.display_name || p?.employee_name || fallback || '').trim();
-}
-
-function looksLikeCurrentUser(rawSender, currentSender) {
-    const s = normalizeChatKey(rawSender);
-    if (!s) return false;
-    const a = normalizeChatKey(currentSender?.senderDisplay || '');
-    const b = normalizeChatKey(currentSender?.senderKey || '');
-    const al = normalizeChatLoose(currentSender?.senderDisplay || '');
-    const bl = normalizeChatLoose(currentSender?.senderKey || '');
-    return (
-        s === a ||
-        s === b ||
-        normalizeChatLoose(rawSender) === al ||
-        normalizeChatLoose(rawSender) === bl ||
-        s === 'you'
-    );
-}
-
-function getInitials(name) {
-    return (name || 'U')
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((part) => part[0])
-        .join('')
-        .slice(0, 2)
-        .toUpperCase();
-}
-
-function renderAvatarMarkup(name, avatarUrl, className) {
-    if (avatarUrl) {
-        return `<img src="${escapeChatHtml(avatarUrl)}" alt="${escapeChatHtml(name || 'User')}" class="${className}">`;
+    titleFor(id) {
+        if (id === 'announcements') return 'Announcements';
+        if (id.startsWith('group-')) return this.meta[id]?.name || KitchenChatIds.groupTitle(id);
+        return this.meta[id]?.name || 'Direct Message';
     }
-    return `<div class="${className} avatar-fallback"><span>${escapeChatHtml(getInitials(name))}</span></div>`;
+
+    static latestTs(messages) {
+        if (!messages || !messages.length) return 0;
+        return Math.max(...messages.map((m) => {
+            const val = Date.parse(m?.ts || '');
+            return Number.isNaN(val) ? 0 : val;
+        }));
+    }
 }
 
-async function loadChatProfiles() {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-    const [{ data, error }, { data: adminData }, { data: allAdminProfiles }] = await Promise.all([
-        window.supabaseClient
-            .from('profiles')
-            .select('id, user_id, employee_name, display_name, first_name, last_name, avatar_url, email')
-            .eq('org_id', window.ORG_ID),
-        window.currentAdminUser?.id
-            ? window.supabaseClient
+class KitchenChatPermissions {
+    static async canCreateGroup() {
+        if (window.kkCanManageOrg === true) return true;
+        const user = window.currentAdminUser;
+        if (!user?.id || !window.supabaseClient) return false;
+        try {
+            const [{ data: adminRow }, { data: mgrRows }] = await Promise.all([
+                window.supabaseClient
+                    .from('admin_users')
+                    .select('is_admin')
+                    .eq('user_id', user.id)
+                    .maybeSingle(),
+                window.supabaseClient
+                    .from('org_members')
+                    .select('org_id, role')
+                    .eq('user_id', user.id)
+                    .in('role', ['manager', 'owner'])
+                    .limit(8),
+            ]);
+            const isAdmin = !!(adminRow && adminRow.is_admin);
+            const orgId = window.ORG_ID;
+            const isMgr = (mgrRows || []).some((r) => !orgId || r.org_id === orgId);
+            window.kkCanManageOrg = isAdmin || isMgr;
+            return window.kkCanManageOrg;
+        } catch (_) {
+            return !!window.kkCanManageOrg;
+        }
+    }
+
+    static applyCreateGroupButton(canCreate) {
+        const btn = document.getElementById('btn-create-group');
+        if (!btn) return;
+        btn.hidden = !canCreate;
+        btn.style.display = canCreate ? 'flex' : 'none';
+        btn.setAttribute('aria-hidden', canCreate ? 'false' : 'true');
+    }
+}
+
+class KitchenChat {
+    constructor() {
+        this.store = new KitchenChatStore();
+        this.profiles = [];
+        this.adminAvatarUrl = null;
+        this.syncing = false;
+        this.syncQueued = false;
+        this.syncTimer = null;
+        this.realtime = null;
+        this.realtimeTimer = null;
+        this.initialized = false;
+        this.meIds = new Set();
+        this.senderMeta = { senderKey: 'You', senderDisplay: 'You', senderAvatar: null, employeeId: null };
+    }
+
+    static POLL_MS = 20000;
+
+    static escape(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    static initials(name) {
+        return (name || 'U')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((part) => part[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase();
+    }
+
+    static formatTime(date) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    static formatDay(ts) {
+        const d = new Date(ts);
+        if (Number.isNaN(d.getTime())) return '';
+        const now = new Date();
+        const sameYear = d.getFullYear() === now.getFullYear();
+        return d.toLocaleDateString([], sameYear
+            ? { weekday: 'short', month: 'short', day: 'numeric' }
+            : { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    static avatarMarkup(name, avatarUrl, className) {
+        if (avatarUrl) {
+            return `<img src="${KitchenChat.escape(avatarUrl)}" alt="${KitchenChat.escape(name || 'User')}" class="${className}">`;
+        }
+        return `<div class="${className} avatar-fallback"><span>${KitchenChat.escape(KitchenChat.initials(name))}</span></div>`;
+    }
+
+    static personName(p, fallback = '') {
+        const first = (p?.first_name || '').trim();
+        const last = (p?.last_name || '').trim();
+        const combined = [first, last].filter(Boolean).join(' ').trim();
+        return (combined || p?.display_name || p?.employee_name || fallback || '').trim();
+    }
+
+    static sendError(err) {
+        if (!err) return 'Could not send message. Please try again.';
+        const msg = (err.message || String(err)).toLowerCase();
+        if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed to fetch')) return 'Check your internet connection.';
+        if (msg.includes('jwt') || msg.includes('auth') || msg.includes('session')) return 'Session expired. Please refresh the page.';
+        if (msg.includes('permission') || msg.includes('rls') || msg.includes('policy')) return "You don't have permission to send that.";
+        if (msg.includes('connection') || msg.includes('timeout')) return 'Could not connect. Please check your internet.';
+        return err.message || 'Could not send message. Please try again.';
+    }
+
+    static toast(message, type) {
+        if (typeof showNotificationToast === 'function') {
+            showNotificationToast(message, type);
+            return;
+        }
+        const toast = document.createElement('div');
+        toast.className = 'chat-toast';
+        const bg = (typeof SheekColors !== 'undefined' && SheekColors.toast)
+            ? SheekColors.toast(type)
+            : (type === 'error' ? '#A94F47' : '#52705A');
+        toast.style.cssText = `position:fixed;bottom:20px;right:20px;background:${bg};color:#fff;padding:0.85rem 1.25rem;border-radius:12px;z-index:10001;font-weight:600;max-width:320px;`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    profileById(id) {
+        const needle = KitchenChatIds.normalize(id);
+        if (!needle) return null;
+        return this.profiles.find((p) => (
+            KitchenChatIds.normalize(p.id) === needle
+            || KitchenChatIds.normalize(p.user_id) === needle
+        )) || null;
+    }
+
+    displayName(profileId, fallback = '') {
+        return KitchenChat.personName(this.profileById(profileId), fallback);
+    }
+
+    navLabel() {
+        return (document.querySelector('.user-profile span')?.textContent || 'You').trim();
+    }
+
+    refreshMe() {
+        const adminId = KitchenChatIds.normalize(window.currentAdminUser?.id);
+        const adminEmail = KitchenChatIds.normalize(window.currentAdminUser?.email);
+        const ids = new Set();
+        if (adminId) ids.add(adminId);
+
+        const match = this.profiles.find((p) => {
+            const byUser = adminId && KitchenChatIds.normalize(p.user_id) === adminId;
+            const byId = adminId && KitchenChatIds.normalize(p.id) === adminId;
+            const byEmail = adminEmail && KitchenChatIds.normalize(p.email) === adminEmail;
+            return byUser || byId || byEmail;
+        }) || null;
+
+        if (match?.id) ids.add(KitchenChatIds.normalize(match.id));
+        if (match?.user_id) ids.add(KitchenChatIds.normalize(match.user_id));
+
+        const avatar = (match?.avatar_url || '').trim() || this.adminAvatarUrl || null;
+        const resolvedDisplay = KitchenChat.personName(match, this.navLabel() || 'You');
+        this.meIds = ids;
+        this.senderMeta = {
+            senderKey: resolvedDisplay,
+            senderDisplay: resolvedDisplay,
+            senderAvatar: avatar,
+            employeeId: match?.id || null,
+        };
+        return this.senderMeta;
+    }
+
+    meAnchor() {
+        const eid = KitchenChatIds.normalize(this.senderMeta.employeeId || '');
+        if (eid) return eid;
+        return [...this.meIds].filter(Boolean).sort()[0] || '';
+    }
+
+    isMine(msg) {
+        if (msg?.senderId && this.senderMeta.employeeId && msg.senderId === this.senderMeta.employeeId) return true;
+        if (msg?.senderId && this.meIds.has(KitchenChatIds.normalize(msg.senderId))) return true;
+        return false;
+    }
+
+    applyNavIdentity() {
+        const admin = window.currentAdminUser;
+        if (!admin) return;
+        if (typeof window.kkRefreshNavIdentity === 'function') {
+            window.kkRefreshNavIdentity(admin).catch(() => {});
+        }
+    }
+
+    async loadProfiles() {
+        if (!window.supabaseClient || !window.ORG_ID) return;
+        const [{ data, error }, { data: adminData }, { data: allAdminProfiles }] = await Promise.all([
+            window.supabaseClient
+                .from('profiles')
+                .select('id, user_id, employee_name, display_name, first_name, last_name, avatar_url, email')
+                .eq('org_id', window.ORG_ID),
+            window.currentAdminUser?.id
+                ? window.supabaseClient
+                    .from('admin_profiles')
+                    .select('user_id, avatar_url, display_name, first_name, last_name')
+                    .eq('user_id', window.currentAdminUser.id)
+                    .maybeSingle()
+                    .then((r) => ({ data: r.data }))
+                : Promise.resolve({ data: null }),
+            window.supabaseClient
                 .from('admin_profiles')
                 .select('user_id, avatar_url, display_name, first_name, last_name')
-                .eq('user_id', window.currentAdminUser.id)
-                .maybeSingle()
-                .then(r => ({ data: r.data }))
-            : Promise.resolve({ data: null }),
-        window.supabaseClient
-            .from('admin_profiles')
-            .select('user_id, avatar_url, display_name, first_name, last_name')
-            .then(r => ({ data: r.data || [] }))
-            .catch(() => ({ data: [] })),
-    ]);
-    if (error) {
-        console.warn('[Supabase] Profiles load failed for chat:', error.message);
-        return;
-    }
-    const adminByUserId = {};
-    (allAdminProfiles || []).forEach((a) => {
-        const key = normalizeChatKey(a?.user_id);
-        if (!key) return;
-        adminByUserId[key] = a;
-    });
+                .then((r) => ({ data: r.data || [] }))
+                .catch(() => ({ data: [] })),
+        ]);
+        if (error) {
+            console.warn('[Supabase] Profiles load failed for chat:', error.message);
+            return;
+        }
 
-    chatProfiles = (data || [])
-        .filter(p => !!p.id && (p.employee_name || p.display_name || p.email || p.first_name || p.last_name || '').trim())
-        .map((p) => ({
-            ...p,
-            first_name: (p.first_name || adminByUserId[normalizeChatKey(p.user_id)]?.first_name || '').trim(),
-            last_name: (p.last_name || adminByUserId[normalizeChatKey(p.user_id)]?.last_name || '').trim(),
-            avatar_url: (p.avatar_url || adminByUserId[normalizeChatKey(p.user_id)]?.avatar_url || '').trim() || null,
-            display_name: buildProfileDisplayName({
-                ...p,
-                first_name: p.first_name || adminByUserId[normalizeChatKey(p.user_id)]?.first_name || '',
-                last_name: p.last_name || adminByUserId[normalizeChatKey(p.user_id)]?.last_name || '',
-                display_name: p.display_name || adminByUserId[normalizeChatKey(p.user_id)]?.display_name || '',
-            }, p.display_name || p.employee_name || ''),
-        }));
-    chatAdminAvatarUrl = (adminData?.avatar_url || '').trim() || null;
+        const adminByUserId = {};
+        (allAdminProfiles || []).forEach((a) => {
+            const key = KitchenChatIds.normalize(a?.user_id);
+            if (key) adminByUserId[key] = a;
+        });
 
-    const withAvatars = chatProfiles.filter(p => !!p.avatar_url);
-    console.log(`[Chat] Loaded ${chatProfiles.length} profiles, ${withAvatars.length} have avatar_url.`,
-        withAvatars.length === 0 ? 'Upload profile pictures in Supabase profiles.avatar_url to see them here.' : '');
-    if (withAvatars.length > 0) {
-        console.log('[Chat] Profiles with avatars:', withAvatars.map(p => `${p.display_name || p.employee_name}: ${p.avatar_url}`));
-    }
+        this.profiles = (data || [])
+            .filter((p) => !!p.id && (p.employee_name || p.display_name || p.email || p.first_name || p.last_name || '').trim())
+            .map((p) => {
+                const admin = adminByUserId[KitchenChatIds.normalize(p.user_id)];
+                const first = (p.first_name || admin?.first_name || '').trim();
+                const last = (p.last_name || admin?.last_name || '').trim();
+                const row = { ...p, first_name: first, last_name: last, avatar_url: (p.avatar_url || admin?.avatar_url || '').trim() || null };
+                row.display_name = KitchenChat.personName(row, p.display_name || p.employee_name || '');
+                return row;
+            });
 
-    // Merge current admin into chatProfiles so we can resolve their display name by UUID
-    const admin = window.currentAdminUser;
-    if (admin?.id) {
-        const adminDisplay = (adminData?.display_name || '').trim()
-            || [adminData?.first_name, adminData?.last_name].filter(Boolean).join(' ').trim()
-            || (document.querySelector('.user-profile span')?.textContent || '').trim()
-            || (admin.user_metadata?.full_name || admin.user_metadata?.name || '').trim()
-            || (admin.email || '').split('@')[0];
-        const existing = chatProfiles.find(p => p.id === admin.id);
-        if (!existing) {
-            chatProfiles = [...chatProfiles, {
+        this.adminAvatarUrl = (adminData?.avatar_url || '').trim() || null;
+        const admin = window.currentAdminUser;
+        if (admin?.id && !this.profiles.some((p) => p.id === admin.id || p.user_id === admin.id)) {
+            const adminDisplay = (adminData?.display_name || '').trim()
+                || [adminData?.first_name, adminData?.last_name].filter(Boolean).join(' ').trim()
+                || this.navLabel()
+                || (admin.user_metadata?.full_name || admin.user_metadata?.name || '').trim()
+                || (admin.email || '').split('@')[0];
+            this.profiles = [...this.profiles, {
                 id: admin.id,
+                user_id: admin.id,
                 employee_name: adminDisplay,
                 display_name: adminDisplay,
-                avatar_url: chatAdminAvatarUrl || null,
+                avatar_url: this.adminAvatarUrl || null,
                 email: admin.email || null,
             }];
-        } else if (adminDisplay && !existing.display_name) {
-            chatProfiles = chatProfiles.map(p =>
-                p.id === admin.id ? { ...p, display_name: adminDisplay, avatar_url: chatAdminAvatarUrl || p.avatar_url } : p
-            );
         }
+        this.refreshMe();
+        this.applyNavIdentity();
     }
-    applyResolvedNavIdentity();
-}
 
-function resolveProfileById(id) {
-    if (!id) return null;
-    const needle = normalizeChatKey(id);
-    return (chatProfiles || []).find(p =>
-        normalizeChatKey(p.id) === needle || normalizeChatKey(p.user_id) === needle
-    ) || null;
-}
-
-/** Always use profile as source of truth. Never use message-history sender strings. */
-function resolveDisplayName(profileId, fallback = '') {
-    const p = resolveProfileById(profileId);
-    return buildProfileDisplayName(p, fallback);
-}
-
-function resolveProfileByAny(raw) {
-    const key = normalizeChatKey(raw);
-    const loose = normalizeChatLoose(raw);
-    if (!key) return null;
-    return (chatProfiles || []).find((p) => {
-        const employee = normalizeChatKey(p.employee_name);
-        const display = normalizeChatKey(p.display_name);
-        const email = normalizeChatKey(p.email);
-        const emailLocal = normalizeChatKey(emailLocalPart(p.email));
-        const combined = normalizeChatKey(buildProfileDisplayName(p));
-        return (
-            key === employee ||
-            key === display ||
-            key === email ||
-            key === emailLocal ||
-            key === combined ||
-            loose === normalizeChatLoose(p.employee_name) ||
-            loose === normalizeChatLoose(p.display_name) ||
-            loose === normalizeChatLoose(emailLocalPart(p.email)) ||
-            loose === normalizeChatLoose(buildProfileDisplayName(p))
-        );
-    }) || null;
-}
-
-/** Resolve sender display and avatar. Always from profile when we have UUID. */
-function resolveSenderMeta(rawSender, employeeId = null) {
-    const pid = employeeId || null;
-    const rawFallback = (rawSender || '').trim() || 'Unknown user';
-    if (pid && /^[0-9a-fA-F-]{36}$/.test(pid)) {
-        const p = resolveProfileById(pid);
-        return {
-            sender: resolveDisplayName(pid, rawFallback),
-            avatar: (p?.avatar_url || '').trim() || null,
-        };
-    }
-    const key = normalizeChatKey(rawSender);
-    const looseKey = normalizeChatLoose(rawSender);
-    if (!key) {
-        return { sender: rawFallback, avatar: null };
-    }
-    const match = (chatProfiles || []).find(p => {
-        const employeeKey = normalizeChatKey(p.employee_name);
-        const displayKey = normalizeChatKey(p.display_name);
-        const combinedKey = normalizeChatKey(buildProfileDisplayName(p));
-        const emailKey = normalizeChatKey(p.email);
-        const emailLocal = normalizeChatKey(emailLocalPart(p.email));
-        const employeeLoose = normalizeChatLoose(p.employee_name);
-        const displayLoose = normalizeChatLoose(p.display_name);
-        return (
-            key === employeeKey ||
-            key === displayKey ||
-            key === combinedKey ||
-            key === emailKey ||
-            key === emailLocal ||
-            looseKey === employeeLoose ||
-            looseKey === displayLoose ||
-            looseKey === normalizeChatLoose(emailLocalPart(p.email)) ||
-            looseKey === normalizeChatLoose(buildProfileDisplayName(p))
-        );
-    });
-    return {
-        sender: buildProfileDisplayName(match, rawFallback),
-        avatar: (match?.avatar_url || '').trim() || null,
-    };
-}
-
-function resolveCurrentSenderMeta() {
-    const label = getCurrentChatUser();
-    const key = normalizeChatKey(label);
-    const loose = normalizeChatLoose(label);
-    const currentEmail = normalizeChatKey(window.currentAdminUser?.email || '');
-
-    const match = (chatProfiles || []).find((p) => {
-        const employee = normalizeChatKey(p.employee_name);
-        const display = normalizeChatKey(p.display_name);
-        const email = normalizeChatKey(p.email);
-        const emailLocal = normalizeChatKey(emailLocalPart(p.email));
-        const combined = normalizeChatKey(buildProfileDisplayName(p));
-        return (
-            key === employee ||
-            key === display ||
-            key === combined ||
-            loose === normalizeChatLoose(p.employee_name) ||
-            loose === normalizeChatLoose(p.display_name) ||
-            loose === normalizeChatLoose(buildProfileDisplayName(p)) ||
-            (!!currentEmail && (currentEmail === email || currentEmail === emailLocal))
-        );
-    }) || null;
-
-    const avatar = (match?.avatar_url || '').trim() || chatAdminAvatarUrl || null;
-    const resolvedDisplay = buildProfileDisplayName(match, label || 'You');
-    return {
-        senderKey: resolvedDisplay,
-        senderDisplay: resolvedDisplay,
-        senderAvatar: avatar || null,
-        employeeId: match?.id || null,
-    };
-}
-
-async function populateChatEmployees() {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-    try {
-        const { data: profiles } = await window.supabaseClient
-            .from('profiles')
-            .select('id, employee_name, display_name')
-            .eq('org_id', window.ORG_ID);
-
-        const data = (profiles || []).filter(p => !!p.id && (p.employee_name || '').trim());
-        if (!data.length) return;
-
+    async populatePeoplePickers() {
         const dmSelect = document.getElementById('dm-recipient');
+        const groupList = document.querySelector('.member-select-list');
+        const myId = KitchenChatIds.normalize(this.senderMeta.employeeId);
+        const people = this.profiles.filter((p) => p.id && KitchenChatIds.normalize(p.id) !== myId);
+
         if (dmSelect) {
-            dmSelect.innerHTML = '<option value="">Select recipient...</option>';
-            data.forEach(p => {
+            const previous = dmSelect.value;
+            dmSelect.innerHTML = '<option value="">Select teammate…</option>';
+            people.forEach((p) => {
                 const opt = document.createElement('option');
-                opt.value = p.id || p.employee_name;
-                opt.dataset.employeeName = p.employee_name || '';
-                opt.textContent = resolveDisplayName(p.id, p.display_name || p.employee_name);
+                opt.value = p.id;
+                opt.textContent = this.displayName(p.id, p.display_name || p.employee_name);
                 dmSelect.appendChild(opt);
             });
+            if (previous && people.some((p) => p.id === previous)) dmSelect.value = previous;
         }
 
-        const groupList = document.querySelector('.member-select-list');
         if (groupList) {
+            const checked = new Set([...groupList.querySelectorAll('input:checked')].map((el) => el.value));
             groupList.innerHTML = '';
-            data.forEach(p => {
+            people.forEach((p) => {
                 const label = document.createElement('label');
                 label.className = 'member-checkbox';
                 const input = document.createElement('input');
                 input.type = 'checkbox';
-                input.value = p.employee_name;
+                input.value = p.id;
+                input.checked = checked.has(p.id);
                 const span = document.createElement('span');
-                span.textContent = resolveDisplayName(p.id, p.display_name || p.employee_name);
+                span.textContent = this.displayName(p.id, p.display_name || p.employee_name);
                 label.appendChild(input);
                 label.appendChild(span);
                 groupList.appendChild(label);
             });
         }
-    } catch (e) {
-        console.warn('Could not populate chat employees', e);
     }
-}
 
-async function loadChatMessagesFromSupabase() {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-    const { data, error } = await window.supabaseClient
-        .from('messages')
-        .select('channel_id, sender, text, created_at, employee_id')
-        .eq('org_id', window.ORG_ID)
-        .order('created_at', { ascending: true });
-    if (error) {
-        console.warn('[Supabase] Chat load failed:', error.message);
-        return;
+    mapServerMessage(row, channelId) {
+        const senderId = row.employee_id || null;
+        const profile = senderId ? this.profileById(senderId) : null;
+        const sender = KitchenChat.personName(profile, (row.sender || '').trim() || 'Unknown user');
+        const created = new Date(row.created_at);
+        return {
+            serverId: row.id || null,
+            sender,
+            senderId,
+            text: row.text || '',
+            time: KitchenChat.formatTime(created),
+            ts: created.toISOString(),
+            avatar: (profile?.avatar_url || '').trim() || null,
+            pending: false,
+        };
     }
-    const prevDmMeta = { ...dmChannelMeta };
-    dmChannelInsertMap = {};
-    dmChannelMeta = {};
-    Object.keys(conversationMessages).forEach((k) => {
-        if (k !== 'announcements') delete conversationMessages[k];
-    });
-    const byChannel = {};
-    const currentSender = resolveCurrentSenderMeta();
 
-    const myIds = getMyWebProfileIds();
-
-    (data || []).forEach(m => {
-        const channelId = (m.channel_id || '').trim();
-        if (!channelId) return;
-        const d = new Date(m.created_at);
-        let threadId = channelId;
-        let insertChannelId = channelId;
-        let senderId = m.employee_id || null;
-        if (!senderId && m.sender) {
-            const senderProfile = resolveProfileByAny(m.sender);
-            senderId = senderProfile?.id || null;
-        }
-
-        if (channelId.startsWith('dm:') && channelId.indexOf(':', 3) > 3) {
-            const rest = channelId.slice(3);
-            const idx = rest.indexOf(':');
-            const leftId = idx > -1 ? normalizeChatKey(rest.slice(0, idx)) : '';
-            const rightId = idx > -1 ? normalizeChatKey(rest.slice(idx + 1)) : '';
-            if (!UUID_RE.test(leftId) || !UUID_RE.test(rightId)) return;
-            if (leftId === rightId) return;
-            // Privacy: only load DMs where this browser user's profile/auth ids match one side of the channel.
-            // Never guess "the other person" by display name — that showed other employees' DMs to managers.
-            const amInDm = myIds.has(leftId) || myIds.has(rightId);
-            if (!amInDm) return;
-
-            let participantId = parseDmParticipantWeb(channelId, myIds);
-            if (!participantId) {
-                participantId = myIds.has(leftId) ? rightId : leftId;
-            }
-            if (!participantId) return;
-            if (myIds.has(participantId)) return;
-            const meAnchor = canonicalMeAnchorForDm(myIds, currentSender);
-            if (!meAnchor) return;
-            const canonicalId = buildSortedDmChannelId(meAnchor, participantId);
-            if (!canonicalId) return;
-            threadId = canonicalId;
-            insertChannelId = canonicalId;
-            const targetProfile = resolveProfileById(participantId);
-            const resolvedName = resolveDisplayName(participantId, '');
-            const prev =
-                prevDmMeta[threadId] ||
-                prevDmMeta[channelId] ||
-                null;
-            const senderIsMe = !!senderId && myIds.has(normalizeChatKey(senderId));
-            const senderMetaForFallback = resolveSenderMeta(m.sender || '', senderId || null);
-            const fallbackNameFromSender = senderIsMe ? '' : (senderMetaForFallback.sender || '').trim();
-            const fallbackAvatarFromSender = senderIsMe ? null : (senderMetaForFallback.avatar || null);
-            dmChannelMeta[threadId] = {
-                name:
-                    resolvedName ||
-                    (prev?.name && prev.name !== 'Direct Message' ? prev.name : '') ||
-                    fallbackNameFromSender ||
-                    'Direct Message',
-                avatar:
-                    (targetProfile?.avatar_url || '').trim() ||
-                    prev?.avatar ||
-                    fallbackAvatarFromSender ||
-                    null,
-            };
-        } else if (!channelId.startsWith('group-')) {
+    async loadMessages() {
+        if (!window.supabaseClient || !window.ORG_ID) return;
+        const { data, error } = await window.supabaseClient
+            .from('messages')
+            .select('id, channel_id, sender, text, created_at, employee_id')
+            .eq('org_id', window.ORG_ID)
+            .order('created_at', { ascending: true });
+        if (error) {
+            console.warn('[Supabase] Chat load failed:', error.message);
             return;
         }
 
-        const senderMeta = resolveSenderMeta(m.sender || '', senderId);
+        this.refreshMe();
+        const byChannel = {};
+        const serverIds = new Set();
 
-        if (!byChannel[threadId]) byChannel[threadId] = [];
-        dmChannelInsertMap[threadId] = insertChannelId;
-        byChannel[threadId].push({
-            sender: senderMeta.sender,
-            senderId: senderId || null,
-            text: m.text,
-            time: formatChatTime(d),
-            ts: d.toISOString(),
-            avatar: senderMeta.avatar,
-        });
-    });
-    Object.keys(byChannel).forEach(ch => {
-        conversationMessages[ch] = byChannel[ch];
-    });
-}
+        (data || []).forEach((m) => {
+            const channelId = (m.channel_id || '').trim();
+            if (!channelId) return;
+            let threadId = channelId;
+            let insertChannelId = channelId;
 
-async function loadAnnouncementsFromSupabase() {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-    let { data, error } = await window.supabaseClient
-        .from('announcements')
-        .select('created_by, created_by_id, message, created_at')
-        .eq('org_id', window.ORG_ID)
-        .order('created_at', { ascending: true });
-    if (error && /created_by_id/i.test(error.message || '')) {
-        const fallback = await window.supabaseClient
-            .from('announcements')
-            .select('created_by, message, created_at')
-            .eq('org_id', window.ORG_ID)
-            .order('created_at', { ascending: true });
-        data = fallback.data;
-        error = fallback.error;
-    }
-    if (error) {
-        console.warn('[Supabase] Announcements load failed:', error.message);
-        return;
-    }
-    conversationMessages['announcements'] = (data || []).map(a => {
-        const senderMeta = resolveSenderMeta(a.created_by || '', a.created_by_id || null);
-        return {
-            sender: senderMeta.sender,
-            senderId: a.created_by_id || null,
-            text: a.message || '',
-            time: formatChatTime(new Date(a.created_at)),
-            ts: new Date(a.created_at).toISOString(),
-            avatar: senderMeta.avatar,
-        };
-    });
-}
-
-function loadChatMessages() { return null; }
-function saveChatMessages() { if (!window.supabaseClient || !window.ORG_ID) return; }
-function loadExtraConvos() { return []; }
-function saveExtraConvos() {}
-
-const conversationMessages = { 'announcements': [] };
-let chatSyncTimer = null;
-let chatSyncInitialized = false;
-
-function clearSeededChatUI() {
-    const list = document.querySelector('.conversations-list');
-    if (list) list.innerHTML = '';
-    const thread = document.getElementById('chat-thread');
-    if (thread) thread.innerHTML = '';
-}
-
-async function initChatSync() {
-    if (chatSyncInitialized) return;
-    chatSyncInitialized = true;
-    await syncChatFromSupabase();
-    await populateChatEmployees();
-    const active = document.querySelector('.conversation-item.active');
-    if (active) switchConversation(active);
-    if (!chatSyncTimer) {
-        chatSyncTimer = setInterval(syncChatFromSupabase, CHAT_SYNC_INTERVAL_MS);
-    }
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    const dc = document.querySelector('.dashboard-container');
-    if (dc) { dc.style.height = '100vh'; dc.style.maxHeight = '100vh'; dc.style.overflow = 'hidden'; }
-    document.body.style.overflow = 'hidden';
-    document.body.style.height = '100vh';
-
-    clearSeededChatUI();
-    window.addEventListener('supabase-ready', initChatSync, { once: true });
-    if (window.supabaseClient && window.ORG_ID) initChatSync();
-
-    checkManagerStatus();
-    setupChatModals();
-    setupConversationSwitching();
-    setupChatInput();
-    scrollChatToBottom();
-    if (typeof setupNotificationBell === 'function') setupNotificationBell();
-});
-
-async function syncChatFromSupabase() {
-    await loadChatProfiles();
-    await loadChatMessagesFromSupabase();
-    await loadAnnouncementsFromSupabase();
-    rebuildConversationsFromSupabase();
-    const active = document.querySelector('.conversation-item.active');
-    if (active) switchConversation(active);
-}
-
-function getLatestPreview(messages) {
-    return (messages && messages.length > 0) ? (messages[messages.length - 1]?.text || '') : '';
-}
-
-function getMessageTimestamp(message) {
-    const ts = message?.ts || message?.created_at || null;
-    if (!ts) return 0;
-    const val = Date.parse(ts);
-    return Number.isNaN(val) ? 0 : val;
-}
-
-function getLatestConversationTimestamp(chatId) {
-    const messages = conversationMessages[chatId] || [];
-    return messages.length ? Math.max(...messages.map(getMessageTimestamp)) : 0;
-}
-
-function titleFromChannelId(channelId) {
-    if (!channelId) return 'Chat';
-    if (channelId === 'announcements') return 'Announcements';
-    if (channelId.startsWith('dm:') && channelId.indexOf(':', 3) > 3) {
-        const meta = dmChannelMeta[channelId];
-        if (meta?.name && meta.name !== 'Direct Message') return meta.name;
-        const myIds = getMyWebProfileIds();
-        const participantId = parseDmParticipantWeb(channelId, myIds);
-        return participantId ? resolveDisplayName(participantId, 'Direct Message') : (meta?.name || 'Direct Message');
-    }
-    if (channelId.startsWith('group-')) {
-        const raw = channelId.slice(6).replace(/-/g, ' ');
-        return raw.split(' ').filter(Boolean).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ') || 'Group Chat';
-    }
-    return channelId;
-}
-
-function rebuildConversationsFromSupabase() {
-    const list = document.querySelector('.conversations-list');
-    if (!list) return;
-    const activeId = document.querySelector('.conversation-item.active')?.dataset?.chatId || null;
-    list.querySelectorAll('.conversation-item').forEach(item => item.remove());
-
-    const idsInOrder = Object.keys(conversationMessages)
-        .filter(id => !!id && (id === 'announcements' || (conversationMessages[id] || []).length > 0))
-        .sort((a, b) => getLatestConversationTimestamp(b) - getLatestConversationTimestamp(a));
-
-    idsInOrder.forEach((id) => {
-        const type = id === 'announcements' ? 'announcements' : (id.startsWith('group-') ? 'group' : 'dm');
-        addConversationToSidebar(type, id, titleFromChannelId(id), getLatestPreview(conversationMessages[id]), true);
-    });
-
-    const nextActive = (activeId && document.querySelector(`.conversation-item[data-chat-id="${activeId}"]`))
-        || document.querySelector('.conversation-item');
-    if (nextActive) switchConversation(nextActive);
-}
-
-function scrollChatToBottom() {
-    scrollChatThreadToBottom(document.getElementById('chat-thread'));
-}
-
-/**
- * Scroll chat to the latest message without fighting the layout engine.
- * Avoids scrollIntoView (scrolls wrong ancestors / jitters) and avoids many
- * staggered timeouts that visibly "nudge" the scroll position.
- */
-function scrollChatThreadToBottom(thread) {
-    if (!thread) return;
-    const go = () => {
-        thread.scrollTop = thread.scrollHeight;
-    };
-    let rafOnce = null;
-    const afterPaint = () => {
-        if (rafOnce) return;
-        rafOnce = requestAnimationFrame(() => {
-            rafOnce = null;
-            go();
-        });
-    };
-    go();
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            go();
-            thread.querySelectorAll('.chat-message img').forEach((img) => {
-                if (img.complete) return;
-                img.addEventListener('load', afterPaint, { once: true });
-                img.addEventListener('error', afterPaint, { once: true });
-            });
-        });
-    });
-}
-
-function checkManagerStatus() {
-    const currentUser = document.querySelector('.user-profile span')?.textContent || '';
-    let isManager = currentUser.toLowerCase() === 'admin';
-    if (!isManager && window.getEmployeeIdFromName) {
-        const positionsCache = typeof loadEmployeePositions === 'function' ? loadEmployeePositions() : null;
-        if (positionsCache && positionsCache[currentUser]) {
-            isManager = positionsCache[currentUser].includes('MOD') || positionsCache[currentUser].includes('FOH Manager');
-        }
-    }
-    const createGroupBtn = document.getElementById('btn-create-group');
-    if (createGroupBtn) createGroupBtn.style.display = isManager ? 'flex' : 'none';
-}
-
-function setupChatModals() {
-    const newMessageBtn = document.getElementById('btn-new-message');
-    const createGroupBtn = document.getElementById('btn-create-group');
-    const newMessageModal = document.getElementById('new-message-modal');
-    const createGroupModal = document.getElementById('create-group-modal');
-
-    newMessageBtn?.addEventListener('click', () => openChatModal(newMessageModal, 'dm-recipient'));
-    createGroupBtn?.addEventListener('click', () => openChatModal(createGroupModal, 'group-name'));
-
-    document.getElementById('close-new-message')?.addEventListener('click', () => closeChatModal(newMessageModal));
-    document.getElementById('cancel-new-message')?.addEventListener('click', () => closeChatModal(newMessageModal));
-    document.getElementById('close-create-group')?.addEventListener('click', () => closeChatModal(createGroupModal));
-    document.getElementById('cancel-create-group')?.addEventListener('click', () => closeChatModal(createGroupModal));
-
-    document.getElementById('send-dm')?.addEventListener('click', handleSendDM);
-    document.getElementById('create-group')?.addEventListener('click', handleCreateGroup);
-
-    [newMessageModal, createGroupModal].forEach(modal => {
-        modal?.addEventListener('click', e => { if (e.target === modal) closeChatModal(modal); });
-    });
-
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') {
-            if (newMessageModal?.classList.contains('active')) closeChatModal(newMessageModal);
-            if (createGroupModal?.classList.contains('active')) closeChatModal(createGroupModal);
-        }
-    });
-}
-
-function openChatModal(modal, focusId) {
-    if (!modal) return;
-    modal.classList.add('active');
-    document.body.style.overflow = 'hidden';
-    const focusEl = document.getElementById(focusId);
-    if (focusEl) setTimeout(() => focusEl.focus(), 50);
-}
-
-function closeChatModal(modal) {
-    if (!modal) return;
-    modal.classList.remove('active');
-    document.body.style.overflow = '';
-    resetChatModal(modal);
-}
-
-function resetChatModal(modal) {
-    if (modal.id === 'new-message-modal') {
-        const recipient = document.getElementById('dm-recipient');
-        const message = document.getElementById('dm-message');
-        if (recipient) recipient.value = '';
-        if (message) message.value = '';
-    } else if (modal.id === 'create-group-modal') {
-        const name = document.getElementById('group-name');
-        const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
-        if (name) name.value = '';
-        checkboxes.forEach(cb => cb.checked = false);
-    }
-}
-
-function handleSendDM() {
-    const recipientSelect = document.getElementById('dm-recipient');
-    const messageTextarea = document.getElementById('dm-message');
-    const recipient = (recipientSelect?.value || '').trim();
-    const message = (messageTextarea?.value || '').trim();
-
-    if (!recipient) {
-        showChatToast('Please select a recipient.', 'error');
-        recipientSelect?.focus();
-        return;
-    }
-    if (!message) {
-        showChatToast('Please enter a message.', 'error');
-        messageTextarea?.focus();
-        return;
-    }
-
-    const selectedOpt = recipientSelect.options[recipientSelect.selectedIndex];
-    const recipientName = selectedOpt?.text || recipient;
-    const recipientUuid = (recipient && /^[0-9a-fA-F-]{36}$/.test(recipient)) ? recipient : null;
-    if (!recipientUuid) {
-        showChatToast('Recipient must have a UUID profile.', 'error');
-        return;
-    }
-    const currentSenderForDm = resolveCurrentSenderMeta();
-    if (!currentSenderForDm.employeeId) {
-        showChatToast('Your profile is not loaded. Please refresh.', 'error');
-        return;
-    }
-    const chatId = buildSortedDmChannelId(currentSenderForDm.employeeId, recipientUuid);
-    if (!chatId) {
-        showChatToast('Could not build DM channel.', 'error');
-        return;
-    }
-    const recipientThreadId = chatId;
-
-    const existingItem = document.querySelector(`[data-chat-id="${recipientThreadId}"]`);
-    if (existingItem) switchConversation(existingItem);
-
-    if (!conversationMessages[recipientThreadId]) conversationMessages[recipientThreadId] = [];
-
-    const currentSender = resolveCurrentSenderMeta();
-    const now = new Date();
-    conversationMessages[recipientThreadId].push({
-        sender: currentSender.senderDisplay,
-        senderId: currentSender.employeeId || null,
-        text: message,
-        time: formatChatTime(now),
-        ts: now.toISOString(),
-        avatar: currentSender.senderAvatar,
-    });
-
-    dmChannelInsertMap[recipientThreadId] = chatId;
-    dmChannelMeta[recipientThreadId] = { name: recipientName, avatar: resolveProfileById(recipientUuid)?.avatar_url || null };
-    addConversationToSidebar('dm', recipientThreadId, recipientName, message);
-    rebuildConversationsFromSupabase();
-
-    const activeChat = document.querySelector('.conversation-item.active');
-    const bubble = (activeChat && activeChat.dataset.chatId === recipientThreadId)
-        ? addMessageToThread(currentSender.senderDisplay, message, formatChatTime(now), currentSender.senderAvatar, now.toISOString(), true)
-        : null;
-
-    if (window.supabaseClient && window.ORG_ID) {
-        window.supabaseClient.from('messages').insert({
-            org_id: window.ORG_ID,
-            channel_id: chatId,
-            sender: currentSender.senderKey,
-            employee_id: currentSender.employeeId,
-            text: message,
-        }).then(async ({ error }) => {
-            if (error) {
-                const friendly = formatSendError(error);
-                if (bubble) markMessageAsFailed(bubble, friendly);
-                showChatToast(friendly, 'error');
+            if (channelId.startsWith('dm:') && channelId.indexOf(':', 3) > 3) {
+                const rest = channelId.slice(3);
+                const idx = rest.indexOf(':');
+                const leftId = idx > -1 ? KitchenChatIds.normalize(rest.slice(0, idx)) : '';
+                const rightId = idx > -1 ? KitchenChatIds.normalize(rest.slice(idx + 1)) : '';
+                if (!KitchenChatIds.isUuid(leftId) || !KitchenChatIds.isUuid(rightId) || leftId === rightId) return;
+                if (!this.meIds.has(leftId) && !this.meIds.has(rightId)) return;
+                const participantId = KitchenChatIds.parseDmParticipant(channelId, this.meIds);
+                if (!participantId) return;
+                const meAnchor = this.meAnchor();
+                if (!meAnchor) return;
+                const canonicalId = KitchenChatIds.buildSortedDmChannelId(meAnchor, participantId);
+                if (!canonicalId) return;
+                threadId = canonicalId;
+                insertChannelId = canonicalId;
+                const target = this.profileById(participantId);
+                this.store.meta[threadId] = {
+                    name: this.displayName(participantId, this.store.meta[threadId]?.name || 'Direct Message'),
+                    avatar: (target?.avatar_url || '').trim() || this.store.meta[threadId]?.avatar || null,
+                };
+            } else if (channelId.startsWith('group-')) {
+                this.store.meta[threadId] = {
+                    name: this.store.meta[threadId]?.name || KitchenChatIds.groupTitle(channelId),
+                    avatar: null,
+                };
             } else {
-                showChatToast(`Message sent to ${recipientName}.`, 'success');
-                try {
-                    if (window.ORG_ID) {
-                        const { data: tokenRows, error: tokenErr } = await window.supabaseClient
-                            .from('push_tokens')
-                            .select('token, employee_name')
-                            .eq('org_id', window.ORG_ID);
-                        const tokenRow = !tokenErr
-                            ? (tokenRows || []).find(row => {
-                                const key = (row.employee_name || '').trim().toLowerCase();
-                                const byValue = (resolveProfileById(recipientUuid)?.employee_name || recipientName || '').trim().toLowerCase();
-                                return key === byValue;
-                            })
-                            : null;
-                        if (tokenRow?.token) {
-                            fetch('https://exp.host/--/api/v2/push/send', {
-                                method: 'POST',
-                                headers: { 'Accept': 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    to: tokenRow.token,
-                                    sound: 'default',
-                                    priority: 'high',
-                                    channelId: 'default',
-                                    title: `New message from ${currentSender.senderDisplay}`,
-                                    body: message,
-                                    data: { type: 'chat_message', channelId: recipientThreadId }
-                                })
-                            }).catch(err => console.warn('[Push] DM send failed:', err?.message || err));
-                        }
-                    }
-                } catch (e) { console.warn('[Supabase] Failed to notify recipient (DM):', e); }
-            }
-        });
-    } else {
-        showChatToast(`Message sent to ${recipientName}.`, 'success');
-    }
-
-    closeChatModal(document.getElementById('new-message-modal'));
-}
-
-function formatSendError(err) {
-    if (!err) return 'Could not send message. Please try again.';
-    const msg = (err.message || String(err)).toLowerCase();
-    if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed to fetch')) return 'Check your internet connection.';
-    if (msg.includes('jwt') || msg.includes('auth') || msg.includes('session')) return 'Session expired. Please refresh the page.';
-    if (msg.includes('permission') || msg.includes('rls') || msg.includes('policy')) return "You don't have permission to send messages.";
-    if (msg.includes('connection') || msg.includes('timeout')) return 'Could not connect. Please check your internet.';
-    return err.message || 'Could not send message. Please try again.';
-}
-
-function markMessageAsFailed(bubbleEl, errorMessage) {
-    if (!bubbleEl) return;
-    bubbleEl.classList.add('chat-bubble--error');
-    const errSpan = document.createElement('span');
-    errSpan.className = 'chat-bubble-error-text';
-    errSpan.textContent = errorMessage;
-    bubbleEl.appendChild(errSpan);
-}
-
-function formatChatDayLabel(ts) {
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return '';
-    const now = new Date();
-    const sameYear = d.getFullYear() === now.getFullYear();
-    return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function renderThreadMessages(thread, messages, emptyLabel) {
-    if (!thread) return;
-    thread.style.display = 'flex';
-    thread.style.flexDirection = 'column';
-    thread.style.justifyContent = 'flex-start';
-    if (!messages || messages.length === 0) {
-        thread.innerHTML = `
-            <div class="chat-message">
-                ${renderAvatarMarkup('System', null, 'chat-avatar')}
-                <div class="chat-bubble-wrap">
-                    <div class="chat-bubble">
-                        <span class="chat-sender">System</span>
-                        <p class="chat-text">${escapeChatHtml(emptyLabel || 'No messages yet.')}</p>
-                        <span class="chat-time">Just now</span>
-                    </div>
-                </div>
-            </div>
-        `;
-        scrollChatThreadToBottom(thread);
-        return;
-    }
-
-    let lastDayKey = '';
-    const html = ['<div class="chat-thread-spacer" aria-hidden="true"></div>'];
-    const currentSender = resolveCurrentSenderMeta();
-    messages.forEach(msg => {
-        const ts = getMessageTimestamp(msg);
-        const dayKey = ts ? new Date(ts).toISOString().split('T')[0] : '';
-        const senderLooksLikeMe =
-            looksLikeCurrentUser(msg.sender, currentSender);
-        const isMine = (!!msg.senderId && !!currentSender.employeeId && msg.senderId === currentSender.employeeId) || senderLooksLikeMe;
-        if (dayKey && dayKey !== lastDayKey) {
-            lastDayKey = dayKey;
-            html.push(`<div class="chat-day-divider"><span>${escapeChatHtml(formatChatDayLabel(ts))}</span></div>`);
-        }
-        const avatar = (isMine ? currentSender.senderAvatar : msg.avatar) || null;
-        html.push(`
-            <div class="chat-message ${isMine ? 'chat-message--mine' : ''}">
-                ${renderAvatarMarkup(msg.sender, avatar, 'chat-avatar')}
-                <div class="chat-bubble-wrap">
-                    <div class="chat-bubble">
-                        <span class="chat-sender">${escapeChatHtml(msg.sender)}</span>
-                        <p class="chat-text">${escapeChatHtml(msg.text)}</p>
-                        <span class="chat-time">${escapeChatHtml(msg.time)}</span>
-                    </div>
-                </div>
-            </div>
-        `);
-    });
-    thread.innerHTML = html.join('');
-    scrollChatThreadToBottom(thread);
-}
-
-function addMessageToThread(sender, text, time, avatar, ts, forceMine = false) {
-    const thread = document.getElementById('chat-thread');
-    if (!thread) return null;
-
-    const messageAvatar = avatar || null;
-    const parsedTs = ts ? Date.parse(ts) : Date.now();
-    const dayKey = Number.isNaN(parsedTs) ? '' : new Date(parsedTs).toISOString().split('T')[0];
-    const lastDayKey = thread.querySelector('.chat-message:last-of-type')?.dataset?.dayKey || '';
-
-    if (dayKey && dayKey !== lastDayKey) {
-        const divider = document.createElement('div');
-        divider.className = 'chat-day-divider';
-        divider.innerHTML = `<span>${escapeChatHtml(formatChatDayLabel(parsedTs))}</span>`;
-        thread.appendChild(divider);
-    }
-
-    const messageEl = document.createElement('div');
-    if (dayKey) messageEl.dataset.dayKey = dayKey;
-    messageEl.className = `chat-message ${(forceMine || isMyChatMessage(sender)) ? 'chat-message--mine' : ''}`.trim();
-    messageEl.innerHTML = `
-        ${renderAvatarMarkup(sender, messageAvatar, 'chat-avatar')}
-        <div class="chat-bubble-wrap">
-            <div class="chat-bubble">
-                <span class="chat-sender">${escapeChatHtml(sender)}</span>
-                <p class="chat-text">${escapeChatHtml(text)}</p>
-                <span class="chat-time">${escapeChatHtml(time)}</span>
-            </div>
-        </div>
-    `;
-
-    thread.appendChild(messageEl);
-    scrollChatToBottom();
-    return messageEl.querySelector('.chat-bubble');
-}
-
-function handleCreateGroup() {
-    const nameInput = document.getElementById('group-name');
-    const checkboxes = document.querySelectorAll('#create-group-modal input[type="checkbox"]:checked');
-    const groupName = (nameInput?.value || '').trim();
-    const selectedMembers = Array.from(checkboxes).map(cb => cb.value);
-
-    if (!groupName) {
-        showChatToast('Please enter a group name.', 'error');
-        nameInput?.focus();
-        return;
-    }
-    if (selectedMembers.length === 0) {
-        showChatToast('Please select at least one member.', 'error');
-        return;
-    }
-
-    const groupId = `group-${groupName.toLowerCase().replace(/\s+/g, '-')}`;
-    const currentSender = resolveCurrentSenderMeta();
-
-    if (window.supabaseClient && window.ORG_ID) {
-        window.supabaseClient.from('messages').insert({
-            org_id: window.ORG_ID,
-            channel_id: groupId,
-            sender: currentSender.senderKey,
-            employee_id: currentSender.employeeId,
-            text: `${groupName} created`,
-        }).then(({ error }) => {
-            if (error) {
-                showChatToast(formatSendError(error), 'error');
                 return;
             }
-            if (!conversationMessages[groupId]) conversationMessages[groupId] = [];
-            const now = new Date();
-            conversationMessages[groupId].push({
-                sender: currentSender.senderDisplay,
-                senderId: currentSender.employeeId || null,
-                text: `${groupName} created`,
-                time: formatChatTime(now),
-                ts: now.toISOString(),
-                avatar: null,
-            });
-            addConversationToSidebar('group', groupId, groupName, `${selectedMembers.length} members`);
-            rebuildConversationsFromSupabase();
-            closeChatModal(document.getElementById('create-group-modal'));
-            showChatToast(`Group "${groupName}" created.`, 'success');
+
+            if (!byChannel[threadId]) byChannel[threadId] = [];
+            this.store.insertMap[threadId] = insertChannelId;
+            byChannel[threadId].push(this.mapServerMessage(m, threadId));
+            serverIds.add(threadId);
         });
-        return;
+
+        Object.keys(byChannel).forEach((id) => this.store.mergeIncoming(id, byChannel[id]));
+        if (this.meIds.size > 0) this.store.dropMissingServerThreads(serverIds);
     }
 
-    addConversationToSidebar('group', groupId, groupName, `${selectedMembers.length} members`);
-    closeChatModal(document.getElementById('create-group-modal'));
-    showChatToast(`Group "${groupName}" created.`, 'success');
-}
-
-function addConversationToSidebar(type, id, name, preview, skipSave = false) {
-    const conversationsList = document.querySelector('.conversations-list');
-    if (!conversationsList) return;
-
-    if (document.querySelector(`[data-chat-id="${id}"]`)) return;
-
-    if (!skipSave) {
-        const existing = loadExtraConvos().filter(c => c.id !== id);
-        existing.push({ type, id, name, preview });
-        saveExtraConvos(existing);
-    }
-
-    const item = document.createElement('div');
-    item.className = 'conversation-item';
-    item.dataset.chatType = type;
-    item.dataset.chatId = id;
-
-    if (type === 'dm') {
-        let dmAvatar = null;
-        if (id.startsWith('dm:') && id.indexOf(':', 3) > 3) {
-            const myIds = getMyWebProfileIds();
-            const pid = parseDmParticipantWeb(id, myIds);
-            dmAvatar = (pid && resolveProfileById(pid)?.avatar_url) || dmChannelMeta[id]?.avatar || null;
+    async loadAnnouncements() {
+        if (!window.supabaseClient || !window.ORG_ID) return;
+        let { data, error } = await window.supabaseClient
+            .from('announcements')
+            .select('id, created_by, created_by_id, message, created_at')
+            .eq('org_id', window.ORG_ID)
+            .order('created_at', { ascending: true });
+        if (error && /created_by_id/i.test(error.message || '')) {
+            const fallback = await window.supabaseClient
+                .from('announcements')
+                .select('id, created_by, message, created_at')
+                .eq('org_id', window.ORG_ID)
+                .order('created_at', { ascending: true });
+            data = fallback.data;
+            error = fallback.error;
         }
-        item.innerHTML = `
-            ${renderAvatarMarkup(name, dmAvatar, 'conversation-avatar')}
-            <div class="conversation-info">
-                <span class="conversation-name">${escapeChatHtml(name)}</span>
-                <span class="conversation-preview">${escapeChatHtml(preview)}</span>
-            </div>
-        `;
-    } else if (type === 'group') {
-        item.innerHTML = `
-            <i class="fas fa-users"></i>
-            <div class="conversation-info">
-                <span class="conversation-name">${escapeChatHtml(name)}</span>
-                <span class="conversation-preview">${escapeChatHtml(preview)}</span>
-            </div>
-        `;
-    } else {
-        item.innerHTML = `
-            <i class="fas fa-bullhorn"></i>
-            <div class="conversation-info">
-                <span class="conversation-name">${escapeChatHtml(name || 'Announcements')}</span>
-                <span class="conversation-preview">${escapeChatHtml(preview)}</span>
-            </div>
+        if (error) {
+            console.warn('[Supabase] Announcements load failed:', error.message);
+            return;
+        }
+        const incoming = (data || []).map((a) => {
+            const profile = this.profileById(a.created_by_id);
+            const created = new Date(a.created_at);
+            return {
+                serverId: a.id || null,
+                sender: KitchenChat.personName(profile, (a.created_by || '').trim() || 'Unknown user'),
+                senderId: a.created_by_id || null,
+                text: a.message || '',
+                time: KitchenChat.formatTime(created),
+                ts: created.toISOString(),
+                avatar: (profile?.avatar_url || '').trim() || null,
+                pending: false,
+            };
+        });
+        this.store.mergeIncoming('announcements', incoming, { name: 'Announcements' });
+    }
+
+    async sync() {
+        if (this.syncing) {
+            this.syncQueued = true;
+            return;
+        }
+        this.syncing = true;
+        try {
+            await this.loadProfiles();
+            await this.loadMessages();
+            await this.loadAnnouncements();
+            this.renderSidebar();
+            this.renderActiveThread();
+        } finally {
+            this.syncing = false;
+            if (this.syncQueued) {
+                this.syncQueued = false;
+                this.sync();
+            }
+        }
+    }
+
+    subscribeRealtime() {
+        if (!window.supabaseClient || !window.ORG_ID || this.realtime) return;
+        const bump = () => {
+            clearTimeout(this.realtimeTimer);
+            this.realtimeTimer = setTimeout(() => this.sync(), 250);
+        };
+        this.realtime = window.supabaseClient
+            .channel(`kitchen-chat-${window.ORG_ID}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `org_id=eq.${window.ORG_ID}` }, bump)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements', filter: `org_id=eq.${window.ORG_ID}` }, bump)
+            .subscribe();
+    }
+
+    renderSidebar() {
+        const list = document.querySelector('.conversations-list');
+        if (!list) return;
+        const items = this.store.sidebarItems();
+        const fp = items.map((i) => `${i.id}|${i.title}|${i.preview}`).join('\n');
+        if (fp === this.store.sidebarFingerprint && list.querySelectorAll('.conversation-item').length === items.length) {
+            this.markActive();
+            return;
+        }
+        this.store.sidebarFingerprint = fp;
+        const existing = new Map([...list.querySelectorAll('.conversation-item')].map((el) => [el.dataset.chatId, el]));
+        const used = new Set();
+        items.forEach((item, idx) => {
+            let el = existing.get(item.id);
+            if (!el) el = this.buildSidebarItem(item);
+            else this.updateSidebarItem(el, item);
+            used.add(item.id);
+            const current = list.children[idx];
+            if (current !== el) list.insertBefore(el, current || null);
+        });
+        existing.forEach((el, id) => { if (!used.has(id)) el.remove(); });
+        this.markActive();
+    }
+
+    buildSidebarItem(item) {
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'conversation-item';
+        el.dataset.chatType = item.type;
+        el.dataset.chatId = item.id;
+        this.updateSidebarItem(el, item);
+        return el;
+    }
+
+    updateSidebarItem(el, item) {
+        el.dataset.chatType = item.type;
+        el.dataset.chatId = item.id;
+        let media = '';
+        if (item.type === 'dm') media = KitchenChat.avatarMarkup(item.title, item.avatar, 'conversation-avatar');
+        else if (item.type === 'group') media = '<span class="conversation-icon" aria-hidden="true"><i class="fas fa-users"></i></span>';
+        else media = '<span class="conversation-icon" aria-hidden="true"><i class="fas fa-bullhorn"></i></span>';
+        el.innerHTML = `
+            ${media}
+            <span class="conversation-info">
+                <span class="conversation-name">${KitchenChat.escape(item.title)}</span>
+                <span class="conversation-preview">${KitchenChat.escape(item.preview)}</span>
+            </span>
         `;
     }
 
-    conversationsList.appendChild(item);
-    item.addEventListener('click', () => switchConversation(item));
-}
-
-function setupConversationSwitching() {
-    document.querySelectorAll('.conversation-item').forEach(item => {
-        item.addEventListener('click', function () { switchConversation(this); });
-    });
-}
-
-function switchConversation(item) {
-    document.querySelectorAll('.conversation-item').forEach(i => i.classList.remove('active'));
-    item.classList.add('active');
-
-    const chatType = item.dataset.chatType;
-    const chatId = item.dataset.chatId || 'announcements';
-    let chatTitle = item.querySelector('.conversation-name')?.textContent || 'Chat';
-    if (chatType === 'dm' && (!chatTitle || chatTitle === 'Direct Message')) {
-        chatTitle = titleFromChannelId(chatId);
+    markActive() {
+        const activeId = this.store.activeId;
+        document.querySelectorAll('.conversation-item').forEach((el) => {
+            el.classList.toggle('active', el.dataset.chatId === activeId);
+        });
     }
 
-    const titleEl = document.getElementById('chat-title');
-    if (titleEl) {
-        if (chatType === 'announcements') {
-            titleEl.innerHTML = '<i class="fas fa-bullhorn"></i> Announcements';
-        } else if (chatType === 'group') {
-            titleEl.innerHTML = `<i class="fas fa-users"></i> ${escapeChatHtml(chatTitle)}`;
+    openConversation(id, { forceScroll } = {}) {
+        if (!id) return;
+        this.store.activeId = id;
+        this.markActive();
+        this.renderHeader();
+        this.renderActiveThread({ forceScroll: !!forceScroll });
+        const input = document.getElementById('chat-message-input');
+        if (input) input.focus();
+    }
+
+    renderHeader() {
+        const titleEl = document.getElementById('chat-title');
+        if (!titleEl) return;
+        const id = this.store.activeId;
+        const type = KitchenChatIds.channelType(id);
+        const title = this.store.titleFor(id);
+        if (type === 'announcements') {
+            titleEl.innerHTML = '<i class="fas fa-bullhorn"></i><span>Announcements</span>';
+        } else if (type === 'group') {
+            titleEl.innerHTML = `<i class="fas fa-users"></i><span>${KitchenChat.escape(title)}</span>`;
         } else {
-            const myIds = getMyWebProfileIds();
-            const pid = chatId.startsWith('dm:') ? parseDmParticipantWeb(chatId, myIds) : null;
-            const participantProfile = pid ? resolveProfileById(pid) : null;
-            const avatarHtml = participantProfile?.avatar_url
-                ? `<img src="${escapeChatHtml(participantProfile.avatar_url)}" class="chat-title-avatar" style="width:28px;height:28px;border-radius:50%;margin-right:8px;vertical-align:middle;">`
-                : '<i class="fas fa-user"></i> ';
-            titleEl.innerHTML = `${avatarHtml}${escapeChatHtml(chatTitle)}`;
+            const participantId = KitchenChatIds.parseDmParticipant(id, this.meIds);
+            const profile = participantId ? this.profileById(participantId) : null;
+            const avatar = profile?.avatar_url
+                ? `<img src="${KitchenChat.escape(profile.avatar_url)}" alt="" class="chat-title-avatar">`
+                : '<i class="fas fa-user"></i>';
+            titleEl.innerHTML = `${avatar}<span>${KitchenChat.escape(title)}</span>`;
         }
+        const thread = document.getElementById('chat-thread');
+        if (thread) thread.dataset.chatKind = type;
     }
 
-    const thread = document.getElementById('chat-thread');
-    if (!thread) return;
-
-    if (chatType === 'announcements') {
-        renderThreadMessages(thread, conversationMessages['announcements'] || [], 'No announcements yet.');
-    } else {
-        renderThreadMessages(thread, conversationMessages[chatId] || [], chatType === 'group' ? 'Group chat started' : 'Conversation started');
+    nearBottom(thread) {
+        if (!thread) return true;
+        return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 96;
     }
-}
 
-function showChatToast(message, type) {
-    if (typeof showNotificationToast === 'function') {
-        showNotificationToast(message, type);
-        return;
+    scrollToBottom(thread) {
+        if (!thread) return;
+        const go = () => { thread.scrollTop = thread.scrollHeight; };
+        go();
+        requestAnimationFrame(() => requestAnimationFrame(go));
     }
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        position: fixed; bottom: 20px; right: 20px;
-        background: ${type === 'error' ? SheekColors.error : SheekColors.success};
-        color: white; padding: 1rem 1.5rem; border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 10001;
-        font-weight: 600; max-width: 320px;
-    `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
 
-function escapeChatHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function formatChatTime(date) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function getCurrentChatUser() {
-    return (document.querySelector('.user-profile span')?.textContent || 'You').trim();
-}
-
-function isMyChatMessage(sender) {
-    const me = getCurrentChatUser().toLowerCase();
-    const s = (sender || '').trim().toLowerCase();
-    if (!s) return false;
-    return s === me || s === 'you';
-}
-
-function setupChatInput() {
-    const input = document.getElementById('chat-message-input');
-    const sendBtn = document.getElementById('chat-send-btn');
-
-    if (!input || !sendBtn) return;
-
-    input.value = '';
-    setTimeout(() => { if (input) input.value = ''; }, 100);
-    setTimeout(() => { if (input) input.value = ''; }, 500);
-
-    sendBtn.addEventListener('click', handleSendMessage);
-
-    input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSendMessage();
+    renderActiveThread({ forceScroll } = {}) {
+        const thread = document.getElementById('chat-thread');
+        if (!thread) return;
+        const id = this.store.activeId || 'announcements';
+        const messages = this.store.messagesFor(id);
+        const fp = KitchenChatStore.threadFingerprint(messages);
+        const already = thread.dataset.renderedId === id && this.store.threadFingerprints[id] === fp;
+        if (already) {
+            if (forceScroll) this.scrollToBottom(thread);
+            return;
         }
-    });
+        const stick = forceScroll || this.nearBottom(thread) || thread.dataset.renderedId !== id;
+        const prevScroll = thread.scrollTop;
+        this.store.threadFingerprints[id] = fp;
+        thread.dataset.renderedId = id;
+        thread.dataset.chatKind = KitchenChatIds.channelType(id);
+        thread.innerHTML = this.buildThreadHtml(id, messages);
+        if (stick) this.scrollToBottom(thread);
+        else thread.scrollTop = prevScroll;
+        this.renderHeader();
+    }
 
-    input.addEventListener('input', function () {
-        sendBtn.disabled = !(this.value || '').trim().length;
-    });
-
-    sendBtn.disabled = true;
-}
-
-function handleSendMessage() {
-    const input = document.getElementById('chat-message-input');
-    const message = (input?.value || '').trim();
-
-    if (!message) return;
-
-    const activeChat = document.querySelector('.conversation-item.active');
-    if (!activeChat) return;
-
-    const chatType = activeChat.dataset.chatType;
-    const chatId = activeChat.dataset.chatId || 'announcements';
-    const insertChatId = dmChannelInsertMap[chatId] || chatId;
-    const currentSender = resolveCurrentSenderMeta();
-
-    if (chatType === 'announcements') {
-        const now = new Date();
-        const timestamp = formatChatTime(now);
-        if (!Array.isArray(conversationMessages['announcements'])) conversationMessages['announcements'] = [];
-        conversationMessages['announcements'].push({
-            sender: currentSender.senderDisplay,
-            senderId: currentSender.employeeId || null,
-            text: message,
-            time: timestamp,
-            ts: now.toISOString(),
-            avatar: null,
+    buildThreadHtml(id, messages) {
+        if (!messages || messages.length === 0) {
+            const empty = id === 'announcements' ? 'No announcements yet.' : 'No messages yet.';
+            return `<div class="chat-empty">${KitchenChat.escape(empty)}</div>`;
+        }
+        const type = KitchenChatIds.channelType(id);
+        const showSender = type !== 'dm';
+        let lastDay = '';
+        const html = [];
+        messages.forEach((msg) => {
+            const ts = Date.parse(msg.ts || '');
+            const dayKey = Number.isNaN(ts) ? '' : new Date(ts).toISOString().split('T')[0];
+            if (dayKey && dayKey !== lastDay) {
+                lastDay = dayKey;
+                html.push(`<div class="chat-day-divider"><span>${KitchenChat.escape(KitchenChat.formatDay(ts))}</span></div>`);
+            }
+            const mine = this.isMine(msg);
+            const avatar = (mine ? this.senderMeta.senderAvatar : msg.avatar) || null;
+            const fail = msg.failed ? `<span class="chat-bubble-error-text">${KitchenChat.escape(msg.errorMessage || 'Not sent')}</span>` : '';
+            html.push(`
+                <div class="chat-message ${mine ? 'chat-message--mine' : ''} ${msg.pending ? 'chat-message--pending' : ''} ${msg.failed ? 'chat-message--failed' : ''}">
+                    ${KitchenChat.avatarMarkup(msg.sender, avatar, 'chat-avatar')}
+                    <div class="chat-bubble-wrap">
+                        <div class="chat-bubble${msg.failed ? ' chat-bubble--error' : ''}">
+                            ${showSender && !mine ? `<span class="chat-sender">${KitchenChat.escape(msg.sender)}</span>` : ''}
+                            <p class="chat-text">${KitchenChat.escape(msg.text)}</p>
+                            <span class="chat-time">${KitchenChat.escape(msg.time)}${msg.pending && !msg.failed ? ' · Sending' : ''}</span>
+                            ${fail}
+                        </div>
+                    </div>
+                </div>
+            `);
         });
-        const bubble = addMessageToThread(currentSender.senderDisplay, message, timestamp, null, now.toISOString(), true);
-        rebuildConversationsFromSupabase();
+        return html.join('');
+    }
+
+    openModal(modal, focusId) {
+        if (!modal) return;
+        modal.classList.add('active');
+        const focusEl = document.getElementById(focusId);
+        if (focusEl) setTimeout(() => focusEl.focus(), 50);
+    }
+
+    closeModal(modal) {
+        if (!modal) return;
+        modal.classList.remove('active');
+        if (modal.id === 'new-message-modal') {
+            const recipient = document.getElementById('dm-recipient');
+            const message = document.getElementById('dm-message');
+            if (recipient) recipient.value = '';
+            if (message) message.value = '';
+        } else if (modal.id === 'create-group-modal') {
+            const name = document.getElementById('group-name');
+            if (name) name.value = '';
+            modal.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+        }
+    }
+
+    async sendDmFromModal() {
+        const recipientSelect = document.getElementById('dm-recipient');
+        const messageTextarea = document.getElementById('dm-message');
+        const recipient = (recipientSelect?.value || '').trim();
+        const message = (messageTextarea?.value || '').trim();
+        if (!recipient) {
+            KitchenChat.toast('Please select a teammate.', 'error');
+            recipientSelect?.focus();
+            return;
+        }
+        if (!message) {
+            KitchenChat.toast('Please enter a message.', 'error');
+            messageTextarea?.focus();
+            return;
+        }
+        if (!KitchenChatIds.isUuid(recipient)) {
+            KitchenChat.toast('Recipient must have a profile.', 'error');
+            return;
+        }
+        this.refreshMe();
+        if (!this.senderMeta.employeeId) {
+            KitchenChat.toast('Your profile is not loaded. Please refresh.', 'error');
+            return;
+        }
+        const chatId = KitchenChatIds.buildSortedDmChannelId(this.senderMeta.employeeId, recipient);
+        if (!chatId) {
+            KitchenChat.toast('Could not start that conversation.', 'error');
+            return;
+        }
+        const recipientName = recipientSelect.options[recipientSelect.selectedIndex]?.text || this.displayName(recipient, 'Direct Message');
+        this.store.insertMap[chatId] = chatId;
+        this.closeModal(document.getElementById('new-message-modal'));
+        await this.sendToChannel(chatId, 'dm', message, {
+            name: recipientName,
+            avatar: this.profileById(recipient)?.avatar_url || null,
+        });
+        this.notifyPush({
+            chatType: 'dm',
+            chatId,
+            message,
+            recipientUuid: recipient,
+            recipientName,
+        });
+    }
+
+    async createGroupFromModal() {
+        const allowed = await KitchenChatPermissions.canCreateGroup();
+        KitchenChatPermissions.applyCreateGroupButton(allowed);
+        if (!allowed) {
+            KitchenChat.toast('Only managers can create group chats.', 'error');
+            return;
+        }
+        const nameInput = document.getElementById('group-name');
+        const groupName = (nameInput?.value || '').trim();
+        const selected = [...document.querySelectorAll('#create-group-modal input[type="checkbox"]:checked')].map((cb) => cb.value);
+        if (!groupName) {
+            KitchenChat.toast('Please enter a group name.', 'error');
+            nameInput?.focus();
+            return;
+        }
+        const groupId = KitchenChatIds.groupChannelId(groupName);
+        if (!groupId) {
+            KitchenChat.toast('Please enter a group name.', 'error');
+            return;
+        }
+        this.refreshMe();
+        if (!this.senderMeta.employeeId) {
+            KitchenChat.toast('Your profile is not loaded. Please refresh.', 'error');
+            return;
+        }
+        this.closeModal(document.getElementById('create-group-modal'));
+        await this.sendToChannel(groupId, 'group', `${groupName} created`, { name: groupName, avatar: null });
+        this.notifyPush({
+            chatType: 'group',
+            chatId: groupId,
+            message: `${groupName} created`,
+            memberIds: selected,
+        });
+    }
+
+    async handleComposerSend() {
+        const input = document.getElementById('chat-message-input');
+        const message = (input?.value || '').trim();
+        if (!message) return;
+        const chatId = this.store.activeId || 'announcements';
+        const chatType = KitchenChatIds.channelType(chatId);
         if (input) {
             input.value = '';
-            document.getElementById('chat-send-btn').disabled = true;
+            const sendBtn = document.getElementById('chat-send-btn');
+            if (sendBtn) sendBtn.disabled = true;
         }
-        const previewEl = activeChat.querySelector('.conversation-preview');
-        if (previewEl) previewEl.textContent = message.length > 30 ? message.substring(0, 30) + '...' : message;
-
-        if (window.supabaseClient && window.ORG_ID) {
-            window.supabaseClient
-                .from('announcements')
-                .insert({ org_id: window.ORG_ID, message, created_by: currentSender.senderDisplay, created_by_id: currentSender.employeeId || null })
-                .then(async ({ error }) => {
-                    if (error && /created_by_id/i.test(error.message || '')) {
-                        const fallback = await window.supabaseClient
-                            .from('announcements')
-                            .insert({ org_id: window.ORG_ID, message, created_by: currentSender.senderDisplay });
-                        error = fallback.error;
-                    }
-                    if (error) {
-                        markMessageAsFailed(bubble, formatSendError(error));
-                        showChatToast(formatSendError(error), 'error');
-                    } else {
-                        showChatToast('Announcement sent to all staff!', 'success');
-                    }
-                });
-        } else {
-            showChatToast('Announcement posted!', 'success');
-        }
-        return;
+        await this.sendToChannel(chatId, chatType, message);
+        this.notifyPush({ chatType, chatId, message });
     }
 
-    if (!conversationMessages[chatId]) conversationMessages[chatId] = [];
+    async sendToChannel(chatId, chatType, message, extraMeta) {
+        this.refreshMe();
+        const now = new Date();
+        const local = {
+            serverId: null,
+            sender: this.senderMeta.senderDisplay,
+            senderId: this.senderMeta.employeeId || null,
+            text: message,
+            time: KitchenChat.formatTime(now),
+            ts: now.toISOString(),
+            avatar: this.senderMeta.senderAvatar,
+            pending: true,
+        };
+        this.store.pushLocal(chatId, local, extraMeta);
+        this.store.activeId = chatId;
+        this.renderSidebar();
+        this.renderActiveThread({ forceScroll: true });
 
-    const now = new Date();
-    const timestamp = formatChatTime(now);
-    conversationMessages[chatId].push({
-        sender: currentSender.senderDisplay,
-        senderId: currentSender.employeeId || null,
-        text: message,
-        time: timestamp,
-        ts: now.toISOString(),
-        avatar: currentSender.senderAvatar,
-    });
+        if (!window.supabaseClient || !window.ORG_ID) {
+            KitchenChat.toast(chatType === 'announcements' ? 'Announcement posted!' : 'Message sent.', 'success');
+            return;
+        }
 
-    const bubble = addMessageToThread(currentSender.senderDisplay, message, timestamp, currentSender.senderAvatar, now.toISOString(), true);
-    rebuildConversationsFromSupabase();
+        if (chatType === 'announcements') {
+            let { error } = await window.supabaseClient
+                .from('announcements')
+                .insert({
+                    org_id: window.ORG_ID,
+                    message,
+                    created_by: this.senderMeta.senderDisplay,
+                    created_by_id: this.senderMeta.employeeId || null,
+                });
+            if (error && /created_by_id/i.test(error.message || '')) {
+                const fallback = await window.supabaseClient
+                    .from('announcements')
+                    .insert({ org_id: window.ORG_ID, message, created_by: this.senderMeta.senderDisplay });
+                error = fallback.error;
+            }
+            if (error) {
+                this.store.markFailed(chatId, local.ts, message, KitchenChat.sendError(error));
+                this.renderActiveThread({ forceScroll: true });
+                KitchenChat.toast(KitchenChat.sendError(error), 'error');
+                return;
+            }
+            KitchenChat.toast('Announcement sent.', 'success');
+            await this.sync();
+            return;
+        }
 
-    if (window.supabaseClient && window.ORG_ID) {
-        window.supabaseClient.from('messages').insert({
+        const insertChatId = this.store.insertMap[chatId] || chatId;
+        const { error } = await window.supabaseClient.from('messages').insert({
             org_id: window.ORG_ID,
             channel_id: insertChatId,
-            sender: currentSender.senderKey,
-            employee_id: currentSender.employeeId,
+            sender: this.senderMeta.senderKey,
+            employee_id: this.senderMeta.employeeId,
             text: message,
-        }).then(async ({ error }) => {
-            if (error) {
-                markMessageAsFailed(bubble, formatSendError(error));
-                showChatToast(formatSendError(error), 'error');
-            } else {
-                try {
-                    const { data: tokens, error: tokensError } = await window.supabaseClient
-                        .from('push_tokens')
-                        .select('token, employee_name')
-                        .eq('org_id', window.ORG_ID);
-
-                    if (!tokensError && tokens) {
-                        let pushTokens = [];
-                        if (chatType === 'dm') {
-                            const myIds = getMyWebProfileIds();
-                            const participantUuid = parseDmParticipantWeb(chatId, myIds);
-                            const recipientName = participantUuid
-                                ? (resolveProfileById(participantUuid)?.employee_name || '')
-                                : '';
-                            const recipientTokenRow = recipientName
-                                ? tokens.find(p => (p.employee_name || '').toLowerCase() === recipientName.toLowerCase())
-                                : null;
-                            if (recipientTokenRow?.token) pushTokens.push(recipientTokenRow.token);
-                        } else if (chatType === 'group' || chatType === 'announcements') {
-                            tokens.forEach(p => {
-                                if (p.token && (p.employee_name || '').toLowerCase() !== currentSender.senderDisplay.toLowerCase()) {
-                                    pushTokens.push(p.token);
-                                }
-                            });
-                        }
-
-                        pushTokens.forEach(token => {
-                            fetch('https://exp.host/--/api/v2/push/send', {
-                                method: 'POST',
-                                headers: { 'Accept': 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    to: token,
-                                    sound: 'default',
-                                    priority: 'high',
-                                    channelId: 'default',
-                                    title: chatType === 'group' || chatType === 'announcements' ? `New message in ${chatType === 'group' ? 'group' : 'announcements'} from ${currentSender.senderDisplay}` : `New message from ${currentSender.senderDisplay}`,
-                                    body: message,
-                                    data: { type: 'chat_message', channelId: chatId }
-                                })
-                            });
-                        });
-                    }
-                } catch (e) { console.warn(e); }
-            }
         });
+        if (error) {
+            this.store.markFailed(chatId, local.ts, message, KitchenChat.sendError(error));
+            this.renderActiveThread({ forceScroll: true });
+            KitchenChat.toast(KitchenChat.sendError(error), 'error');
+            return;
+        }
+        await this.sync();
     }
 
-    if (input) {
-        input.value = '';
-        input.focus();
-        document.getElementById('chat-send-btn').disabled = true;
+    async notifyPush({ chatType, chatId, message, recipientUuid, recipientName, memberIds }) {
+        if (!window.supabaseClient || !window.ORG_ID) return;
+        try {
+            const { data: tokens, error } = await window.supabaseClient
+                .from('push_tokens')
+                .select('token, employee_name')
+                .eq('org_id', window.ORG_ID);
+            if (error || !tokens) return;
+            const pushTokens = [];
+            if (chatType === 'dm') {
+                const name = (this.profileById(recipientUuid)?.employee_name || recipientName || this.store.titleFor(chatId) || '').trim().toLowerCase();
+                const row = tokens.find((t) => (t.employee_name || '').trim().toLowerCase() === name);
+                if (row?.token) pushTokens.push(row.token);
+            } else {
+                const selectedNames = new Set((memberIds || []).map((id) => this.displayName(id, '').toLowerCase()).filter(Boolean));
+                tokens.forEach((row) => {
+                    const key = (row.employee_name || '').toLowerCase();
+                    if (!row.token) return;
+                    if (key && key === this.senderMeta.senderDisplay.toLowerCase()) return;
+                    if (selectedNames.size && !selectedNames.has(key)) return;
+                    pushTokens.push(row.token);
+                });
+            }
+            const title = chatType === 'announcements'
+                ? `Announcement from ${this.senderMeta.senderDisplay}`
+                : chatType === 'group'
+                    ? `New message in ${this.store.titleFor(chatId)}`
+                    : `New message from ${this.senderMeta.senderDisplay}`;
+            pushTokens.forEach((token) => {
+                fetch('https://exp.host/--/api/v2/push/send', {
+                    method: 'POST',
+                    headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        to: token,
+                        sound: 'default',
+                        priority: 'high',
+                        channelId: 'default',
+                        title,
+                        body: message,
+                        data: { type: 'chat_message', channelId: chatId },
+                    }),
+                }).catch(() => {});
+            });
+        } catch (e) {
+            console.warn('[Push] notify failed:', e);
+        }
     }
 
-    const previewEl = activeChat.querySelector('.conversation-preview');
-    if (previewEl) previewEl.textContent = message.length > 30 ? message.substring(0, 30) + '...' : message;
+    bindUi() {
+        if (this.uiBound) return;
+        this.uiBound = true;
+
+        const list = document.querySelector('.conversations-list');
+        if (list && !list.dataset.kkBound) {
+            list.dataset.kkBound = '1';
+            list.addEventListener('click', (e) => {
+                const item = e.target.closest('.conversation-item');
+                if (item?.dataset.chatId) this.openConversation(item.dataset.chatId);
+            });
+        }
+
+        const newMessageBtn = document.getElementById('btn-new-message');
+        const createGroupBtn = document.getElementById('btn-create-group');
+        const newMessageModal = document.getElementById('new-message-modal');
+        const createGroupModal = document.getElementById('create-group-modal');
+
+        newMessageBtn?.addEventListener('click', () => this.openModal(newMessageModal, 'dm-recipient'));
+        createGroupBtn?.addEventListener('click', async () => {
+            const allowed = await KitchenChatPermissions.canCreateGroup();
+            KitchenChatPermissions.applyCreateGroupButton(allowed);
+            if (!allowed) {
+                KitchenChat.toast('Only managers can create group chats.', 'error');
+                return;
+            }
+            this.openModal(createGroupModal, 'group-name');
+        });
+
+        document.getElementById('close-new-message')?.addEventListener('click', () => this.closeModal(newMessageModal));
+        document.getElementById('cancel-new-message')?.addEventListener('click', () => this.closeModal(newMessageModal));
+        document.getElementById('close-create-group')?.addEventListener('click', () => this.closeModal(createGroupModal));
+        document.getElementById('cancel-create-group')?.addEventListener('click', () => this.closeModal(createGroupModal));
+        document.getElementById('send-dm')?.addEventListener('click', () => this.sendDmFromModal());
+        document.getElementById('create-group')?.addEventListener('click', () => this.createGroupFromModal());
+
+        [newMessageModal, createGroupModal].forEach((modal) => {
+            modal?.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(modal); });
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (newMessageModal?.classList.contains('active')) this.closeModal(newMessageModal);
+            if (createGroupModal?.classList.contains('active')) this.closeModal(createGroupModal);
+        });
+
+        const input = document.getElementById('chat-message-input');
+        const sendBtn = document.getElementById('chat-send-btn');
+        if (input && sendBtn) {
+            input.value = '';
+            sendBtn.disabled = true;
+            sendBtn.addEventListener('click', () => this.handleComposerSend());
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.handleComposerSend();
+                }
+            });
+            input.addEventListener('input', () => {
+                sendBtn.disabled = !(input.value || '').trim().length;
+            });
+        }
+    }
+
+    async init() {
+        const dc = document.querySelector('.dashboard-container');
+        if (dc) {
+            dc.style.height = '100vh';
+            dc.style.maxHeight = '100vh';
+            dc.style.overflow = 'hidden';
+        }
+        document.body.style.overflow = 'hidden';
+        document.body.style.height = '100vh';
+
+        this.bindUi();
+        const canCreate = await KitchenChatPermissions.canCreateGroup();
+        KitchenChatPermissions.applyCreateGroupButton(canCreate);
+        await this.sync();
+        await this.populatePeoplePickers();
+        this.subscribeRealtime();
+        if (!this.syncTimer) this.syncTimer = setInterval(() => this.sync(), KitchenChat.POLL_MS);
+        if (!this.initialized && typeof setupNotificationBell === 'function') setupNotificationBell();
+        this.initialized = true;
+    }
 }
+
+window.KitchenChat = KitchenChat;
+window.KitchenChatStore = KitchenChatStore;
+window.KitchenChatPermissions = KitchenChatPermissions;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const app = new KitchenChat();
+    window.kitchenChat = app;
+    const boot = () => app.init();
+    window.addEventListener('supabase-ready', boot);
+    window.addEventListener('kk-admin-authenticated', boot);
+    KitchenChatPermissions.applyCreateGroupButton(false);
+    app.bindUi();
+    if (window.supabaseClient && window.ORG_ID) boot();
+});
