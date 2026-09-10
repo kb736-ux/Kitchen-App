@@ -1,115 +1,156 @@
-/* Scheduling Page Specific Styles */
+/* Scheduling Page Specific Styles
+   Toolbar reuses .dashboard-header from styles.css (flat, like Home/Employees).
+   Matrix is the only glass card. */
 
-.scheduling-header {
+.scheduling-page .dashboard-main {
+    padding-top: 1.5rem;
+}
+
+.scheduling-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
-    padding: 1.5rem;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    gap: 0.85rem 1.25rem;
 }
 
-.scheduling-header h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #2d3748;
-    margin: 0;
+.scheduling-toolbar h1 {
+    font-size: 1.75rem;
 }
 
-.header-actions {
+.scheduling-header-actions {
     display: flex;
-    gap: 1rem;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
 }
 
 .btn-primary, .btn-secondary {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
+    gap: 0.45rem;
+    padding: 0.55rem 1.1rem;
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
-    font-size: 0.9rem;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    font-size: 0.875rem;
 }
 
 .btn-primary {
     background: #4CAF50;
     color: white;
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.25);
 }
 
 .btn-primary:hover {
-    background: #45a049;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
+    background: #43a047;
+    box-shadow: 0 3px 10px rgba(76, 175, 80, 0.3);
 }
 
 .btn-secondary {
-    background: rgba(255, 255, 255, 0.9);
+    background: #fff;
     color: #4a5568;
-    border: 2px solid #e2e8f0;
+    border: 1.5px solid #e2e8f0;
 }
 
 .btn-secondary:hover {
     background: #f7fafc;
     border-color: #4CAF50;
-    color: #4CAF50;
-    transform: translateY(-2px);
+    color: #2e7d32;
 }
 
-/* Week Navigation */
+/* Week Navigation — inline with page title, not a second card */
 .week-navigation {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
-    padding: 1.5rem;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
+    justify-content: center;
+    gap: 0.35rem;
 }
 
 .week-nav-btn {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    background: rgba(76, 175, 80, 0.1);
-    color: #4CAF50;
-    border: 2px solid rgba(76, 175, 80, 0.2);
-    border-radius: 12px;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: transparent;
+    color: #4a5568;
+    border: none;
+    border-radius: 8px;
     cursor: pointer;
-    font-weight: 600;
-    transition: all 0.3s ease;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .week-nav-btn:hover {
-    background: #4CAF50;
-    color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.3);
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
 }
 
-.week-display h2 {
-    font-size: 1.5rem;
-    font-weight: 700;
+.week-display-title {
+    font-size: 1.05rem;
+    font-weight: 600;
     color: #2d3748;
     margin: 0;
+    min-width: 11.5rem;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.week-today-btn {
+    margin-left: 0.35rem;
+    padding: 0.3rem 0.7rem;
+    border: 1.5px solid #c6f6d5;
+    background: #f0fff4;
+    color: #276749;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.week-today-btn:hover {
+    background: #c6f6d5;
+}
+
+.form-label-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.form-label-row label {
+    margin-bottom: 0;
+}
+
+.sched-inline-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #2e7d32;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.sched-inline-link:hover {
+    text-decoration: underline;
 }
 
 /* Schedule Grid */
 .schedule-container {
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
     overflow: hidden;
+    border: 1px solid #e2e8f0;
 }
 
 /* Employee (rows) × day (columns) matrix */
@@ -144,56 +185,55 @@
 }
 
 .sched-corner-cell {
-    background: linear-gradient(135deg, #2e7d32, #4CAF50);
+    background: #2e7d32;
     color: white;
-    padding: 0.75rem 1rem;
-    font-weight: 700;
-    font-size: 0.85rem;
+    padding: 0.6rem 0.9rem;
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
     display: flex;
     align-items: center;
     position: sticky;
     left: 0;
     z-index: 4;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.04);
 }
 
 .sched-day-header-cell {
-    background: linear-gradient(135deg, #4CAF50, #66bb6a);
+    background: #4CAF50;
     color: white;
-    padding: 0.75rem 0.5rem;
+    padding: 0.6rem 0.4rem;
     text-align: center;
-    font-weight: 700;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
 }
 
 .sched-day-header-cell.sched-day-header-today {
-    background: linear-gradient(135deg, #2e7d32, #43a047);
-    box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.85);
+    background: #2e7d32;
+    box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.85);
 }
 
 .sched-day-header-cell.sched-day-header-past {
-    background: linear-gradient(135deg, #78909c, #90a4ae);
-    opacity: 0.92;
+    background: #90a4ae;
 }
 
 .sched-employee-cell {
     background: #fff;
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.7rem;
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.55rem;
     position: sticky;
     left: 0;
     z-index: 2;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.03);
     border-right: 1px solid #edf2f7;
 }
 
 .sched-emp-avatar {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
     background: #4CAF50;
     color: white;
@@ -201,7 +241,7 @@
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     flex-shrink: 0;
 }
 
@@ -229,17 +269,17 @@
 
 .sched-matrix-cell {
     background: #fff;
-    padding: 6px;
-    min-height: 88px;
+    padding: 5px;
+    min-height: 72px;
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
 .sched-matrix-cell.sched-matrix-cell-today {
-    background: linear-gradient(180deg, rgba(76, 175, 80, 0.09) 0%, #fff 40%);
-    box-shadow: inset 0 0 0 2px rgba(76, 175, 80, 0.28);
+    background: #f4faf4;
+    box-shadow: inset 0 0 0 1.5px rgba(76, 175, 80, 0.35);
 }
 
 .sched-matrix-cell.sched-matrix-cell-past {
@@ -248,88 +288,98 @@
 
 /* Approved time off for this employee on this calendar day (from shift_requests) */
 .sched-matrix-cell.sched-matrix-cell-time-off {
-    background: linear-gradient(180deg, rgba(229, 62, 62, 0.12) 0%, #fff 42%);
-    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.32);
+    background: #fff5f5;
+    box-shadow: inset 0 0 0 1.5px rgba(229, 62, 62, 0.28);
 }
 
 .sched-matrix-cell.sched-matrix-cell-today.sched-matrix-cell-time-off {
-    background: linear-gradient(180deg, rgba(229, 62, 62, 0.18) 0%, rgba(255, 255, 255, 0.95) 45%);
-    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.45);
+    background: #fff5f5;
+    box-shadow: inset 0 0 0 1.5px rgba(229, 62, 62, 0.4);
 }
 
 .sched-matrix-cell.sched-matrix-cell-past.sched-matrix-cell-time-off {
-    background: linear-gradient(180deg, rgba(229, 62, 62, 0.1) 0%, #f7fafc 42%);
-    box-shadow: inset 0 0 0 2px rgba(229, 62, 62, 0.28);
+    background: #faf7f7;
+    box-shadow: inset 0 0 0 1.5px rgba(229, 62, 62, 0.22);
 }
 
 .sched-cell-add {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 26px;
-    height: 26px;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     background: rgba(76, 175, 80, 0.12);
     color: #2e7d32;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     padding: 0;
     z-index: 1;
-    transition: background 0.2s ease, transform 0.15s ease;
+    opacity: 0;
+    transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.sched-matrix-cell:hover .sched-cell-add,
+.sched-matrix-cell:focus-within .sched-cell-add,
+.sched-cell-add:focus-visible {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .sched-cell-add {
+        opacity: 0.55;
+    }
 }
 
 .sched-cell-add:hover {
     background: rgba(76, 175, 80, 0.22);
-    transform: scale(1.05);
 }
 
 .sched-matrix-cell-past .sched-cell-add {
-    opacity: 0.5;
-    pointer-events: none;
+    display: none;
 }
 
 .sched-cell-shifts {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-top: 28px;
+    gap: 4px;
+    padding-top: 2px;
     flex: 1;
 }
 
 .shift-card.shift-card--compact {
-    padding: 0.45rem 0.5rem 0.45rem 0.25rem;
+    padding: 0.35rem 0.4rem 0.35rem 0.2rem;
     margin: 0;
+    border-radius: 8px;
+    box-shadow: none;
 }
 
 .shift-card.shift-card--compact .shift-card-drag-handle {
-    padding: 0.15rem 0.1rem;
-    margin-top: 0.05rem;
-    font-size: 0.75rem;
+    padding: 0.1rem 0.05rem;
+    margin-top: 0;
+    font-size: 0.7rem;
 }
 
 .shift-card.shift-card--compact .shift-header {
-    margin-bottom: 0.35rem;
+    margin-bottom: 0;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 2px 4px;
 }
 
 .shift-card.shift-card--compact .shift-position {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     line-height: 1.2;
 }
 
 .shift-card.shift-card--compact .shift-time {
-    font-size: 0.68rem;
-    padding: 0.15rem 0.35rem;
-}
-
-.shift-card.shift-card--compact .shift-employee,
-.shift-card.shift-card--compact .shift-card-hint {
-    display: none;
+    font-size: 0.65rem;
+    padding: 0.08rem 0.3rem;
+    background: transparent;
+    color: #4a5568;
 }
 
 .sched-matrix-empty {
@@ -348,66 +398,15 @@
     line-height: 1.5;
 }
 
-.schedule-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
-    background: #e2e8f0;
-    align-items: start;
-}
-
-.day-header {
-    background: linear-gradient(135deg, #4CAF50, #66bb6a);
-    color: white;
-    padding: 1rem;
-    text-align: center;
-    font-weight: 700;
-    font-size: 1rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.day-header.day-header-today {
-    background: linear-gradient(135deg, #2e7d32, #4CAF50);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.8), 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.day-header.day-header-past {
-    background: linear-gradient(135deg, #78909c, #90a4ae);
-    opacity: 0.85;
-}
-
-.day-column {
-    background: white;
-    min-height: 200px;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-
-.day-column.day-column-today {
-    background: linear-gradient(180deg, rgba(76, 175, 80, 0.08) 0%, #ffffff 15%);
-    box-shadow: inset 0 0 0 2px rgba(76, 175, 80, 0.35);
-}
-
-.day-column.day-column-past {
-    background: #f5f5f5;
-    opacity: 0.9;
-}
-
-.day-column.day-column-past .shift-card {
-    opacity: 0.9;
-}
-
 /* Shift Cards */
 .shift-card {
-    background: white;
-    border-radius: 12px;
+    background: #fff;
+    border-radius: 10px;
     padding: 0.65rem 0.75rem 0.65rem 0.35rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    border-left: 4px solid #4CAF50;
-    transition: all 0.3s ease;
+    box-shadow: none;
+    border: 1px solid #edf2f7;
+    border-left: 3px solid #4CAF50;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
     cursor: pointer;
     display: flex;
     flex-direction: row;
@@ -455,8 +454,8 @@ body.sched-await-duplicate-drop #schedule-matrix {
 }
 
 .shift-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    border-color: #e2e8f0;
 }
 
 .shift-details-past-banner {
@@ -477,27 +476,27 @@ body.sched-await-duplicate-drop #schedule-matrix {
 /* Position-specific colors */
 .shift-card.line-cook {
     border-left-color: #e53e3e;
-    background: linear-gradient(135deg, #fff5f5, #ffffff);
+    background: #fff8f8;
 }
 
 .shift-card.server {
     border-left-color: #3182ce;
-    background: linear-gradient(135deg, #ebf8ff, #ffffff);
+    background: #f7fbff;
 }
 
 .shift-card.dish {
     border-left-color: #805ad5;
-    background: linear-gradient(135deg, #faf5ff, #ffffff);
+    background: #faf8ff;
 }
 
 .shift-card.prep {
     border-left-color: #d69e2e;
-    background: linear-gradient(135deg, #fffbeb, #ffffff);
+    background: #fffdf5;
 }
 
 .shift-card.foh-manager {
     border-left-color: #38a169;
-    background: linear-gradient(135deg, #f0fff4, #ffffff);
+    background: #f6fdf8;
 }
 
 .shift-header {
@@ -545,31 +544,6 @@ body.sched-await-duplicate-drop #schedule-matrix {
     color: #2d3748;
 }
 
-/* Assign Task button on shift cards */
-.assign-task-btn {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 10px;
-    width: 100%;
-    background: transparent;
-    border: 1.5px dashed #cbd5e0;
-    border-radius: 8px;
-    padding: 5px 10px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #718096;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    justify-content: center;
-}
-
-.assign-task-btn:hover {
-    background: #f0fff4;
-    border-color: #4CAF50;
-    color: #276749;
-}
-
 .shift-card-hint {
     font-size: 0.7rem;
     color: #a0aec0;
@@ -581,66 +555,6 @@ body.sched-await-duplicate-drop #schedule-matrix {
 
 .shift-card-hint i {
     font-size: 0.65rem;
-}
-
-/* Per-day Add Shift Button */
-.day-add-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    width: 100%;
-    padding: 0.45rem 0.5rem;
-    background: rgba(76, 175, 80, 0.07);
-    color: #4CAF50;
-    border: 1.5px dashed rgba(76, 175, 80, 0.4);
-    border-radius: 8px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.day-add-btn:hover {
-    background: rgba(76, 175, 80, 0.15);
-    border-color: #4CAF50;
-    color: #2e7d32;
-}
-
-.day-add-btn i {
-    font-size: 0.75rem;
-}
-
-/* Empty Day Styling */
-.empty-day {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 120px;
-    color: #a0aec0;
-    cursor: pointer;
-    border: 2px dashed #e2e8f0;
-    border-radius: 12px;
-    transition: all 0.3s ease;
-    padding: 2rem;
-}
-
-.empty-day:hover {
-    border-color: #4CAF50;
-    color: #4CAF50;
-    background: rgba(76, 175, 80, 0.05);
-}
-
-.empty-day i {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-}
-
-.empty-day span {
-    font-weight: 600;
-    font-size: 0.9rem;
 }
 
 /* Modal Styles */
@@ -807,6 +721,10 @@ body.sched-await-duplicate-drop #schedule-matrix {
     color: #2d3748;
 }
 
+.form-group .form-label-row label {
+    margin-bottom: 0;
+}
+
 .form-control {
     width: 100%;
     padding: 0.75rem;
@@ -823,112 +741,41 @@ body.sched-await-duplicate-drop #schedule-matrix {
 }
 
 /* Responsive Design */
-@media (max-width: 1200px) {
-    .schedule-grid {
-        grid-template-columns: repeat(4, 1fr);
-    }
-    
-    .day-header:nth-child(n+5) {
-        display: none;
-    }
-    
-    .day-column:nth-child(n+5) {
-        display: none;
-    }
-}
-
 @media (max-width: 768px) {
-    .scheduling-header {
+    .scheduling-toolbar {
+        display: flex;
         flex-direction: column;
-        gap: 1rem;
         align-items: stretch;
+        text-align: left;
+        gap: 0.85rem;
     }
-    
-    .header-actions {
-        justify-content: center;
+
+    .scheduling-toolbar .header-center {
+        justify-content: flex-start;
     }
-    
-    .week-navigation {
-        flex-direction: column;
-        gap: 1rem;
-        text-align: center;
+
+    .scheduling-header-actions {
+        justify-content: flex-start;
     }
-    
-    .schedule-grid {
-        grid-template-columns: repeat(2, 1fr);
+
+    .week-display-title {
+        min-width: 0;
+        font-size: 0.95rem;
     }
-    
-    .day-header:nth-child(n+3) {
-        display: none;
-    }
-    
-    .day-column:nth-child(n+3) {
-        display: none;
-    }
-    
-    .day-column {
-        min-height: 400px;
-    }
-    
+
     .modal {
         width: 95%;
         margin: 1rem;
     }
-    
+
     .form-row {
         grid-template-columns: 1fr;
     }
 }
 
-@media (max-width: 480px) {
-    .schedule-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .day-header:nth-child(n+2) {
-        display: none;
-    }
-    
-    .day-column:nth-child(n+2) {
-        display: none;
-    }
-}
-
-/* Animation for shift cards */
-.shift-card {
-    animation: fadeInUp 0.6s ease forwards;
-}
-
-.shift-card:nth-child(1) { animation-delay: 0.1s; }
-.shift-card:nth-child(2) { animation-delay: 0.2s; }
-.shift-card:nth-child(3) { animation-delay: 0.3s; }
-.shift-card:nth-child(4) { animation-delay: 0.4s; }
-.shift-card:nth-child(5) { animation-delay: 0.5s; }
-.shift-card:nth-child(6) { animation-delay: 0.6s; }
-.shift-card:nth-child(7) { animation-delay: 0.7s; }
-.shift-card:nth-child(8) { animation-delay: 0.8s; }
-
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* Drag and drop styles (for future enhancement) */
 .shift-card.dragging {
     opacity: 0.7;
-    transform: rotate(5deg);
     z-index: 1000;
-}
-
-.day-column.drop-zone {
-    background: rgba(76, 175, 80, 0.1);
-    border: 2px dashed #4CAF50;
 }
 
 /* Task Assignment Modal */
@@ -1206,7 +1053,7 @@ body.sched-await-duplicate-drop #schedule-matrix {
 }
 
 /* Calendar / History View Modal */
-.calendar-history-modal .modal {
+.modal.calendar-history-modal {
     max-width: 420px;
     max-height: 90vh;
     display: flex;
