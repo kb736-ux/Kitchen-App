@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="assets/favicon.png" sizes="192x192" />
+    <link rel="icon" type="image/png" href="assets/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <title>Sheek - Employees</title>
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="employees.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -14,7 +18,7 @@
         <!-- Top Navigation -->
         <nav class="top-nav">
             <div class="nav-brand">
-                <i class="fas fa-utensils"></i>
+                <img src="assets/logo.png" alt="" class="nav-logo" width="36" height="36">
                 <span>Sheek</span>
             </div>
             <div class="nav-tabs">
@@ -500,6 +504,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="tokens.js"></script>
     <script src="supabase-config.js?v=20260414-implicit"></script>
     <script src="subscriptionPlans.js?v=1"></script>
     <script src="stripeBilling.js?v=1"></script>

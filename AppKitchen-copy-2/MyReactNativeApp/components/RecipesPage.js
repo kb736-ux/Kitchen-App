@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Activi
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, ORG_ID } from '../utils/supabase';
 import { quickAdjustKitted, quickAdjustAvailable } from '../utils/inventorySync';
+import { Colors } from '../constants/theme';
 
 const FRACTIONAL_UNITS = ['qt', 'pt', 'liters', 'cups', 'oz', 'lbs', 'kg', 'g'];
 const SHOULD_SEED_SAMPLE_DATA = false;
@@ -266,7 +267,7 @@ const RecipesPage = ({ orgId }) => {
             style={[styles.tabBtn, view === 'active' && styles.tabBtnActive]}
             onPress={() => { setView('active'); setExpandedId(null); }}
           >
-            <Ionicons name="checkmark-circle" size={16} color={view === 'active' ? '#4CAF50' : '#a0aec0'} />
+            <Ionicons name="checkmark-circle" size={16} color={view === 'active' ? Colors.primary : '#a0aec0'} />
             <Text style={[styles.tabBtnText, view === 'active' && styles.tabBtnTextActive]}>
               Active{activeCount > 0 ? ` (${activeCount})` : ''}
             </Text>
@@ -287,7 +288,7 @@ const RecipesPage = ({ orgId }) => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4CAF50']} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
         }
       >
         {/* Search */}
@@ -349,7 +350,7 @@ const RecipesPage = ({ orgId }) => {
                     <View style={styles.dishRecipeTags}>
                       {componentRecipes.map((recipeName, i) => (
                         <View key={i} style={styles.dishRecipeTag}>
-                          <Ionicons name="book" size={12} color="#4CAF50" />
+                          <Ionicons name="book" size={12} color={Colors.primary} />
                           <Text style={styles.dishRecipeTagText}>{recipeName}</Text>
                         </View>
                       ))}
@@ -425,7 +426,7 @@ const RecipesPage = ({ orgId }) => {
         {/* Recipes views (active / inactive) — only when NOT on Dishes tab */}
         {view !== 'dishes' && (
           loading ? (
-            <ActivityIndicator size="small" color="#4CAF50" style={{ marginTop: 24 }} />
+            <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 24 }} />
           ) : filtered.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Ionicons name={view === 'active' ? 'restaurant-outline' : 'archive-outline'} size={40} color="#e2e8f0" />
@@ -453,7 +454,7 @@ const RecipesPage = ({ orgId }) => {
                       <Ionicons
                         name="restaurant"
                         size={20}
-                        color={view === 'active' ? '#4CAF50' : '#a0aec0'}
+                        color={view === 'active' ? Colors.primary : '#a0aec0'}
                       />
                     </View>
                     <View style={styles.cardBody}>
@@ -598,7 +599,7 @@ const RecipesPage = ({ orgId }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.bg },
 
   // Header
   header: {
@@ -620,9 +621,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1.5,
     borderColor: '#e2e8f0',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
-  tabBtnActive: { borderColor: '#4CAF50', backgroundColor: '#f0fff4' },
+  tabBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primarySoft },
   tabBtnInactive: { borderColor: '#cbd5e0', backgroundColor: '#f7fafc' },
   tabBtnDishes: { borderColor: '#ed8936', backgroundColor: '#fffaf0' },
   tabBtnText: { fontSize: 12, fontWeight: '600', color: '#a0aec0' },
@@ -675,7 +676,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 10,
-    backgroundColor: '#f0fff4',
+    backgroundColor: Colors.primarySoft,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -686,7 +687,7 @@ const styles = StyleSheet.create({
   cardNameInactive: { color: '#a0aec0', textDecorationLine: 'line-through' },
   cardDesc: { fontSize: 13, color: '#718096', lineHeight: 18 },
   cardYield: { fontSize: 12, color: '#718096', fontWeight: '600', marginTop: 2 },
-  cardMeta: { fontSize: 12, color: '#4CAF50', fontWeight: '600', marginTop: 4 },
+  cardMeta: { fontSize: 12, color: Colors.primary, fontWeight: '600', marginTop: 4 },
 
   // Inventory row (active recipes)
   inventoryRow: {
@@ -729,7 +730,7 @@ const styles = StyleSheet.create({
   },
   ingredientsTitle: { fontSize: 12, fontWeight: '700', color: '#4a5568', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   ingredientRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  ingredientDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4CAF50', marginRight: 10 },
+  ingredientDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.primary, marginRight: 10 },
   ingredientText: { fontSize: 14, color: '#2d3748' },
   ingredientTextInactive: { color: '#a0aec0' },
 
@@ -770,7 +771,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(76, 175, 80, 0.2)',
   },
-  dishRecipeTagText: { fontSize: 13, fontWeight: '600', color: '#276749' },
+  dishRecipeTagText: { fontSize: 13, fontWeight: '600', color: Colors.success },
   dishInventorySection: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
   dishInventoryRow: { marginBottom: 12 },
   dishInventoryRecipeName: { fontSize: 13, fontWeight: '600', color: '#4a5568', marginBottom: 6 },

@@ -44,20 +44,20 @@
 
 .recipes-search-wrap .recipe-search-input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--color-primary);
 }
 
 /* Primary page CTAs */
 #create-recipe-btn,
 #create-dish-btn {
-    background: linear-gradient(135deg, #4CAF50, #45a049);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
     color: #fff;
     border: none;
     padding: 0.9rem 1.4rem;
     border-radius: 12px;
     font-weight: 700;
     font-size: 1.05rem;
-    box-shadow: 0 10px 24px rgba(76, 175, 80, 0.25);
+    box-shadow: 0 10px 24px rgba(51, 42, 37, 0.25);
     transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
@@ -65,7 +65,7 @@
 #create-dish-btn:hover {
     filter: brightness(1.02);
     transform: translateY(-1px);
-    box-shadow: 0 14px 30px rgba(76, 175, 80, 0.28);
+    box-shadow: 0 14px 30px rgba(51, 42, 37, 0.28);
 }
 
 #create-recipe-btn:active,
@@ -119,7 +119,7 @@
 }
 
 .recipes-col-header h2 i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .recipes-col-subtitle {
@@ -151,17 +151,17 @@
 }
 
 .recipe-card-active {
-    border-left: 4px solid #4CAF50;
+    border-left: 4px solid var(--color-primary);
 }
 
 .recipe-card:hover {
-    background: rgba(76, 175, 80, 0.08);
-    border-color: #4CAF50;
+    background: rgba(51, 42, 37, 0.08);
+    border-color: var(--color-primary);
     transform: translateY(-1px);
 }
 
 .recipe-card-active:hover {
-    border-left-color: #4CAF50;
+    border-left-color: var(--color-primary);
 }
 
 .recipe-card .recipe-name {
@@ -249,7 +249,7 @@
 .dish-card-icon {
     flex-shrink: 0;
     font-size: 1.2rem;
-    color: #4CAF50;
+    color: var(--color-primary);
     margin-top: 0.15rem;
 }
 
@@ -313,8 +313,8 @@
 }
 
 .btn-icon.btn-danger {
-    background: #feb2b2;
-    color: #c53030;
+    background: var(--color-error-soft);
+    color: var(--color-error);
 }
 
 .btn-icon.btn-danger:hover {
@@ -348,9 +348,9 @@
 .dish-recipe-chip {
     padding: 0.25rem 0.55rem;
     border-radius: 999px;
-    background: #f0fff4;
-    border: 1px solid #c6f6d5;
-    color: #276749;
+    background: var(--color-primary-soft);
+    border: 1px solid var(--color-success-soft);
+    color: var(--color-success);
     font-size: 0.85rem;
     font-weight: 600;
 }
@@ -385,7 +385,7 @@
 
 .dish-recipes-search input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--color-primary);
 }
 
 .dish-recipe-checkboxes {
@@ -410,11 +410,11 @@
 }
 
 .dish-recipe-option:hover {
-    background: rgba(76, 175, 80, 0.08);
+    background: rgba(51, 42, 37, 0.08);
 }
 
 .dish-recipe-option input {
-    accent-color: #4CAF50;
+    accent-color: var(--color-primary);
     cursor: pointer;
 }
 
@@ -449,21 +449,21 @@
 .modal-recipe .modal-header,
 .modal-dish .modal-header {
     padding: 1.5rem 1.75rem;
-    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-    border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+    background: linear-gradient(135deg, var(--color-success-soft) 0%, #dcfce7 100%);
+    border-bottom: 1px solid rgba(51, 42, 37, 0.2);
 }
 
 .modal-recipe .modal-header h3,
 .modal-dish .modal-header h3 {
     font-size: 1.4rem;
     font-weight: 700;
-    color: #166534;
+    color: var(--color-success);
     gap: 0.6rem;
 }
 
 .modal-recipe .modal-header h3 i,
 .modal-dish .modal-header h3 i {
-    color: #16a34a;
+    color: var(--color-primary);
 }
 
 .modal-recipe .modal-close,
@@ -534,7 +534,7 @@
 
 .modal-recipe .form-group label i,
 .modal-dish .form-group label i {
-    color: #4CAF50;
+    color: var(--color-primary);
     font-size: 0.95rem;
 }
 
@@ -551,8 +551,8 @@
 .modal-recipe .form-control:focus,
 .modal-dish .form-control:focus {
     outline: none;
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.12);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 4px rgba(51, 42, 37, 0.12);
 }
 
 .modal-recipe textarea.form-control,
@@ -574,15 +574,15 @@
     border-radius: 10px;
     font-weight: 600;
     font-size: 1.05rem;
-    background: linear-gradient(135deg, #4CAF50, #45a049);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
     border: none;
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 4px 12px rgba(51, 42, 37, 0.3);
 }
 
 .modal-recipe .btn-primary:hover,
 .modal-dish .btn-primary:hover {
     filter: brightness(1.05);
-    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.35);
+    box-shadow: 0 6px 16px rgba(51, 42, 37, 0.35);
 }
 
 .modal-recipe .btn-secondary,
@@ -615,8 +615,8 @@
 }
 
 .modal-dish .dish-recipes-search input:focus {
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(51, 42, 37, 0.1);
 }
 
 .modal-dish .dish-recipe-checkboxes {
@@ -633,5 +633,5 @@
 }
 
 .modal-dish .dish-recipe-option:hover {
-    background: rgba(76, 175, 80, 0.1);
+    background: rgba(51, 42, 37, 0.1);
 }

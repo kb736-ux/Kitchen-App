@@ -800,19 +800,19 @@ async function loadEmployeeShiftRequestsCard() {
                     </div>
                 </div>
                 <div class="shift-request-shift-block" style="background:#f7fafc;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;color:#4a5568;">
-                    <i class="fas fa-calendar-day" style="color:#4CAF50;margin-right:6px;"></i>
+                    <i class="fas fa-calendar-day" style="color:${SheekColors.primary};margin-right:6px;"></i>
                     <strong>${shiftDate}</strong>${shiftTime ? ' · ' + shiftTime : ''}
-                    ${shift.position ? `<span style="margin-left:8px;background:#e8f5e9;color:#276749;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeEmployeesHtml(shift.position)}</span>` : ''}
+                    ${shift.position ? `<span style="margin-left:8px;background:${SheekColors.primarySoft};color:${SheekColors.success};padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeEmployeesHtml(shift.position)}</span>` : ''}
                 </div>
                 ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;max-width:100%;overflow-wrap:anywhere;">"${escapeEmployeesHtml(req.note)}"</p>` : ''}
                 ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;max-width:100%;overflow-wrap:anywhere;">Transfer to: <strong>${escapeEmployeesHtml(target)}</strong></p>` : ''}
                 <div class="shift-request-actions">
                     <button type="button" onclick="approveEmployeeShiftRequest('${req.id}','${req.shift_id || ''}','${escapeEmployeesHtml(req.employee_name || '')}','${escapeEmployeesHtml(shift.position || '')}','${req.request_type}','${escapeEmployeesHtml(req.target_employee || '')}')"
-                        style="background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
+                        style="background:${SheekColors.primary};color:white;border:none;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-check"></i> Approve
                     </button>
                     <button type="button" onclick="denyEmployeeShiftRequest('${req.id}','${escapeEmployeesHtml(req.employee_name || '')}')"
-                        style="background:#fff0f0;color:#e53e3e;border:1.5px solid #fed7d7;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
+                        style="background:#fff0f0;color:${SheekColors.error};border:1.5px solid #fed7d7;border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-times"></i> Deny
                     </button>
                 </div>
@@ -939,7 +939,7 @@ function updateEmployeesRequestBadge() {
     const cardBadge = requestsCard.querySelector('.card-badge');
     if (cardBadge) {
         cardBadge.textContent = count === 0 ? 'All Clear' : `${count} New`;
-        if (count === 0) cardBadge.style.background = '#4CAF50';
+        if (count === 0) cardBadge.style.background = SheekColors.success;
     }
 
     const navBadge = document.querySelector('.employees-badge, .notification-badge');
@@ -958,7 +958,7 @@ function showEmployeeToast(message, type) {
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed; bottom: 20px; right: 20px;
-        background: ${type === 'error' ? '#e53e3e' : '#4CAF50'};
+        background: ${type === 'error' ? SheekColors.error : SheekColors.success};
         color: white; padding: 1rem 1.5rem; border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 10000;
         font-weight: 600; max-width: ${longError ? 'min(92vw,520px)' : '320px'};

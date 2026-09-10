@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { shiftRowMatchesEmployee, formatLocalDateYMD } from '../utils/shiftMatching';
+import { Colors } from '../constants/theme';
 
 const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -653,7 +654,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
           rawName: (p.employee_name || '').trim() || label,
           label,
           avatarUrl: (p.avatar_url || '').trim() || null,
-          avatarColor: (p.avatar_color || '').trim() || '#4CAF50',
+          avatarColor: (p.avatar_color || '').trim() || Colors.primary,
         };
         const empKey = norm(p.employee_name);
         const displayKey = norm(p.display_name);
@@ -696,7 +697,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
           rawName,
           label,
           avatarUrl: profileInfo?.avatarUrl || null,
-          avatarColor: profileInfo?.avatarColor || '#4CAF50',
+          avatarColor: profileInfo?.avatarColor || Colors.primary,
         });
       });
 
@@ -788,11 +789,11 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4CAF50" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
         {scheduleUiLoading ? (
-          <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 40, marginBottom: 24 }} />
+          <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40, marginBottom: 24 }} />
         ) : (
         <>
         {/* Inline Calendar */}
@@ -859,7 +860,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
               setShowTimeOffModal(true);
             }}
           >
-            <Ionicons name="calendar-outline" size={18} color="#4CAF50" style={{ marginRight: 8 }} />
+            <Ionicons name="calendar-outline" size={18} color={Colors.primary} style={{ marginRight: 8 }} />
             <Text style={styles.requestTimeOffBtnText}>Request Time Off</Text>
           </TouchableOpacity>
         </View>
@@ -920,7 +921,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             {/* Header */}
             <View style={styles.rosterHeader}>
               <View style={styles.rosterIconBg}>
-                <Ionicons name="people" size={20} color="#4CAF50" />
+                <Ionicons name="people" size={20} color={Colors.primary} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.rosterTitle}>Who's Working</Text>
@@ -942,7 +943,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             <View style={styles.shiftModalDivider} />
 
             {loadingRoster ? (
-              <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 30 }} />
+              <ActivityIndicator color={Colors.primary} style={{ paddingVertical: 30 }} />
             ) : rosterShifts.length === 0 ? (
               <View style={styles.rosterEmpty}>
                 <Ionicons name="calendar-outline" size={36} color="#cbd5e0" />
@@ -1037,7 +1038,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                         <Ionicons
                           name={notif.type === 'shift_assigned' ? 'calendar' : 'information-circle'}
                           size={18}
-                          color={notif.read ? '#718096' : '#4CAF50'}
+                          color={notif.read ? '#718096' : Colors.primary}
                         />
                       </View>
                       <View style={{ flex: 1, marginLeft: 12 }}>
@@ -1084,7 +1085,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                   <>
                     <View style={styles.shiftModalHeader}>
                       <View style={styles.shiftModalIconBg}>
-                        <Ionicons name="calendar" size={22} color="#4CAF50" />
+                        <Ionicons name="calendar" size={22} color={Colors.primary} />
                       </View>
                       <View style={{ flex: 1, marginLeft: 12 }}>
                         <Text style={styles.shiftModalDate}>{formatDate(selectedShift.shift_date)}</Text>
@@ -1101,7 +1102,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
                     <Text style={styles.shiftModalSectionLabel}>Assigned Tasks</Text>
                     {loadingShiftTasks ? (
-                      <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 12 }} />
+                      <ActivityIndicator color={Colors.primary} style={{ paddingVertical: 12 }} />
                     ) : shiftTasks.length > 0 ? (
                       <View style={styles.shiftTasksList}>
                         {shiftTasks.map((task) => {
@@ -1117,7 +1118,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                               <Ionicons
                                 name={isDone ? 'checkmark-circle' : 'ellipse-outline'}
                                 size={18}
-                                color={isDone ? '#4CAF50' : '#94a3b8'}
+                                color={isDone ? Colors.success : '#94a3b8'}
                                 style={{ marginRight: 10, marginTop: 1 }}
                               />
                               <Text style={[styles.shiftTaskText, isDone && styles.shiftTaskTextCompleted]}>
@@ -1156,7 +1157,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                         </View>
 
                         {loadingTransfer ? (
-                          <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 20 }} />
+                          <ActivityIndicator color={Colors.primary} style={{ paddingVertical: 20 }} />
                         ) : transferCoworkers.length === 0 ? (
                           <View style={styles.transferEmpty}>
                             <Ionicons name="people-outline" size={32} color="#cbd5e0" />
@@ -1202,7 +1203,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                                   {coworker.avatarUrl ? (
                                     <Image source={{ uri: coworker.avatarUrl }} style={styles.coworkerAvatarImage} />
                                   ) : (
-                                    <View style={[styles.coworkerAvatar, { backgroundColor: coworker.avatarColor || '#4CAF50' }]}>
+                                    <View style={[styles.coworkerAvatar, { backgroundColor: coworker.avatarColor || Colors.primary }]}>
                                       <Text style={styles.coworkerAvatarText}>
                                         {getInitials(coworker.label || coworker.rawName)}
                                       </Text>
@@ -1210,7 +1211,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                                   )}
                                   <Text style={styles.coworkerName}>{coworker.label || coworker.rawName}</Text>
                                   {selectedTransferTarget === coworker.rawName && (
-                                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                                    <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
                                   )}
                                 </TouchableOpacity>
                               ))}
@@ -1384,7 +1385,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1432,9 +1433,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   dayCellInactive: { opacity: 0.25 },
-  dayCellShift: { backgroundColor: '#e8f5e9', borderWidth: 1.5, borderColor: '#4CAF50' },
+  dayCellShift: { backgroundColor: Colors.primarySoft, borderWidth: 1.5, borderColor: Colors.primary },
   dayCellToday: { backgroundColor: '#2d3748' },
-  dayCellSelected: { backgroundColor: '#4CAF50' },
+  dayCellSelected: { backgroundColor: Colors.primary },
   dayText: { fontSize: 14, color: '#2d3748', fontWeight: '500' },
   dayTextInactive: { color: '#e2e8f0' },
   dayTextShift: { color: '#2e7d32', fontWeight: '600' },
@@ -1447,10 +1448,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#e8f5e9',
+    backgroundColor: Colors.primarySoft,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#4CAF50',
+    borderColor: Colors.primary,
   },
   requestTimeOffBtnText: { fontSize: 15, fontWeight: '600', color: '#2e7d32' },
 
@@ -1468,14 +1469,14 @@ const styles = StyleSheet.create({
   },
   staffName: { fontSize: 16, fontWeight: '600', color: '#2d3748' },
   shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
-  repeatSummary: { fontSize: 12, color: '#4CAF50', marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
-  staffPosition: { fontSize: 15, color: '#4CAF50', fontWeight: '500' },
+  repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
+  staffPosition: { fontSize: 15, color: Colors.primary, fontWeight: '500' },
   employeeTag: { fontSize: 12, color: '#718096', marginTop: 2 },
 
   // Bell badge
   notifBadge: {
     position: 'absolute', top: 4, right: 4,
-    backgroundColor: '#e53e3e', borderRadius: 8,
+    backgroundColor: Colors.error, borderRadius: 8,
     minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center',
     paddingHorizontal: 3,
   },
@@ -1492,17 +1493,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start',
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
-  notifRowUnread: { backgroundColor: '#f0fff4', marginHorizontal: -24, paddingHorizontal: 24, borderRadius: 0 },
+  notifRowUnread: { backgroundColor: Colors.primarySoft, marginHorizontal: -24, paddingHorizontal: 24, borderRadius: 0 },
   notifIconBg: {
     width: 36, height: 36, borderRadius: 10,
     backgroundColor: '#f7fafc', justifyContent: 'center', alignItems: 'center',
   },
-  notifIconBgUnread: { backgroundColor: '#e8f5e9' },
+  notifIconBgUnread: { backgroundColor: Colors.primarySoft },
   notifTitle: { fontSize: 14, fontWeight: '600', color: '#4a5568' },
   notifTitleUnread: { color: '#2d3748' },
   notifBody: { fontSize: 13, color: '#718096', marginTop: 2 },
   notifTime: { fontSize: 11, color: '#a0aec0', marginTop: 4 },
-  notifDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginTop: 6, marginLeft: 8 },
+  notifDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary, marginTop: 6, marginLeft: 8 },
 
   // Shift action modal
   shiftModalHandle: {
@@ -1514,7 +1515,7 @@ const styles = StyleSheet.create({
   },
   shiftModalIconBg: {
     width: 44, height: 44, borderRadius: 12,
-    backgroundColor: '#f0fff4', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.primarySoft, justifyContent: 'center', alignItems: 'center',
   },
   shiftModalDate: { fontSize: 16, fontWeight: '700', color: '#2d3748' },
   shiftModalTime: { fontSize: 13, color: '#718096', marginTop: 2 },
@@ -1543,8 +1544,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   shiftTaskRowCompleted: {
-    backgroundColor: '#f0fff4',
-    borderColor: '#c6f6d5',
+    backgroundColor: Colors.primarySoft,
+    borderColor: Colors.successSoft,
   },
   shiftTaskText: { flex: 1, fontSize: 14, color: '#2d3748', lineHeight: 20 },
   shiftTaskTextCompleted: { color: '#718096', textDecorationLine: 'line-through' },
@@ -1576,7 +1577,7 @@ const styles = StyleSheet.create({
   rosterHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   rosterIconBg: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: '#f0fff4', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.primarySoft, justifyContent: 'center', alignItems: 'center',
   },
   rosterTitle: { fontSize: 17, fontWeight: '700', color: '#2d3748' },
   rosterSubtitle: { fontSize: 13, color: '#718096', marginTop: 1 },
@@ -1586,23 +1587,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 12,
   },
-  rosterRowMe: { backgroundColor: '#f0fff4', marginHorizontal: -24, paddingHorizontal: 24, borderRadius: 0 },
+  rosterRowMe: { backgroundColor: Colors.primarySoft, marginHorizontal: -24, paddingHorizontal: 24, borderRadius: 0 },
   rosterAvatar: {
     width: 40, height: 40, borderRadius: 12,
     backgroundColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center',
   },
-  rosterAvatarMe: { backgroundColor: '#4CAF50' },
+  rosterAvatarMe: { backgroundColor: Colors.primary },
   rosterAvatarText: { color: 'white', fontWeight: '700', fontSize: 16 },
   rosterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   rosterName: { fontSize: 15, fontWeight: '600', color: '#2d3748' },
-  rosterNameMe: { color: '#276749' },
-  rosterPosition: { fontSize: 12, color: '#4CAF50', fontWeight: '600', marginBottom: 1 },
+  rosterNameMe: { color: Colors.success },
+  rosterPosition: { fontSize: 12, color: Colors.primary, fontWeight: '600', marginBottom: 1 },
   rosterTime: { fontSize: 12, color: '#718096' },
   meBadge: {
-    backgroundColor: '#c6f6d5', borderRadius: 20,
+    backgroundColor: Colors.successSoft, borderRadius: 20,
     paddingHorizontal: 7, paddingVertical: 2,
   },
-  meBadgeText: { fontSize: 10, fontWeight: '700', color: '#276749' },
+  meBadgeText: { fontSize: 10, fontWeight: '700', color: Colors.success },
   rosterActionBtn: {
     backgroundColor: '#ebf8ff', borderWidth: 1.5, borderColor: '#63b3ed',
     borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
@@ -1636,11 +1637,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#f7fafc',
   },
   coworkerRowSelected: {
-    borderColor: '#4CAF50', backgroundColor: '#f0fff4',
+    borderColor: Colors.primary, backgroundColor: Colors.primarySoft,
   },
   coworkerAvatar: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center',
     marginRight: 12,
   },
   coworkerAvatarImage: {
@@ -1690,7 +1691,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
     borderRadius: 10,
     padding: 14,
     marginBottom: 16,
@@ -1715,7 +1716,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   modalDayCellRange: { backgroundColor: 'rgba(76,175,80,0.15)', borderRadius: 0 },
-  modalDayCellEndpoint: { backgroundColor: '#4CAF50', borderRadius: 8 },
+  modalDayCellEndpoint: { backgroundColor: Colors.primary, borderRadius: 8 },
   modalDayCellPast: { opacity: 0.3 },
   modalDayTextRange: { color: '#2e7d32', fontWeight: '600' },
   modalDayTextPast: { color: '#a0aec0' },
@@ -1737,7 +1738,7 @@ const styles = StyleSheet.create({
     flex: 2,
     paddingVertical: 14,
     borderRadius: 10,
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     alignItems: 'center',
   },
   modalSubmitText: { fontSize: 15, fontWeight: '700', color: 'white' },

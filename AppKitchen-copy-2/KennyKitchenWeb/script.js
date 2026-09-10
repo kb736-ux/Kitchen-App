@@ -329,7 +329,7 @@ function showComingSoon(message) {
         position: fixed;
         top: 20px;
         right: 20px;
-        background: #4CAF50;
+        background: ${SheekColors.primary};
         color: white;
         padding: 1rem 1.5rem;
         border-radius: 12px;
@@ -471,7 +471,7 @@ function updateNotificationBadge() {
     if (cardBadge) {
         cardBadge.textContent = count === 0 ? 'All Clear' : `${count} New`;
         if (count === 0) {
-            cardBadge.style.background = '#4CAF50';
+            cardBadge.style.background = SheekColors.success;
         }
     }
 }
@@ -479,7 +479,7 @@ function updateNotificationBadge() {
 // Show notification toast
 function showNotificationToast(message, type = 'success') {
     const toast = document.createElement('div');
-    const bgColor = type === 'success' ? '#4CAF50' : '#e53e3e';
+    const bgColor = type === 'success' ? SheekColors.success : SheekColors.error;
     const longError = type === 'error' && String(message || '').length > 120;
     const maxW = longError ? 'min(92vw, 520px)' : '300px';
     const durationMs = longError ? 12000 : 3000;
@@ -1224,8 +1224,8 @@ function markTaskComplete(progressItem) {
     const assigneeEl = progressItem.querySelector('.task-assignee');
     const employeeName = assigneeEl?.textContent.trim();
     
-    progressItem.style.background = '#f0fff4';
-    progressItem.style.border = '2px solid #4CAF50';
+    progressItem.style.background = SheekColors.successSoft;
+    progressItem.style.border = `2px solid ${SheekColors.success}`;
     progressItem.querySelector('.btn-finish')?.remove();
     
     const checkmark = document.createElement('div');
@@ -1476,7 +1476,7 @@ function renderTaskTransferRequests(requests) {
                         Approve
                     </button>
                     <button class="btn-decline-transfer" data-id="${r.id}"
-                            style="background:#e53e3e;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">
+                            style="background:${SheekColors.error};color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">
                         Decline
                     </button>
                 </div>

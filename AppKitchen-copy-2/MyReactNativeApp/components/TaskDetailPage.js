@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
+import { Colors } from '../constants/theme';
 
 /** Extract a recipe name from task text like "make Smoked Salmon", "kit 2 Focaccia", "make 3 blueberry compote". */
 function parseRecipeFromTask(text) {
@@ -60,7 +61,7 @@ const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId }) => {
 
         {/* Recipe info (ingredients + steps) */}
         {recipeLoading && (
-          <ActivityIndicator color="#4CAF50" style={{ marginBottom: 20 }} />
+          <ActivityIndicator color={Colors.primary} style={{ marginBottom: 20 }} />
         )}
         {recipe && (
           <View style={styles.recipeCard}>
@@ -128,7 +129,7 @@ const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId }) => {
         >
           {task.completed ? (
             <>
-              <Ionicons name="checkmark" size={24} color="#4CAF50" />
+              <Ionicons name="checkmark" size={24} color={Colors.success} />
               <Text style={styles.completedButtonTextActive}>Completed</Text>
             </>
           ) : (
@@ -143,7 +144,7 @@ const TaskDetailPage = ({ onBack, task, toggleTask, toggleUrgent, orgId }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
     minWidth: 150,
   },
   completedButtonActive: {
-    borderColor: '#4CAF50',
+    borderColor: Colors.primary,
     backgroundColor: '#f0f8f0',
   },
   completedButtonText: {
@@ -219,7 +220,7 @@ const styles = StyleSheet.create({
   },
   completedButtonTextActive: {
     fontSize: 16,
-    color: '#4CAF50',
+    color: Colors.primary,
     fontWeight: '500',
     marginLeft: 8,
   },
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
   stepNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#4CAF50',
+    color: Colors.primary,
     marginRight: 8,
     lineHeight: 22,
     minWidth: 20,

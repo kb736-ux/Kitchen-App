@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, PanResponder, TextInput, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../constants/theme';
 
 const SWIPE_THRESHOLD = 80;
 const REVEAL_WIDTH = 120;
@@ -76,7 +77,7 @@ const swipeStyles = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
   },
-  revealBgOn:  { backgroundColor: '#e53e3e' },
+  revealBgOn:  { backgroundColor: Colors.error },
   revealBgOff: { backgroundColor: '#718096' },
   revealText: { color: 'white', fontWeight: '700', fontSize: 14 },
   slidingContent: {
@@ -131,7 +132,7 @@ const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShi
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[Colors.primary]} />
         }
       >
         {/* Date */}
@@ -240,7 +241,7 @@ const TasksPage = ({ onProgressPress, tasks, toggleTask, onTaskPress, todayIsShi
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -254,7 +255,7 @@ const styles = StyleSheet.create({
   progressButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -389,7 +390,7 @@ const styles = StyleSheet.create({
     borderColor: '#fed7d7',
   },
   urgentAddBtn: {
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
     borderRadius: 20,
     paddingHorizontal: 18,
     paddingVertical: 9,

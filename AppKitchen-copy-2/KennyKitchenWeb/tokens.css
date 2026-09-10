@@ -1,0 +1,25 @@
+/* Sheek palette — keep in sync with tokens.js and MyReactNativeApp/constants/theme.js */
+:root {
+    --color-bg: #F7F4EE;
+    --color-surface: #FFFEFB;
+    --color-primary: #332A25;
+    --color-primary-hover: #4A3D36;
+    --color-secondary: #81766D;
+    --color-border: #DED8D1;
+    --color-text: #242220;
+    --color-text-muted: #746E69;
+    --color-success: #52705A;
+    --color-success-soft: #E4EBE6;
+    --color-warning: #B57A35;
+    --color-warning-soft: #F4E8D4;
+    --color-error: #A94F47;
+    --color-error-soft: #F4E4E2;
+    --color-on-primary: #FFFEFB;
+    --color-primary-soft: #E3E0DA;
+    --color-primary-softer: rgba(51, 42, 37, 0.08);
+    --radius: 16px;
+    --radius-sm: 12px;
+    --shadow-card: 0 8px 28px rgba(51, 42, 37, 0.08);
+    --shadow-nav: 0 2px 16px rgba(51, 42, 37, 0.06);
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}

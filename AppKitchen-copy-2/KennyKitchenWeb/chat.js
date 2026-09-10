@@ -1128,7 +1128,7 @@ function showChatToast(message, type) {
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed; bottom: 20px; right: 20px;
-        background: ${type === 'error' ? '#e53e3e' : '#4CAF50'};
+        background: ${type === 'error' ? SheekColors.error : SheekColors.success};
         color: white; padding: 1rem 1.5rem; border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 10001;
         font-weight: 600; max-width: 320px;

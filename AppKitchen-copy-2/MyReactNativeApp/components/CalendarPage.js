@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../constants/theme';
 
 const CalendarPage = ({ onBack }) => {
   const [selectedDate, setSelectedDate] = useState(null);
@@ -170,7 +171,7 @@ const CalendarPage = ({ onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -250,12 +251,12 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   dayCellSelected: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
   },
   dayCellWorking: {
     backgroundColor: '#e8f5e8',
     borderWidth: 2,
-    borderColor: '#4CAF50',
+    borderColor: Colors.primary,
   },
   dayText: {
     fontSize: 16,

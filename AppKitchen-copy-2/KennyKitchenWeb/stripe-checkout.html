@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" sizes="192x192" />
+    <link rel="icon" type="image/png" href="assets/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <title>Sheek — Subscribe</title>
+    <link rel="stylesheet" href="tokens.css">
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://js.stripe.com/v3/"></script>
@@ -13,17 +17,17 @@
       margin: 0;
       min-height: 100vh;
       font-family: Inter, system-ui, sans-serif;
-      background: linear-gradient(160deg, #f0fdf4 0%, #ecfdf5 40%, #f8fafc 100%);
-      color: #0f172a;
+      background: var(--color-bg);
+      color: var(--color-text);
       padding: 24px 16px 48px;
     }
     .wrap { max-width: 440px; margin: 0 auto; }
     .card {
-      background: #fff;
+      background: var(--color-surface);
       border-radius: 16px;
       padding: 28px 24px;
-      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
-      border: 1px solid #e2e8f0;
+      box-shadow: 0 12px 40px rgba(51, 42, 37, 0.08);
+      border: 1px solid var(--color-border);
     }
     h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 6px; }
     .sub { font-size: 0.875rem; color: #64748b; margin-bottom: 22px; line-height: 1.45; }
@@ -34,22 +38,22 @@
       font-size: 0.95rem;
       font-weight: 600;
       color: #fff;
-      background: #16a34a;
+      background: var(--color-primary);
       border: none;
       border-radius: 10px;
       cursor: pointer;
       transition: background 0.15s, opacity 0.15s;
     }
-    #submit:hover:not(:disabled) { background: #15803d; }
+    #submit:hover:not(:disabled) { background: var(--color-primary-hover); }
     #submit:disabled { opacity: 0.55; cursor: not-allowed; }
     #message { margin-top: 14px; font-size: 0.8125rem; min-height: 1.25em; }
-    #message.error { color: #b91c1c; }
-    #message.ok { color: #166534; }
+    #message.error { color: var(--color-error); }
+    #message.ok { color: var(--color-success); }
     .back {
       display: inline-block;
       margin-top: 20px;
       font-size: 0.875rem;
-      color: #16a34a;
+      color: var(--color-primary);
       text-decoration: none;
       font-weight: 500;
     }
@@ -60,8 +64,8 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      color: #166534;
-      background: #dcfce7;
+      color: var(--color-primary);
+      background: var(--color-primary-soft);
       padding: 4px 10px;
       border-radius: 999px;
       margin-bottom: 12px;
@@ -84,6 +88,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="tokens.js"></script>
   <script src="supabase-config.js"></script>
   <script>
 (function () {
@@ -174,7 +179,7 @@
         clientSecret: data.clientSecret,
         appearance: {
           theme: 'stripe',
-          variables: { colorPrimary: '#16a34a', borderRadius: '10px' },
+          variables: { colorPrimary: '#332A25', borderRadius: '10px' },
         },
       });
       const paymentElement = elements.create('payment');
