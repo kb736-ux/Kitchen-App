@@ -19,6 +19,14 @@ import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { ShiftMatching, formatLocalDateYMD } from '../utils/shiftMatching';
 import { Colors } from '../constants/theme';
+import { isDev } from '../constants/dev';
+import ShiftSeriesRow from './ShiftSeriesRow';
+import {
+  DAYS_FULL,
+  SHORT_MONTHS,
+  groupRepeatingShifts,
+  shiftRowKey,
+} from '../utils/shiftSeries';
 
 /** Equal-sized Monday-start month cells: 6 rows × 7 flex columns (not % widths). */
 class ScheduleCalendarLayout {
@@ -36,15 +44,6 @@ class ScheduleCalendarLayout {
 const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-
-function shiftRowKey(s) {
-  if (!s) return '';
-  if (s.id != null) return `id:${s.id}`;
-  return `${s.shift_date}|${s.employee_name}|${s.start_time}|${s.end_time}`;
-}
 
 function buildProfileLabel(profile) {
   const firstLast = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
@@ -70,89 +69,6 @@ function mergeShiftRows(prev, incoming) {
     const c = (a.shift_date || '').localeCompare(b.shift_date || '');
     return c !== 0 ? c : String(a.start_time || '').localeCompare(String(b.start_time || ''));
   });
-}
-
-function addDaysToYmd(dateStr, days) {
-  const d = new Date(`${dateStr}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return formatLocalDateYMD(d);
-}
-
-function addMonthsToYmd(dateStr, months) {
-  const d = new Date(`${dateStr}T12:00:00`);
-  d.setMonth(d.getMonth() + months);
-  return formatLocalDateYMD(d);
-}
-
-function getShiftSeriesInterval(prevDate, nextDate) {
-  if (!prevDate || !nextDate) return null;
-  if (addDaysToYmd(prevDate, 7) === nextDate) return 'weekly';
-  if (addMonthsToYmd(prevDate, 1) === nextDate) return 'monthly';
-  return null;
-}
-
-function groupRepeatingShifts(rows) {
-  const byPattern = new Map();
-  (rows || []).forEach((row) => {
-    const key = [
-      row.employee_name || '',
-      row.position || '',
-      row.start_time || '',
-      row.end_time || '',
-    ].join('|');
-    if (!byPattern.has(key)) byPattern.set(key, []);
-    byPattern.get(key).push(row);
-  });
-
-  const groups = [];
-  byPattern.forEach((list) => {
-    const sorted = [...list].sort((a, b) => (a.shift_date || '').localeCompare(b.shift_date || ''));
-    if (sorted.length === 0) return;
-
-    let run = [sorted[0]];
-    let runInterval = null;
-
-    const flush = () => {
-      if (run.length === 0) return;
-      groups.push({
-        shift: run[0],
-        shifts: [...run],
-        repeatInterval: run.length > 1 ? runInterval : null,
-        repeatCount: run.length,
-        repeatUntil: run[run.length - 1]?.shift_date || run[0]?.shift_date || '',
-      });
-    };
-
-    for (let i = 1; i < sorted.length; i += 1) {
-      const prev = run[run.length - 1];
-      const curr = sorted[i];
-      const step = getShiftSeriesInterval(prev.shift_date, curr.shift_date);
-
-      if (run.length === 1) {
-        if (step) {
-          runInterval = step;
-          run.push(curr);
-        } else {
-          flush();
-          run = [curr];
-          runInterval = null;
-        }
-        continue;
-      }
-
-      if (step && step === runInterval) {
-        run.push(curr);
-      } else {
-        flush();
-        run = [curr];
-        runInterval = null;
-      }
-    }
-
-    flush();
-  });
-
-  return groups.sort((a, b) => (a.shift?.shift_date || '').localeCompare(b.shift?.shift_date || ''));
 }
 
 const SchedulePage = ({ orgId, profileData = {} }) => {
@@ -246,16 +162,20 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
   async function fetchOrgProfiles() {
     if (!orgId) return;
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, user_id, employee_name, display_name, first_name, last_name, email')
-      .eq('org_id', orgId)
-      .limit(400);
-    if (error) {
-      console.warn('[Schedule] fetchOrgProfiles:', error.message);
-      return;
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, user_id, employee_name, display_name, first_name, last_name, email')
+        .eq('org_id', orgId)
+        .limit(400);
+      if (error) {
+        console.warn('[Schedule] fetchOrgProfiles:', error.message);
+        return;
+      }
+      setOrgProfiles(data || []);
+    } catch (e) {
+      console.warn('[Schedule] fetchOrgProfiles exception:', e?.message || e);
     }
-    setOrgProfiles(data || []);
   }
 
   async function fetchShifts(isRefresh = false) {
@@ -409,14 +329,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     () => groupRepeatingShifts(scheduleShifts),
     [scheduleShifts]
   );
-
-  const getRepeatSummary = (group) => {
-    if (!group?.repeatInterval || !group?.repeatCount || group.repeatCount < 2) return '';
-    const unit = group.repeatInterval === 'monthly' ? 'month' : 'week';
-    const everyLabel = group.repeatInterval === 'monthly' ? 'monthly' : 'weekly';
-    const countLabel = `${group.repeatCount} ${unit}${group.repeatCount === 1 ? '' : 's'}`;
-    return `Repeats ${everyLabel} for ${countLabel} until ${formatDate(group.repeatUntil)}`;
-  };
 
   // ── Time-off modal helpers ─────────────────────────────────────────────────
   const getModalCalendarDays = () => {
@@ -946,56 +858,16 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
           <Text style={styles.emptyText}>No upcoming shifts scheduled.</Text>
         ) : (
           <View style={styles.scheduleList}>
-            {groupedScheduleShifts.map((group) => {
-              const shift = group.shift;
-              const repeatSummary = getRepeatSummary(group);
-              const isSeries = !!(group.repeatInterval && group.repeatCount >= 2);
-              return (
-              <View
-                key={`${shift.id || shiftRowKey(shift)}|${group.repeatUntil || shift.shift_date}`}
-                style={styles.staffItem}
-              >
-                <TouchableOpacity
-                  style={styles.staffItemMain}
-                  onPress={() => openShiftModal(shift)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.staffItemCopy}>
-                    <Text style={styles.staffName} numberOfLines={1}>
-                      {formatDate(shift.shift_date)}
-                    </Text>
-                    <Text style={styles.shiftTime} numberOfLines={1}>
-                      {formatTime(shift.start_time)} – {formatTime(shift.end_time)}
-                    </Text>
-                    <Text style={styles.staffPosition} numberOfLines={1}>
-                      {shift.position || '—'}
-                    </Text>
-                    {repeatSummary ? (
-                      <Text style={styles.repeatSummary}>{repeatSummary}</Text>
-                    ) : null}
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="#a0aec0" />
-                </TouchableOpacity>
-                {isSeries ? (
-                  <View style={styles.seriesActions}>
-                    <TouchableOpacity
-                      style={[styles.seriesBtn, styles.seriesBtnAccept]}
-                      onPress={() => handleSeriesAck(group, 'accepted')}
-                      disabled={submitting}
-                    >
-                      <Text style={styles.seriesBtnAcceptText}>Accept series</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.seriesBtn, styles.seriesBtnDeny]}
-                      onPress={() => handleSeriesAck(group, 'denied')}
-                      disabled={submitting}
-                    >
-                      <Text style={styles.seriesBtnDenyText}>Deny series</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-              </View>
-            );})}
+            {groupedScheduleShifts.map((group) => (
+              <ShiftSeriesRow
+                key={`${group.shift?.id || shiftRowKey(group.shift)}|${group.repeatUntil || group.shift?.shift_date}`}
+                group={group}
+                submitting={submitting}
+                onPress={() => openShiftModal(group.shift)}
+                onAccept={() => handleSeriesAck(group, 'accepted')}
+                onDeny={() => handleSeriesAck(group, 'denied')}
+              />
+            ))}
           </View>
         )}
 
@@ -1502,51 +1374,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '600', color: '#4a5568', marginBottom: 12 },
   emptyText: { fontSize: 15, color: '#718096', textAlign: 'center', marginTop: 20 },
   scheduleList: { marginBottom: 24 },
-  staffItem: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-    gap: 10,
-  },
-  staffItemMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  staffItemCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  staffName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2d3748',
-    flexShrink: 1,
-  },
-  shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
-  repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', lineHeight: 16 },
-  staffPosition: { fontSize: 13, color: Colors.primary, fontWeight: '600', marginTop: 4 },
-  seriesActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  seriesBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1.5,
-  },
-  seriesBtnAccept: {
-    backgroundColor: Colors.successSoft,
-    borderColor: Colors.success,
-  },
-  seriesBtnAcceptText: { fontSize: 13, fontWeight: '700', color: Colors.success },
-  seriesBtnDeny: {
-    backgroundColor: Colors.errorSoft,
-    borderColor: Colors.error,
-  },
-  seriesBtnDenyText: { fontSize: 13, fontWeight: '700', color: Colors.error },
 
   // Shift action modal
   shiftModalHandle: {

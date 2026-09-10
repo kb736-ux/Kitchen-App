@@ -20,6 +20,7 @@ import { applyTaskCompletionToInventory } from './utils/inventorySync';
 import { EmployeeProvider, useEmployee } from './EmployeeContext';
 import LoginScreen from './LoginScreen';
 import { JS_BUNDLE_BUILD } from './constants/buildInfo';
+import { isDev } from './constants/dev';
 import { Colors } from './constants/theme';
 
 /** Expo Go on Android (SDK 53+) cannot load expo-notifications — use a dev build for push there. */
@@ -601,7 +602,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       const oid = await getOrgId();
       setOrgId(oid);
       setBooting(false);
-      if (__DEV__) {
+      if (isDev) {
         console.log('[Boot] orgId resolved:', oid);
         (async () => {
           try {
@@ -793,7 +794,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
 
     setTasks(mine);
 
-    if (__DEV__) {
+    if (isDev) {
       console.log(
         '[Tasks] fetched',
         all.length,
@@ -870,7 +871,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       .eq('org_id', oid)
       .eq('shift_date', todayStr);
 
-    if (errToday && __DEV__) {
+    if (errToday && isDev) {
       console.warn('[Shifts] today query:', errToday.message);
     }
 
@@ -914,7 +915,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         .gt('shift_date', todayStr)
         .order('shift_date', { ascending: true });
 
-      if (errUp && __DEV__) {
+      if (errUp && isDev) {
         console.warn('[Shifts] upcoming query:', errUp.message);
       }
 
@@ -1286,7 +1287,7 @@ export default function App() {
       <EmployeeProvider identityVersion={identityVersion}>
         <InnerApp bumpEmployeeIdentity={bumpEmployeeIdentity} identityVersion={identityVersion} />
       </EmployeeProvider>
-      {__DEV__ ? (
+      {isDev ? (
         <Text style={styles.devBuildStampRoot} selectable>
           {`Build ${JS_BUNDLE_BUILD} — not updating? Stop Metro, run: npx expo start --tunnel --clear then reload Expo Go`}
         </Text>

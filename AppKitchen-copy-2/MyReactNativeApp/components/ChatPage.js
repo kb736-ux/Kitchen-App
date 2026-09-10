@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase, ORG_ID } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { Colors } from '../constants/theme';
+import { isDev } from '../constants/dev';
 
 class KitchenChat {
   static BASE_CHANNELS = [
@@ -284,7 +285,7 @@ const ChatPage = ({ orgId }) => {
       console.warn('[Chat] loadEmployees profiles query error:', profileRes.error.message || profileRes.error);
     } else {
       const n = (profileRes.rows || []).length;
-      if (__DEV__) console.log('[Chat] loadEmployees profiles count:', n, 'org:', activeOrgId);
+      if (isDev) console.log('[Chat] loadEmployees profiles count:', n, 'org:', activeOrgId);
     }
     if ((profileRes.rows || []).length === 0 && profileRes.error) {
       const msg = String(profileRes.error?.message || '').toLowerCase();
@@ -362,7 +363,7 @@ const ChatPage = ({ orgId }) => {
       )
     );
 
-    if (__DEV__) {
+    if (isDev) {
       const withAvatar = list.filter(e => !!e.avatar_url);
       console.log('[Chat] loadEmployees final:', list.length, 'employees,', withAvatar.length, 'with avatar_url');
       if (list.length > 0) console.log('[Chat] sample employee:', JSON.stringify({ id: list[0].id, display_name: list[0].display_name, avatar_url: list[0].avatar_url }));

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Image, TextInput, Alert, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -7,11 +7,15 @@ import { useEmployee } from '../EmployeeContext';
 import { ShiftMatching, shiftRowMatchesEmployee } from '../utils/shiftMatching';
 import { APP_BRAND_NAME } from '../constants/branding';
 import { Colors } from '../constants/theme';
+import ShiftSeriesRow from './ShiftSeriesRow';
+import {
+  formatShiftDate,
+  formatShiftTimeRange,
+  groupRepeatingShifts,
+  isShiftSeries,
+} from '../utils/shiftSeries';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
-
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const DAYS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 const SHORT_MONTHS_HP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -93,6 +97,8 @@ const HomePage = ({
 
   const [urgentInput, setUrgentInput] = useState('');
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [upcomingShifts, setUpcomingShifts] = useState([]);
+  const [seriesSubmitting, setSeriesSubmitting] = useState(false);
 
   useEffect(() => {
     if (!orgId || authLoading) return;
@@ -146,40 +152,49 @@ const HomePage = ({
 
   async function fetchNewShiftNotifCount() {
     if (!orgId) return;
-    let query = supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('org_id', orgId)
-      .eq('type', 'shift_assigned')
-      .eq('read', false);
-    if (employeeId) {
-      query = query.eq('employee_id', employeeId);
-    } else {
-      query = query.eq('employee_name', employeeName);
+    try {
+      let query = supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('org_id', orgId)
+        .eq('type', 'shift_assigned')
+        .eq('read', false);
+      if (employeeId) {
+        query = query.eq('employee_id', employeeId);
+      } else {
+        query = query.eq('employee_name', employeeName);
+      }
+      const { count } = await query;
+      setNewShiftNotifCount(count || 0);
+    } catch (e) {
+      console.warn('[Home] fetchNewShiftNotifCount failed:', e?.message || e);
     }
-    const { count } = await query;
-    setNewShiftNotifCount(count || 0);
   }
 
   async function markShiftNotifsReadAndNavigate() {
     if (!orgId) return;
-    let query = supabase
-      .from('notifications')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('type', 'shift_assigned')
-      .eq('read', false);
-    if (employeeId) {
-      query = query.eq('employee_id', employeeId);
-    } else {
-      query = query.eq('employee_name', employeeName);
+    try {
+      let query = supabase
+        .from('notifications')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('type', 'shift_assigned')
+        .eq('read', false);
+      if (employeeId) {
+        query = query.eq('employee_id', employeeId);
+      } else {
+        query = query.eq('employee_name', employeeName);
+      }
+      const { data } = await query;
+      if (data?.length) {
+        await supabase.from('notifications').update({ read: true }).in('id', data.map(n => n.id));
+        setNewShiftNotifCount(0);
+      }
+      onSchedulePress?.();
+    } catch (e) {
+      console.warn('[Home] markShiftNotifsReadAndNavigate failed:', e?.message || e);
+      onSchedulePress?.();
     }
-    const { data } = await query;
-    if (data?.length) {
-      await supabase.from('notifications').update({ read: true }).in('id', data.map(n => n.id));
-      setNewShiftNotifCount(0);
-    }
-    onSchedulePress?.();
   }
 
   useEffect(() => {
@@ -219,47 +234,68 @@ const HomePage = ({
   }
 
   async function fetchWeekShifts() {
-    const { monday, sunday, fmt } = getVisibleWeekRange();
+    if (!orgId) return;
+    try {
+      const { monday, sunday, fmt } = getVisibleWeekRange();
+      const horizon = new Date(monday);
+      horizon.setDate(horizon.getDate() + 400);
 
-    const [{ data }, { data: profileRows }] = await Promise.all([
-      supabase
-        .from('shifts')
-        .select('shift_date, employee_name, employee_id')
-        .eq('org_id', orgId)
-        .gte('shift_date', fmt(monday))
-        .lte('shift_date', fmt(sunday)),
-      supabase
-        .from('profiles')
-        .select('id, user_id, employee_name, display_name, first_name, last_name, email')
-        .eq('org_id', orgId)
-        .limit(400),
-    ]);
+      const [{ data, error: shiftErr }, { data: profileRows, error: profileErr }] = await Promise.all([
+        supabase
+          .from('shifts')
+          .select('id, shift_date, employee_name, employee_id, start_time, end_time, position')
+          .eq('org_id', orgId)
+          .gte('shift_date', fmt(monday))
+          .lte('shift_date', fmt(horizon)),
+        supabase
+          .from('profiles')
+          .select('id, user_id, employee_name, display_name, first_name, last_name, email')
+          .eq('org_id', orgId)
+          .limit(400),
+      ]);
 
-    const identity = {
-      employeeId,
-      authUserId,
-      email,
-      employeeName,
-      displayName,
-      defaultEmployeeName,
-      firstName,
-      lastName,
-      profileData,
-    };
-    const candidates = ShiftMatching.collectNameCandidates(identity, profileRows || []);
-    const knownIds = ShiftMatching.profileIdsForMember(profileRows || [], identity);
-    const dates = new Set();
-    (data || []).forEach((row) => {
-      if (ShiftMatching.rowMatchesEmployee(row, employeeId, candidates, authUserId, knownIds)) {
-        const key = ShiftMatching.dateKey(row.shift_date);
-        if (key) dates.add(key);
+      if (shiftErr) {
+        console.warn('[Home] fetchWeekShifts shifts:', shiftErr.message);
       }
-    });
-    setShiftDates(dates);
+      if (profileErr) {
+        console.warn('[Home] fetchWeekShifts profiles:', profileErr.message);
+      }
+
+      const identity = {
+        employeeId,
+        authUserId,
+        email,
+        employeeName,
+        displayName,
+        defaultEmployeeName,
+        firstName,
+        lastName,
+        profileData,
+      };
+      const candidates = ShiftMatching.collectNameCandidates(identity, profileRows || []);
+      const knownIds = ShiftMatching.profileIdsForMember(profileRows || [], identity);
+      const dates = new Set();
+      const mine = [];
+      const todayStr = fmt(new Date());
+      const weekEnd = fmt(sunday);
+      (data || []).forEach((row) => {
+        if (!ShiftMatching.rowMatchesEmployee(row, employeeId, candidates, authUserId, knownIds)) {
+          return;
+        }
+        const key = ShiftMatching.dateKey(row.shift_date);
+        if (key && key >= fmt(monday) && key <= weekEnd) dates.add(key);
+        if (key && key >= todayStr) mine.push(row);
+      });
+      setShiftDates(dates);
+      setUpcomingShifts(mine);
+    } catch (e) {
+      console.warn('[Home] fetchWeekShifts failed:', e?.message || e);
+    }
   }
 
   async function fetchApprovedTimeOffWeek() {
     if (!orgId || authLoading) return;
+    try {
     const { weekStart, weekEnd, fmt } = getVisibleWeekRange();
     const candidates = buildHomeNameCandidates();
 
@@ -311,20 +347,29 @@ const HomePage = ({
       }
     });
     setTimeOffDates(dates);
+    } catch (e) {
+      console.warn('[Home] fetchApprovedTimeOffWeek exception:', e?.message || e);
+    }
   }
 
   async function fetchAnnouncements() {
-    const { data } = await supabase
-      .from('announcements')
-      .select('*')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: false })
-      .limit(2);
-    if (data) setAnnouncements(data);
+    if (!orgId) return;
+    try {
+      const { data } = await supabase
+        .from('announcements')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(2);
+      if (data) setAnnouncements(data);
+    } catch (e) {
+      console.warn('[Home] fetchAnnouncements failed:', e?.message || e);
+    }
   }
 
   async function fetchRecentRequests() {
     if (!orgId || authLoading) return;
+    try {
     const since = new Date();
     since.setDate(since.getDate() - 14);
     const sinceIso = since.toISOString();
@@ -413,6 +458,9 @@ const HomePage = ({
           : null,
       }))
     );
+    } catch (e) {
+      console.warn('[Home] fetchRecentRequests exception:', e?.message || e);
+    }
   }
 
   async function deleteShiftRequest(requestId) {
@@ -437,6 +485,38 @@ const HomePage = ({
       ]
     );
   }
+
+  const handleSeriesAck = async (group, status) => {
+    const ids = (group?.shifts || []).map((s) => s?.id).filter(Boolean);
+    if (!orgId || ids.length === 0) {
+      Alert.alert('Could not update series', 'These shifts are missing ids. Pull to refresh and try again.');
+      return;
+    }
+    const ackStatus = status === 'denied' ? 'denied' : 'accepted';
+    setSeriesSubmitting(true);
+    try {
+      const rows = ids.map((shiftId) => ({
+        org_id: orgId,
+        shift_id: shiftId,
+        employee_name: employeeName,
+        request_type: 'shift_ack',
+        status: ackStatus,
+        note: ackStatus === 'accepted' ? 'Accepted series from Home' : 'Denied series from Home',
+      }));
+      const { error } = await supabase.from('shift_requests').insert(rows);
+      if (error) throw error;
+      Alert.alert(
+        ackStatus === 'accepted' ? 'Series accepted' : 'Series denied',
+        ackStatus === 'accepted'
+          ? 'Your manager can see these shifts as accepted.'
+          : 'Your manager can see these shifts as denied.'
+      );
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Could not update this series.');
+    } finally {
+      setSeriesSubmitting(false);
+    }
+  };
 
   const openDayRoster = async (dateStr) => {
     setRosterDate(dateStr);
@@ -535,10 +615,10 @@ const HomePage = ({
     return null;
   };
 
-  const formatShiftDate = (dateStr) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    return `${DAYS_FULL[d.getDay()]} ${MONTHS[d.getMonth()]} ${d.getDate()}`;
-  };
+  const homeSeries = useMemo(
+    () => groupRepeatingShifts(upcomingShifts).filter(isShiftSeries),
+    [upcomingShifts]
+  );
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const isShiftDay = !!todayShift;
@@ -628,6 +708,22 @@ const HomePage = ({
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {homeSeries.length > 0 ? (
+          <View style={styles.homeSeriesList}>
+            {homeSeries.map((group) => (
+              <ShiftSeriesRow
+                key={`${group.shift?.id || group.shift?.shift_date}|${group.repeatUntil}`}
+                group={group}
+                showChevron={false}
+                submitting={seriesSubmitting}
+                onPress={onSchedulePress}
+                onAccept={() => handleSeriesAck(group, 'accepted')}
+                onDeny={() => handleSeriesAck(group, 'denied')}
+              />
+            ))}
+          </View>
+        ) : null}
+
         <Text style={styles.welcomeText}>Welcome</Text>
         <Text style={styles.nameText}>{welcomeName}</Text>
 
@@ -659,7 +755,7 @@ const HomePage = ({
               <View style={{ marginLeft: 12, flex: 1, minWidth: 0 }}>
                 <Text style={styles.shiftCardLabel}>Today's Shift</Text>
                 <Text style={styles.shiftCardTime} numberOfLines={1}>
-                  {formatTime(todayShift.start_time)} – {formatTime(todayShift.end_time)}
+                  {formatShiftTimeRange(todayShift.start_time, todayShift.end_time)}
                 </Text>
               </View>
             </View>
@@ -679,7 +775,7 @@ const HomePage = ({
                   {formatShiftDate(nextShift.shift_date)}
                 </Text>
                 <Text style={styles.shiftCardSubtime} numberOfLines={1}>
-                  {formatTime(nextShift.start_time)} – {formatTime(nextShift.end_time)}
+                  {formatShiftTimeRange(nextShift.start_time, nextShift.end_time)}
                 </Text>
               </View>
             </View>
@@ -1024,7 +1120,8 @@ const styles = StyleSheet.create({
   dateNum: { fontSize: 15, fontWeight: '600', color: '#2d3748' },
   dateNumActive: { color: 'white' },
 
-  content: { flex: 1, paddingHorizontal: 20, paddingTop: 24 },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
+  homeSeriesList: { marginBottom: 8 },
   welcomeText: { fontSize: 28, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 2 },
   nameText: { fontSize: 28, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 20 },
 

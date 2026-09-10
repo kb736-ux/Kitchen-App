@@ -1,19 +1,19 @@
-// Debug helpers for React Native development
+import { isDev } from '../constants/dev';
 
 export const log = (message, data = null) => {
-  if (__DEV__) {
+  if (isDev) {
     console.log(`🐛 DEBUG: ${message}`, data);
   }
 };
 
 export const logError = (error, context = '') => {
-  if (__DEV__) {
+  if (isDev) {
     console.error(`❌ ERROR ${context}:`, error);
   }
 };
 
 export const logPerformance = (label, fn) => {
-  if (__DEV__) {
+  if (isDev) {
     const start = Date.now();
     const result = fn();
     const end = Date.now();
@@ -23,9 +23,8 @@ export const logPerformance = (label, fn) => {
   return fn();
 };
 
-// Component state debugger
 export const useDebugState = (stateName, state) => {
-  if (__DEV__) {
+  if (isDev) {
     console.log(`🔍 STATE ${stateName}:`, state);
   }
 };
