@@ -7,6 +7,56 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeAttr(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;');
+}
+
+/**
+ * Canonical identity for writing shifts. Must use profiles.employee_name + profiles.id
+ * so Expo Schedule can match the logged-in org member.
+ */
+class ShiftWriteIdentity {
+    static fromRoster(rosterKey, displayName) {
+        const key = String(rosterKey || '').trim();
+        const display = String(displayName || '').trim() || key;
+        const canonical = (
+            typeof window.getCanonicalEmployeeName === 'function'
+                ? (window.getCanonicalEmployeeName(key) || window.getCanonicalEmployeeName(display))
+                : null
+        ) || key || display;
+        const employeeId = typeof window.getEmployeeIdFromName === 'function'
+            ? (
+                window.getEmployeeIdFromName(canonical)
+                || window.getEmployeeIdFromName(key)
+                || window.getEmployeeIdFromName(display)
+            )
+            : null;
+        return { canonical, employeeId, display };
+    }
+}
+
+/** GCal-style chip times: "9a–5p", "9:30a–2p". */
+class ShiftCardTime {
+    static compact(time24) {
+        const raw = String(time24 || '').slice(0, 5);
+        const [hStr, mStr] = raw.split(':');
+        const h = Number(hStr);
+        const m = Number(mStr) || 0;
+        if (!Number.isFinite(h)) return '';
+        const period = h >= 12 ? 'p' : 'a';
+        const h12 = h % 12 || 12;
+        return m ? `${h12}:${String(m).padStart(2, '0')}${period}` : `${h12}${period}`;
+    }
+
+    static range(start24, end24) {
+        const a = ShiftCardTime.compact(start24);
+        const b = ShiftCardTime.compact(end24);
+        if (!a && !b) return '';
+        if (!b) return a;
+        return `${a}–${b}`;
+    }
+}
+
 // Initialize approved drops storage if not exists
 if (typeof window.approvedDrops === 'undefined') {
     window.approvedDrops = {};
@@ -1529,6 +1579,7 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
     if (window.supabaseClient && window.ORG_ID) {
         const empId =
             typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(targetDisplay) : null;
+        const writeId = ShiftWriteIdentity.fromRoster(targetStorageKey, targetDisplay);
         const { data: insRows, error: insErr } = await window.supabaseClient
             .from('shifts')
             .insert({
@@ -1537,8 +1588,8 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
                 start_time: start24,
                 end_time: end24,
                 position: positionLabel,
-                employee_name: targetDisplay,
-                employee_id: empId,
+                employee_name: writeId.canonical,
+                employee_id: writeId.employeeId || empId,
             })
             .select('id')
             .limit(1);
@@ -2337,10 +2388,9 @@ async function populateEmployeeSelectFromOrg() {
     const labelMap = await buildEmployeePositionDisplayLabelMap();
 
     employeeSelect.innerHTML = '<option value="">Select Employee</option>' + names.map(n => {
-        const val = EMPLOYEE_VALUE_MAP[n] || n.toLowerCase().replace(/\s+/g, '-');
         const nk = normEmployeeKey(n);
         const displayText = labelMap.get(nk) || n;
-        return `<option value="${val}">${escapeHtml(displayText)}</option>`;
+        return `<option value="${escapeAttr(n)}">${escapeHtml(displayText)}</option>`;
     }).join('');
     await updateEmployeeDropdownForDay();
     await populatePositionSelect();
@@ -2980,14 +3030,15 @@ function proceedWithShiftAssignment(employee, position, startTime, endTime, shif
             }
 
             const empId = typeof window.getEmployeeIdFromName === 'function' ? window.getEmployeeIdFromName(employeeName) : null;
+            const writeId = ShiftWriteIdentity.fromRoster(storageKey, employeeName);
             const rows = shiftDatesYmd.map((shift_date) => ({
                 org_id: window.ORG_ID,
                 shift_date,
                 start_time: startTime,
                 end_time: endTime,
                 position: positionLabel,
-                employee_name: employeeName,
-                employee_id: empId
+                employee_name: writeId.canonical,
+                employee_id: writeId.employeeId || empId
             }));
 
             const CHUNK = 50;
@@ -3419,12 +3470,9 @@ function initializeEmployeeHours() {
 }
 
 function createShiftCard(employee, position, time, day, hours = null, positionLabelOverride = null, options = {}) {
-    const compact = !!(options && options.compact);
-    // Create shift card
     const shiftCard = document.createElement('div');
     const posSlug = String(position || '').replace(/\s+/g, '-').toLowerCase();
-    shiftCard.className = `shift-card ${posSlug}`;
-    if (compact) shiftCard.classList.add('shift-card--compact');
+    shiftCard.className = `shift-card shift-card--compact ${posSlug}`;
     
     const employeeNames = {
         kenny: 'Kenny',
@@ -3477,30 +3525,17 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     const shiftsHost = dayColumn.querySelector('.sched-cell-shifts');
     if (!shiftsHost) return null;
 
-    const colDate = dayColumn.dataset?.date;
-    const isPastCol = colDate && colDate < getTodayLocalYmd();
-    const hintHtml = isPastCol
-        ? '<i class="fas fa-eye"></i> Click to view tasks for this shift'
-        : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
-
-    const extraHtml = compact
-        ? ''
-        : `<div class="shift-employee">
-                <div class="employee-avatar">${bucketName ? bucketName.charAt(0).toUpperCase() : '?'}</div>
-                <span class="employee-name">${escapeHtml(bucketName)}</span>
-            </div>
-            <div class="shift-card-hint">${hintHtml}</div>`;
+    const displayTime = (start24 && end24) ? ShiftCardTime.range(start24, end24) : time;
 
     shiftCard.innerHTML = `
-        <span class="shift-card-drag-handle" draggable="true" title="Drag grip to copy to another day or person. Double-click grip, then click a cell (Esc to cancel)." aria-label="Drag or double-click to copy shift">
+        <span class="shift-card-drag-handle" draggable="true" title="Copy shift" aria-label="Copy shift">
             <i class="fas fa-grip-vertical" aria-hidden="true"></i>
         </span>
         <div class="shift-card-body">
             <div class="shift-header">
+                <span class="shift-time">${escapeHtml(displayTime)}</span>
                 <span class="shift-position">${escapeHtml(prettyPos)}</span>
-                <span class="shift-time">${escapeHtml(time)}</span>
             </div>
-            ${extraHtml}
         </div>
     `;
 
@@ -3842,21 +3877,6 @@ function getDateForDay(dayName) {
     targetDate.setDate(targetDate.getDate() + dayIndex);
     
     return formatLocalYmd(targetDate);
-}
-
-// Get employee display name from select value
-function getEmployeeDisplayName(employeeValue) {
-    const employeeNames = {
-        'kenny': 'Kenny',
-        'rohan': 'Rohan',
-        'jake': 'Jake',
-        'natalie': 'Natalie',
-        'sam': 'Sam',
-        'sophia': 'Sophia',
-        'aria': 'Aria',
-        'alex': 'Alex'
-    };
-    return employeeNames[employeeValue] || employeeValue.charAt(0).toUpperCase() + employeeValue.slice(1);
 }
 
 // Format date for display

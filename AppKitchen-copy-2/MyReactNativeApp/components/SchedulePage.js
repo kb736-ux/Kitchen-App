@@ -17,8 +17,21 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
-import { shiftRowMatchesEmployee, formatLocalDateYMD } from '../utils/shiftMatching';
+import { ShiftMatching, formatLocalDateYMD } from '../utils/shiftMatching';
 import { Colors } from '../constants/theme';
+
+/** Equal-sized Monday-start month cells: 6 rows × 7 flex columns (not % widths). */
+class ScheduleCalendarLayout {
+  static DAYS_PER_WEEK = 7;
+
+  static weeks(days) {
+    const rows = [];
+    for (let i = 0; i < (days || []).length; i += ScheduleCalendarLayout.DAYS_PER_WEEK) {
+      rows.push(days.slice(i, i + ScheduleCalendarLayout.DAYS_PER_WEEK));
+    }
+    return rows;
+  }
+}
 
 const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -153,6 +166,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     authLoading,
   } = useEmployee();
   const [shifts, setShifts] = useState([]);
+  const [orgProfiles, setOrgProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -193,10 +207,11 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     if (orgId) {
       fetchShifts();
       fetchNotifications();
+      fetchOrgProfiles();
     } else {
       setLoading(false);
     }
-  }, [orgId, employeeId, employeeName, displayName, firstName, lastName, defaultEmployeeName]);
+  }, [orgId, employeeId, employeeName, displayName, firstName, lastName, defaultEmployeeName, authUserId, email]);
 
   /**
    * Dots on the month grid only reflect rows in `shifts`. The rolling fetch below is bounded;
@@ -227,6 +242,20 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
       cancelled = true;
     };
   }, [currentMonth, orgId]);
+
+  async function fetchOrgProfiles() {
+    if (!orgId) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, user_id, employee_name, display_name, first_name, last_name, email')
+      .eq('org_id', orgId)
+      .limit(400);
+    if (error) {
+      console.warn('[Schedule] fetchOrgProfiles:', error.message);
+      return;
+    }
+    setOrgProfiles(data || []);
+  }
 
   async function fetchNotifications() {
     const { data, error } = await supabase
@@ -291,43 +320,62 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
   const onRefresh = () => { fetchShifts(true); fetchNotifications(); };
 
-  const shiftNameCandidates = useMemo(() => {
-    const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
-    const pCombined = [profileData?.firstName, profileData?.lastName].filter(Boolean).join(' ').trim();
-    return Array.from(
-      new Set(
-        [
+  const shiftNameCandidates = useMemo(
+    () =>
+      ShiftMatching.collectNameCandidates(
+        {
+          employeeId,
+          authUserId,
+          email,
           employeeName,
           displayName,
           defaultEmployeeName,
-          combined,
           firstName,
           lastName,
-          (email || '').split('@')[0],
-          profileData?.displayName,
-          profileData?.employeeNameFromProfile,
-          pCombined,
-          profileData?.firstName,
-          profileData?.lastName,
-        ]
-          .map((n) => (n || '').trim())
-          .filter(Boolean)
-      )
-    );
-  }, [employeeName, displayName, defaultEmployeeName, firstName, lastName, email, profileData]);
+          profileData,
+        },
+        orgProfiles
+      ),
+    [
+      employeeId,
+      authUserId,
+      email,
+      employeeName,
+      displayName,
+      defaultEmployeeName,
+      firstName,
+      lastName,
+      profileData,
+      orgProfiles,
+    ]
+  );
+
+  const knownProfileIds = useMemo(
+    () =>
+      ShiftMatching.profileIdsForMember(orgProfiles, {
+        employeeId,
+        authUserId,
+      }),
+    [orgProfiles, employeeId, authUserId]
+  );
 
   const myShifts = useMemo(() => {
     if (authLoading) return [];
-    const matched = shifts.filter((s) => shiftRowMatchesEmployee(s, employeeId, shiftNameCandidates, authUserId));
+    const matched = shifts.filter((s) =>
+      ShiftMatching.rowMatchesEmployee(s, employeeId, shiftNameCandidates, authUserId, knownProfileIds)
+    );
     if (__DEV__) {
       console.log('[Schedule] myShifts filter:', matched.length, '/', shifts.length, 'matched | employeeId:', employeeId, '| authUserId:', authUserId, '| candidates:', JSON.stringify(shiftNameCandidates));
     }
     return matched;
-  }, [shifts, employeeId, shiftNameCandidates, authLoading, authUserId]);
+  }, [shifts, employeeId, shiftNameCandidates, authLoading, authUserId, knownProfileIds]);
 
   const scheduleUiLoading = loading || (!!orgId && authLoading);
 
-  const shiftDateSet = new Set(myShifts.map((s) => s.shift_date));
+  const shiftDateSet = useMemo(
+    () => new Set(myShifts.map((s) => ShiftMatching.dateKey(s.shift_date)).filter(Boolean)),
+    [myShifts]
+  );
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
@@ -376,7 +424,8 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   };
 
   const calendarDays = getCalendarDays();
-  const scheduleShifts = myShifts.filter((s) => s.shift_date >= todayStr);
+  const calendarWeeks = ScheduleCalendarLayout.weeks(calendarDays);
+  const scheduleShifts = myShifts.filter((s) => ShiftMatching.dateKey(s.shift_date) >= todayStr);
   const groupedScheduleShifts = useMemo(
     () => groupRepeatingShifts(scheduleShifts),
     [scheduleShifts]
@@ -499,6 +548,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   };
 
   const modalDays = getModalCalendarDays();
+  const modalWeeks = ScheduleCalendarLayout.weeks(modalDays);
 
   // ── Shift action modal helpers ─────────────────────────────────────────────
   const openShiftModal = (shift) => {
@@ -819,7 +869,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
           </View>
 
           <View style={styles.calendarGrid}>
-            {calendarDays.map((item, i) => {
+            {calendarWeeks.map((week, wi) => (
+              <View key={wi} style={styles.calendarWeekRow}>
+                {week.map((item, di) => {
               const ds = toDateStr(item.date);
               const isToday = ds === todayStr;
               const isSelected = selectedDate && toDateStr(selectedDate) === ds;
@@ -827,7 +879,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
               return (
                 <TouchableOpacity
-                  key={i}
+                  key={di}
                   style={[
                     styles.dayCell,
                     !item.isCurrentMonth && styles.dayCellInactive,
@@ -848,7 +900,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                   </Text>
                 </TouchableOpacity>
               );
-            })}
+                })}
+              </View>
+            ))}
           </View>
 
           <TouchableOpacity
@@ -893,9 +947,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.staffPosition}>{shift.position || '—'}</Text>
-                  {shift.employee_name ? (
-                    <Text style={styles.employeeTag}>{shift.employee_name}</Text>
-                  ) : null}
                   <Ionicons name="chevron-forward" size={14} color="#a0aec0" style={{ marginTop: 4 }} />
                 </View>
               </TouchableOpacity>
@@ -952,8 +1003,16 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 340 }}>
                 {rosterShifts.map((s, i) => {
-                  const isMe = (s.employee_name || '').toLowerCase() === employeeName.toLowerCase();
-                  const myShiftOnDay = isMe ? myShifts.find((sh) => sh.shift_date === rosterDate) : null;
+                  const isMe = ShiftMatching.rowMatchesEmployee(
+                    s,
+                    employeeId,
+                    shiftNameCandidates,
+                    authUserId,
+                    knownProfileIds
+                  );
+                  const myShiftOnDay = isMe
+                    ? myShifts.find((sh) => ShiftMatching.dateKey(sh.shift_date) === rosterDate)
+                    : null;
                   return (
                     <View key={i} style={[styles.rosterRow, isMe && styles.rosterRowMe]}>
                       <View style={[styles.rosterAvatar, isMe && styles.rosterAvatarMe]}>
@@ -1331,7 +1390,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             </View>
 
             <View style={styles.calendarGrid}>
-              {modalDays.map((item, i) => {
+              {modalWeeks.map((week, wi) => (
+                <View key={wi} style={styles.calendarWeekRow}>
+                  {week.map((item, di) => {
                 const ds = toDateStr(item.date);
                 const isStart = rangeStart && toDateStr(rangeStart) === ds;
                 const isEnd = rangeEnd && toDateStr(rangeEnd) === ds;
@@ -1340,7 +1401,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
                 return (
                   <TouchableOpacity
-                    key={i}
+                    key={di}
                     style={[
                       styles.modalDayCell,
                       !item.isCurrentMonth && styles.dayCellInactive,
@@ -1362,7 +1423,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                     </Text>
                   </TouchableOpacity>
                 );
-              })}
+                  })}
+                </View>
+              ))}
             </View>
 
             {/* Action Buttons */}
@@ -1424,21 +1487,25 @@ const styles = StyleSheet.create({
   dayHeadersRow: { flexDirection: 'row', marginBottom: 4 },
   dayHeaderCell: { flex: 1, alignItems: 'center', paddingVertical: 6 },
   dayHeaderText: { fontSize: 12, fontWeight: '600', color: '#4a5568' },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  calendarGrid: { width: '100%' },
+  calendarWeekRow: { flexDirection: 'row', width: '100%' },
   dayCell: {
-    width: '14.28%',
+    flex: 1,
+    minWidth: 0,
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
   dayCellInactive: { opacity: 0.25 },
-  dayCellShift: { backgroundColor: Colors.primarySoft, borderWidth: 1.5, borderColor: Colors.primary },
+  dayCellShift: { backgroundColor: Colors.primarySoft, borderColor: Colors.primary },
   dayCellToday: { backgroundColor: '#2d3748' },
-  dayCellSelected: { backgroundColor: Colors.primary },
+  dayCellSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   dayText: { fontSize: 14, color: '#2d3748', fontWeight: '500' },
   dayTextInactive: { color: '#e2e8f0' },
-  dayTextShift: { color: '#2e7d32', fontWeight: '600' },
+  dayTextShift: { color: Colors.primary, fontWeight: '600' },
   dayTextToday: { color: 'white', fontWeight: 'bold' },
   dayTextSelected: { color: 'white', fontWeight: 'bold' },
   requestTimeOffBtn: {
@@ -1453,7 +1520,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.primary,
   },
-  requestTimeOffBtnText: { fontSize: 15, fontWeight: '600', color: '#2e7d32' },
+  requestTimeOffBtnText: { fontSize: 15, fontWeight: '600', color: Colors.primary },
 
   // Shifts list
   sectionTitle: { fontSize: 16, fontWeight: '600', color: '#4a5568', marginBottom: 12 },
@@ -1471,7 +1538,6 @@ const styles = StyleSheet.create({
   shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
   repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
   staffPosition: { fontSize: 15, color: Colors.primary, fontWeight: '500' },
-  employeeTag: { fontSize: 12, color: '#718096', marginTop: 2 },
 
   // Bell badge
   notifBadge: {
@@ -1709,16 +1775,19 @@ const styles = StyleSheet.create({
   },
   modalMonthTitle: { fontSize: 15, fontWeight: '700', color: '#2d3748' },
   modalDayCell: {
-    width: '14.28%',
+    flex: 1,
+    minWidth: 0,
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
-  modalDayCellRange: { backgroundColor: 'rgba(76,175,80,0.15)', borderRadius: 0 },
-  modalDayCellEndpoint: { backgroundColor: Colors.primary, borderRadius: 8 },
+  modalDayCellRange: { backgroundColor: Colors.primarySoft, borderRadius: 0, borderColor: 'transparent' },
+  modalDayCellEndpoint: { backgroundColor: Colors.primary, borderRadius: 8, borderColor: Colors.primary },
   modalDayCellPast: { opacity: 0.3 },
-  modalDayTextRange: { color: '#2e7d32', fontWeight: '600' },
+  modalDayTextRange: { color: Colors.primary, fontWeight: '600' },
   modalDayTextPast: { color: '#a0aec0' },
   modalActions: {
     flexDirection: 'row',
