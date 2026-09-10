@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sheek - Scheduling</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="scheduling.css">
+    <link rel="stylesheet" href="scheduling.css?v=20260910-sched-ui">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body>
+<body class="scheduling-page">
     <div class="dashboard-container">
         <!-- Top Navigation -->
         <nav class="top-nav">
@@ -57,12 +57,24 @@
 
         <!-- Main Scheduling Content -->
         <main class="dashboard-main">
-            <div class="scheduling-header">
+            <div class="dashboard-header scheduling-toolbar">
                 <h1>Scheduling</h1>
-                <div class="header-actions">
+                <div class="header-center">
+                    <div class="week-navigation">
+                        <button class="week-nav-btn" id="prev-week" type="button" aria-label="Previous week">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <h2 id="current-week" class="week-display-title">Jan 3 – 10</h2>
+                        <button class="week-nav-btn" id="next-week" type="button" aria-label="Next week">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button class="week-today-btn" id="this-week-btn" type="button" hidden>This week</button>
+                    </div>
+                </div>
+                <div class="scheduling-header-actions">
                     <button class="btn-secondary" id="calendar-history-btn" type="button">
-                        <i class="fas fa-history"></i>
-                        Calendar / History
+                        <i class="fas fa-calendar-alt"></i>
+                        Calendar
                     </button>
                     <!-- Shift Requests entry hidden for now -->
                     <button class="btn-secondary" id="shift-requests-btn" type="button"
@@ -75,30 +87,11 @@
                             width:18px;height:18px;font-size:11px;font-weight:700;
                             line-height:18px;text-align:center;">0</span>
                     </button>
-                    <button class="btn-primary" id="assign-shift-btn">
+                    <button class="btn-primary" id="assign-shift-btn" type="button">
                         <i class="fas fa-plus"></i>
                         Assign Shift
                     </button>
-                    <button class="btn-secondary" id="create-position-btn">
-                        <i class="fas fa-briefcase"></i>
-                        Create Position
-                    </button>
                 </div>
-            </div>
-
-            <!-- Week Navigation -->
-            <div class="week-navigation">
-                <button class="week-nav-btn" id="prev-week">
-                    <i class="fas fa-chevron-left"></i>
-                    Previous
-                </button>
-                <div class="week-display">
-                    <h2 id="current-week">Week of Jan 3 - Jan 10</h2>
-                </div>
-                <button class="week-nav-btn" id="next-week">
-                    Next
-                    <i class="fas fa-chevron-right"></i>
-                </button>
             </div>
 
             <!-- Schedule matrix: employees (rows) × days (columns); built by scheduling.js -->
@@ -184,7 +177,10 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="position-select">Position</label>
+                    <div class="form-label-row">
+                        <label for="position-select">Position</label>
+                        <button type="button" class="sched-inline-link" id="create-position-btn">New position</button>
+                    </div>
                     <select id="position-select" class="form-control">
                         <option value="">Select Position</option>
                     </select>
@@ -512,6 +508,6 @@
     <script src="employees.js?v=20260411-profile-roster"></script>
     <script src="script.js"></script>
     <script src="recipes.js"></script>
-    <script src="scheduling.js?v=20260411-profile-roster"></script>
+    <script src="scheduling.js?v=20260910-sched-ui"></script>
 </body>
 </html>

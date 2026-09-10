@@ -188,13 +188,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
 
-  const getCurrentDate = () => {
-    const today = new Date();
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${days[today.getDay()]} ${months[today.getMonth()]}/${today.getDate()}`;
-  };
-
   useEffect(() => {
     if (orgId) {
       fetchShifts();
@@ -789,7 +782,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerLeft} />
+        <Text style={styles.headerTitle}>Schedule</Text>
       </View>
 
       <ScrollView
@@ -798,8 +791,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4CAF50" />
         }
       >
-        <Text style={styles.dateText}>{getCurrentDate()}</Text>
-
         {scheduleUiLoading ? (
           <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 40, marginBottom: 24 }} />
         ) : (
@@ -859,17 +850,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             })}
           </View>
 
-          <View style={styles.calendarLegend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#4CAF50' }]} />
-              <Text style={styles.legendText}>Work day</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#2d3748' }]} />
-              <Text style={styles.legendText}>Today</Text>
-            </View>
-          </View>
-
           <TouchableOpacity
             style={styles.requestTimeOffBtn}
             onPress={() => {
@@ -924,17 +904,6 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
         </>
         )}
-
-        {/* Bottom Buttons */}
-        <View style={styles.bottomButtons}>
-          <TouchableOpacity
-            style={[styles.bottomButton, styles.requestButton]}
-            onPress={() => { setModalMonth(new Date()); setShowTimeOffModal(true); }}
-          >
-            <Ionicons name="time-outline" size={18} color="#4CAF50" style={styles.btnIcon} />
-            <Text style={[styles.bottomButtonText, styles.requestButtonText]}>Request Time Off</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
       {/* Day Roster Modal */}
@@ -1424,11 +1393,12 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 15,
     backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
   },
-  headerLeft: { flex: 1 },
+  headerTitle: { fontSize: 22, fontWeight: '700', color: '#2d3748' },
   notificationIcon: { padding: 8 },
-  content: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
-  dateText: { fontSize: 24, fontWeight: 'bold', color: '#2d3748', marginBottom: 16 },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
 
   // Calendar
   calendarCard: {
@@ -1470,10 +1440,6 @@ const styles = StyleSheet.create({
   dayTextShift: { color: '#2e7d32', fontWeight: '600' },
   dayTextToday: { color: 'white', fontWeight: 'bold' },
   dayTextSelected: { color: 'white', fontWeight: 'bold' },
-  calendarLegend: { flexDirection: 'row', marginTop: 12, gap: 16 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { fontSize: 12, color: '#718096' },
   requestTimeOffBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1686,37 +1652,6 @@ const styles = StyleSheet.create({
   },
   coworkerAvatarText: { color: 'white', fontWeight: '700', fontSize: 15 },
   coworkerName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#2d3748' },
-
-  // Bottom buttons
-  bottomButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 20,
-    gap: 12,
-  },
-  bottomButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'white',
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  requestButton: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#f0fff4',
-  },
-  btnIcon: { marginRight: 6 },
-  bottomButtonText: { fontSize: 14, fontWeight: '600', color: '#2d3748' },
-  requestButtonText: { color: '#2e7d32' },
 
   // Modal
   modalOverlay: {

@@ -1083,27 +1083,63 @@ document.addEventListener('DOMContentLoaded', function() {
 function initializeScheduling() {
     setupWeekNavigation();
     setupModalHandlers();
-    setupShiftInteractions();
     setupTaskAssignment();
-    animateShiftCards();
     checkEmployeeTasks();
     initializeEmployeeHours();
 }
 
-// Week Navigation
+class ScheduleWeek {
+    static mondayOf(date) {
+        const d = new Date(date);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }
+
+    static isSameDay(a, b) {
+        return a.getFullYear() === b.getFullYear()
+            && a.getMonth() === b.getMonth()
+            && a.getDate() === b.getDate();
+    }
+
+    static title(weekStart) {
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const startMonth = weekStart.toLocaleDateString('en-US', { month: 'short' });
+        const endMonth = weekEnd.toLocaleDateString('en-US', { month: 'short' });
+        const startDay = weekStart.getDate();
+        const endDay = weekEnd.getDate();
+        if (startMonth === endMonth) {
+            return `${startMonth} ${startDay} – ${endDay}`;
+        }
+        return `${startMonth} ${startDay} – ${endMonth} ${endDay}`;
+    }
+
+    static formatHours(hours) {
+        const n = Number(hours);
+        if (!Number.isFinite(n) || n <= 0) return '0h';
+        const rounded = Math.round(n * 10) / 10;
+        return `${rounded}h`;
+    }
+
+    static syncThisWeekButton(weekStart) {
+        const btn = document.getElementById('this-week-btn');
+        if (!btn) return;
+        btn.hidden = ScheduleWeek.isSameDay(weekStart, ScheduleWeek.mondayOf(new Date()));
+    }
+}
+
 function getMondayOfWeek(date) {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    d.setDate(diff);
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return ScheduleWeek.mondayOf(date);
 }
 let currentWeekStart = getMondayOfWeek(new Date());
 
 function setupWeekNavigation() {
     const prevWeekBtn = document.getElementById('prev-week');
     const nextWeekBtn = document.getElementById('next-week');
+    const thisWeekBtn = document.getElementById('this-week-btn');
 
     if (prevWeekBtn) {
         prevWeekBtn.addEventListener('click', async () => {
@@ -1118,6 +1154,13 @@ function setupWeekNavigation() {
             await updateScheduleMatrixAndSync();
         });
     }
+
+    if (thisWeekBtn) {
+        thisWeekBtn.addEventListener('click', async () => {
+            currentWeekStart = ScheduleWeek.mondayOf(new Date());
+            await updateScheduleMatrixAndSync();
+        });
+    }
 }
 
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -1125,21 +1168,8 @@ const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat
 
 function updateWeekTitle() {
     const weekDisplay = document.getElementById('current-week');
-    if (!weekDisplay) return;
-
-    const weekEnd = new Date(currentWeekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-
-    const startMonth = currentWeekStart.toLocaleDateString('en-US', { month: 'short' });
-    const endMonth = weekEnd.toLocaleDateString('en-US', { month: 'short' });
-    const startDay = currentWeekStart.getDate();
-    const endDay = weekEnd.getDate();
-
-    if (startMonth === endMonth) {
-        weekDisplay.textContent = `Week of ${startMonth} ${startDay} - ${endDay}`;
-    } else {
-        weekDisplay.textContent = `Week of ${startMonth} ${startDay} - ${endMonth} ${endDay}`;
-    }
+    if (weekDisplay) weekDisplay.textContent = ScheduleWeek.title(currentWeekStart);
+    ScheduleWeek.syncThisWeekButton(currentWeekStart);
 }
 
 function decodeEmployeeKeyAttr(raw) {
@@ -1202,7 +1232,7 @@ function updateMatrixRowHours() {
         const emp = decodeEmployeeKeyAttr(row.getAttribute('data-employee-key'));
         if (!emp) return;
         const el = row.querySelector('.sched-emp-hrs');
-        if (el) el.textContent = `${getEmployeeWeeklyHours(emp, ws).toFixed(1)} hrs this week`;
+        if (el) el.textContent = ScheduleWeek.formatHours(getEmployeeWeeklyHours(emp, ws));
     });
 }
 
@@ -1825,7 +1855,7 @@ async function renderScheduleMatrix() {
             disp.charAt(0).toUpperCase()
         )}</div><div class="sched-emp-meta"><span class="sched-emp-name">${escapeHtml(
             disp
-        )}</span><span class="sched-emp-hrs">${hrs.toFixed(1)} hrs this week</span></div></div>`;
+        )}</span><span class="sched-emp-hrs">${ScheduleWeek.formatHours(hrs)}</span></div></div>`;
         DAY_NAMES.forEach((dayKey, index) => {
             const d = new Date(currentWeekStart);
             d.setDate(d.getDate() + index);
@@ -3437,7 +3467,15 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     const hintHtml = isPastCol
         ? '<i class="fas fa-eye"></i> Click to view tasks for this shift'
         : '<i class="fas fa-pen"></i> Click to edit shift & assign tasks';
-    
+
+    const extraHtml = compact
+        ? ''
+        : `<div class="shift-employee">
+                <div class="employee-avatar">${bucketName ? bucketName.charAt(0).toUpperCase() : '?'}</div>
+                <span class="employee-name">${escapeHtml(bucketName)}</span>
+            </div>
+            <div class="shift-card-hint">${hintHtml}</div>`;
+
     shiftCard.innerHTML = `
         <span class="shift-card-drag-handle" draggable="true" title="Drag grip to copy to another day or person. Double-click grip, then click a cell (Esc to cancel)." aria-label="Drag or double-click to copy shift">
             <i class="fas fa-grip-vertical" aria-hidden="true"></i>
@@ -3447,11 +3485,7 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
                 <span class="shift-position">${escapeHtml(prettyPos)}</span>
                 <span class="shift-time">${escapeHtml(time)}</span>
             </div>
-            <div class="shift-employee">
-                <div class="employee-avatar">${bucketName ? bucketName.charAt(0).toUpperCase() : '?'}</div>
-                <span class="employee-name">${escapeHtml(bucketName)}</span>
-            </div>
-            <div class="shift-card-hint">${hintHtml}</div>
+            ${extraHtml}
         </div>
     `;
 
@@ -3461,21 +3495,9 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
     shiftCard.dataset.endTime24 = end24;
     shiftCard.dataset.positionSlug = posSlug;
 
-    // Check if employee has tasks and update visual indicator
     updateShiftCardTaskIndicator(shiftCard, bucketName);
-    
-    // Add animation
-    shiftCard.style.opacity = '0';
-    shiftCard.style.transform = 'translateY(20px)';
 
     shiftsHost.appendChild(shiftCard);
-    
-    // Animate in
-    setTimeout(() => {
-        shiftCard.style.transition = 'all 0.3s ease';
-        shiftCard.style.opacity = '1';
-        shiftCard.style.transform = 'translateY(0)';
-    }, 100);
 
     return shiftCard;
 }
@@ -3715,70 +3737,6 @@ async function loadActiveRecipesInto(container, targetTaskList) {
 
 function editShift(shiftCard, employee, position, time, day) {
     openShiftDetailsModal(shiftCard, employee, position, time, day);
-}
-
-// Shift Interactions
-function setupShiftInteractions() {
-    document.querySelectorAll('.shift-card').forEach(card => {
-        const employeeNameEl = card.querySelector('.employee-name');
-        const employeeName = employeeNameEl?.textContent.trim();
-        if (employeeName && !card.dataset.employeeName) {
-            card.dataset.employeeName = employeeName;
-        }
-        if (card.dataset.hasShiftDetailsHandler) return;
-        card.dataset.hasShiftDetailsHandler = 'true';
-
-        card.addEventListener('click', function(e) {
-            if (e.target.closest('.task-warning') || e.target.closest('.shift-card-drag-handle')) return;
-            const dayColumn = card.closest('.sched-matrix-cell');
-            const cardDay = dayColumn?.dataset.day || 'monday';
-            const posEl = card.querySelector('.shift-position');
-            const timeEl = card.querySelector('.shift-time');
-            const empEl = card.querySelector('.employee-name');
-            const POS_MAP = { 'Line Cook':'line-cook', 'Server':'server',
-                               'Dish':'dish', 'Prep':'prep', 'FOH Manager':'foh-manager' };
-            const posLabel = posEl?.textContent.trim() || '';
-            const posValue = POS_MAP[posLabel] || (posLabel ? posLabel.toLowerCase().replace(/\s+/g, '-') : 'line-cook');
-            const label = (card.dataset.employeeName || empEl?.textContent || '').trim();
-            const empKey = label ? label.toLowerCase() : '';
-            const timeStr = timeEl?.textContent.trim() || '';
-            editShift(card, empKey, posValue, timeStr, cardDay);
-        });
-    });
-    
-    // Add click handlers to empty day slots
-    document.querySelectorAll('.empty-day').forEach(emptyDay => {
-        emptyDay.addEventListener('click', function() {
-            // Find the parent day-column to get the day
-            const dayColumn = this.closest('.sched-matrix-cell');
-            const day = dayColumn ? dayColumn.dataset.day : null;
-            openModal('assign-shift-modal', day);
-        });
-    });
-
-    // Add click handlers to per-day add shift buttons
-    document.querySelectorAll('.day-add-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const dayColumn = this.closest('.sched-matrix-cell');
-            const day = dayColumn ? dayColumn.dataset.day : null;
-            openModal('assign-shift-modal', day);
-        });
-    });
-}
-
-// Animations
-function animateShiftCards() {
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.animationPlayState = 'running';
-            }
-        });
-    });
-    
-    document.querySelectorAll('.shift-card').forEach(card => {
-        observer.observe(card);
-    });
 }
 
 // Notifications
