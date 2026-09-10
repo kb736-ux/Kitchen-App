@@ -98,10 +98,21 @@ function testUniqueHeadsKeepsFirstPerChannel() {
   assert.strictEqual(heads[0].text, 'latest');
 }
 
+function testHydrateEmptyDoesNotWipeExisting() {
+  const store = new KitchenChatStore();
+  store.hydrateIncoming('announcements', [msg({ serverId: 'a1', text: 'stay' })]);
+  const wiped = store.hydrateIncoming('announcements', []);
+  assert.strictEqual(wiped, false);
+  assert.strictEqual(store.messagesFor('announcements').length, 1);
+  assert.strictEqual(store.messagesFor('announcements')[0].text, 'stay');
+}
+
 testMergeKeepsUnmatchedPending();
 testMergeMatchesPendingToServer();
 testApplyHeadDoesNotWipeHydratedHistory();
 testApplyHeadOnStubReplacesPreview();
 testDropMissingSkipsIncompleteAndHydrated();
 testSidebarFingerprintStableWhenPreviewUnchanged();
+testUniqueHeadsKeepsFirstPerChannel();
+testHydrateEmptyDoesNotWipeExisting();
 console.log('kitchenChatStore.test.js: ok');

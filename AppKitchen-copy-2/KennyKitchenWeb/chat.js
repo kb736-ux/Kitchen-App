@@ -127,6 +127,10 @@ class KitchenChatStore {
     }
 
     hydrateIncoming(id, incoming, extraMeta) {
+        if ((!incoming || incoming.length === 0) && (this.threads[id] || []).some((m) => !m.pending)) {
+            this.hydrated[id] = true;
+            return false;
+        }
         const changed = this.mergeIncoming(id, incoming, extraMeta);
         this.hydrated[id] = true;
         return changed;
@@ -618,7 +622,7 @@ class KitchenChat {
     }
 
     async fetchAnnouncementRows() {
-        if (!window.supabaseClient || !window.ORG_ID) return [];
+        if (!window.supabaseClient || !window.ORG_ID) return null;
         const selectFull = 'id, created_by, created_by_id, message, created_at';
         const selectLite = 'id, created_by, message, created_at';
         let { data, error } = await window.supabaseClient
@@ -639,13 +643,14 @@ class KitchenChat {
         }
         if (error) {
             console.warn('[Supabase] Announcements load failed:', error.message);
-            return [];
+            return null;
         }
         return (data || []).slice().reverse();
     }
 
     applyAnnouncements(rows) {
-        const incoming = (rows || []).map((a) => {
+        if (!rows) return;
+        const incoming = rows.map((a) => {
             const profile = this.profileById(a.created_by_id);
             const created = new Date(a.created_at);
             return {
@@ -728,7 +733,7 @@ class KitchenChat {
             await profilesP;
             const [headResult, annRows] = await Promise.all([headsP, annP]);
             this.applyConversationHeads(headResult.rows, headResult.complete);
-            this.applyAnnouncements(annRows);
+            if (annRows) this.applyAnnouncements(annRows);
             this.renderSidebar();
             this.renderActiveThread();
             if (hydrate && this.store.activeId && this.store.activeId !== 'announcements') {
