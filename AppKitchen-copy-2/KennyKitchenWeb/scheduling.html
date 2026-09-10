@@ -9,7 +9,7 @@
     <title>Sheek - Scheduling</title>
     <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="scheduling.css?v=20260910-gcal-chips">
+    <link rel="stylesheet" href="scheduling.css?v=20260910-week-grid">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -95,10 +95,28 @@
                 </div>
             </div>
 
-            <!-- Schedule matrix: employees (rows) × days (columns); built by scheduling.js -->
+            <div class="sched-board-meta">
+                <div class="sched-view-toggle" role="tablist" aria-label="Schedule view">
+                    <button type="button" id="sched-view-employee" role="tab" aria-selected="true" class="is-active">
+                        <i class="fas fa-users" aria-hidden="true"></i>
+                        Employee View
+                    </button>
+                    <button type="button" id="sched-view-position" role="tab" aria-selected="false">
+                        <i class="fas fa-briefcase" aria-hidden="true"></i>
+                        Position View
+                    </button>
+                </div>
+                <div class="sched-status-legend" aria-label="Shift status">
+                    <span><i class="sched-legend-dot accepted" aria-hidden="true"></i> Accepted (scheduled)</span>
+                    <span><i class="sched-legend-dot awaiting" aria-hidden="true"></i> Awaiting employee</span>
+                    <span><i class="sched-legend-dot denied" aria-hidden="true"></i> Denied</span>
+                </div>
+            </div>
+
+            <!-- Schedule matrix: Employee View (people × days) or Position View (roles × days) -->
             <div class="schedule-container">
                 <div class="schedule-matrix-scroll">
-                    <div id="schedule-matrix" class="schedule-matrix" aria-label="Weekly schedule by employee"></div>
+                    <div id="schedule-matrix" class="schedule-matrix" data-view="employee" aria-label="Weekly schedule by employee"></div>
                 </div>
             </div>
         </main>
@@ -419,6 +437,6 @@
     <script src="adminSettings.js"></script>
     <script src="employees.js?v=20260411-profile-roster"></script>
     <script src="script.js"></script>
-    <script src="scheduling.js?v=20260910-ampm-chips"></script>
+    <script src="scheduling.js?v=20260910-week-grid"></script>
 </body>
 </html>

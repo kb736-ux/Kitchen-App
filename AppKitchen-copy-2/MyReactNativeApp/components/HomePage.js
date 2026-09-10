@@ -656,9 +656,9 @@ const HomePage = ({
               <View style={styles.shiftIconBg}>
                 <Ionicons name="time" size={20} color={Colors.success} />
               </View>
-              <View style={{ marginLeft: 12 }}>
+              <View style={{ marginLeft: 12, flex: 1, minWidth: 0 }}>
                 <Text style={styles.shiftCardLabel}>Today's Shift</Text>
-                <Text style={styles.shiftCardTime}>
+                <Text style={styles.shiftCardTime} numberOfLines={1}>
                   {formatTime(todayShift.start_time)} – {formatTime(todayShift.end_time)}
                 </Text>
               </View>
@@ -673,12 +673,12 @@ const HomePage = ({
               <View style={[styles.shiftIconBg, { backgroundColor: '#ebf8ff' }]}>
                 <Ionicons name="calendar-outline" size={20} color="#3182ce" />
               </View>
-              <View style={{ marginLeft: 12 }}>
+              <View style={{ marginLeft: 12, flex: 1, minWidth: 0 }}>
                 <Text style={[styles.shiftCardLabel, { color: '#3182ce' }]}>Next Shift</Text>
-                <Text style={styles.shiftCardTime}>
+                <Text style={styles.shiftCardTime} numberOfLines={1}>
                   {formatShiftDate(nextShift.shift_date)}
                 </Text>
-                <Text style={styles.shiftCardSubtime}>
+                <Text style={styles.shiftCardSubtime} numberOfLines={1}>
                   {formatTime(nextShift.start_time)} – {formatTime(nextShift.end_time)}
                 </Text>
               </View>
@@ -1064,7 +1064,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.successSoft, justifyContent: 'center', alignItems: 'center',
   },
   shiftCardLabel: { fontSize: 11, fontWeight: '700', color: Colors.success, textTransform: 'uppercase', letterSpacing: 0.5 },
-  shiftCardTime: { fontSize: 17, fontWeight: '700', color: '#2d3748', marginTop: 2 },
+  shiftCardTime: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2d3748',
+    marginTop: 2,
+    flexShrink: 1,
+  },
   shiftCardSubtime: { fontSize: 13, color: '#718096', marginTop: 1 },
   shiftBadge: {
     backgroundColor: Colors.successSoft,

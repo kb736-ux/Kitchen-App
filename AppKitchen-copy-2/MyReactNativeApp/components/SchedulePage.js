@@ -37,6 +37,8 @@ const DAY_HEADERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
 
 function shiftRowKey(s) {
   if (!s) return '';
@@ -223,15 +225,19 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     const endStr = formatLocalDateYMD(last);
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from('shifts')
-        .select('*')
-        .eq('org_id', orgId)
-        .gte('shift_date', startStr)
-        .lte('shift_date', endStr)
-        .order('shift_date', { ascending: true });
-      if (cancelled || error) return;
-      setShifts((prev) => mergeShiftRows(prev, data || []));
+      try {
+        const { data, error } = await supabase
+          .from('shifts')
+          .select('*')
+          .eq('org_id', orgId)
+          .gte('shift_date', startStr)
+          .lte('shift_date', endStr)
+          .order('shift_date', { ascending: true });
+        if (cancelled || error) return;
+        setShifts((prev) => mergeShiftRows(prev, data || []));
+      } catch (e) {
+        console.warn('[Schedule] month fetch failed:', e?.message || e);
+      }
     })();
     return () => {
       cancelled = true;
@@ -276,7 +282,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
         console.warn('[Schedule] fetchShifts RLS/query error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }), 'orgId:', orgId);
       } else {
         const rows = data || [];
-        if (__DEV__) {
+        if (isDev) {
           console.log('[Schedule] fetchShifts returned', rows.length, 'rows for org', orgId);
           if (rows.length > 0) {
             console.log('[Schedule] sample shift:', JSON.stringify({ id: rows[0].id, employee_name: rows[0].employee_name, employee_id: rows[0].employee_id, shift_date: rows[0].shift_date, position: rows[0].position }));
@@ -338,7 +344,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
     const matched = shifts.filter((s) =>
       ShiftMatching.rowMatchesEmployee(s, employeeId, shiftNameCandidates, authUserId, knownProfileIds)
     );
-    if (__DEV__) {
+    if (isDev) {
       console.log('[Schedule] myShifts filter:', matched.length, '/', shifts.length, 'matched | employeeId:', employeeId, '| authUserId:', authUserId, '| candidates:', JSON.stringify(shiftNameCandidates));
     }
     return matched;
@@ -360,10 +366,9 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
   };
 
   const formatDate = (dateStr) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${DAYS_FULL[d.getDay()]} ${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}`;
   };
 
   const getCalendarDays = () => {
@@ -553,6 +558,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
       }
 
       setLoadingShiftTasks(true);
+      try {
       const { data, error } = await supabase
         .from('tasks')
         .select('id, text, status, completed_at, created_at, shift_id')
@@ -613,7 +619,14 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
 
         setShiftTasks(rows);
       }
-      setLoadingShiftTasks(false);
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[Schedule] fetchShiftTasks exception:', e?.message || e);
+          setShiftTasks([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingShiftTasks(false);
+      }
     }
 
     fetchShiftTasks();
@@ -636,7 +649,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
         .order('start_time', { ascending: true });
       if (!error) setRosterShifts(data || []);
     } catch (e) {
-      console.warn('[Roster] fetch error:', e.message);
+      console.warn('[Roster] fetch error:', e?.message || e);
     } finally {
       setLoadingRoster(false);
     }
@@ -729,7 +742,7 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
         Array.from(capableByKey.values()).sort((a, b) => a.label.localeCompare(b.label))
       );
     } catch (e) {
-      console.warn('[Transfer] fetchAvailableCoworkers error:', e.message);
+      console.warn('[Transfer] fetchAvailableCoworkers error:', e?.message || e);
     } finally {
       setLoadingTransfer(false);
     }
@@ -791,6 +804,39 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
         : '';
       Alert.alert('Error', `Could not submit request: ${msg}${hint}`);
       console.warn('[Supabase] shift_request failed:', msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSeriesAck = async (group, status) => {
+    const ids = (group?.shifts || []).map((s) => s?.id).filter(Boolean);
+    if (!orgId || ids.length === 0) {
+      Alert.alert('Could not update series', 'These shifts are missing ids. Pull to refresh and try again.');
+      return;
+    }
+    const ackStatus = status === 'denied' ? 'denied' : 'accepted';
+    setSubmitting(true);
+    try {
+      const rows = ids.map((shiftId) => ({
+        org_id: orgId,
+        shift_id: shiftId,
+        employee_name: employeeName,
+        request_type: 'shift_ack',
+        status: ackStatus,
+        note: ackStatus === 'accepted' ? 'Accepted series from Schedule' : 'Denied series from Schedule',
+      }));
+      const { error } = await supabase.from('shift_requests').insert(rows);
+      if (error) throw error;
+      Alert.alert(
+        ackStatus === 'accepted' ? 'Series accepted' : 'Series denied',
+        ackStatus === 'accepted'
+          ? 'Your manager can see these shifts as accepted.'
+          : 'Your manager can see these shifts as denied.'
+      );
+      fetchShifts(true);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Could not update this series.');
     } finally {
       setSubmitting(false);
     }
@@ -903,27 +949,52 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
             {groupedScheduleShifts.map((group) => {
               const shift = group.shift;
               const repeatSummary = getRepeatSummary(group);
+              const isSeries = !!(group.repeatInterval && group.repeatCount >= 2);
               return (
-              <TouchableOpacity
+              <View
                 key={`${shift.id || shiftRowKey(shift)}|${group.repeatUntil || shift.shift_date}`}
                 style={styles.staffItem}
-                onPress={() => openShiftModal(shift)}
-                activeOpacity={0.7}
               >
-                <View>
-                  <Text style={styles.staffName}>{formatDate(shift.shift_date)}</Text>
-                  <Text style={styles.shiftTime}>
-                    {formatTime(shift.start_time)} – {formatTime(shift.end_time)}
-                  </Text>
-                  {repeatSummary ? (
-                    <Text style={styles.repeatSummary}>{repeatSummary}</Text>
-                  ) : null}
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.staffPosition}>{shift.position || '—'}</Text>
-                  <Ionicons name="chevron-forward" size={14} color="#a0aec0" style={{ marginTop: 4 }} />
-                </View>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.staffItemMain}
+                  onPress={() => openShiftModal(shift)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.staffItemCopy}>
+                    <Text style={styles.staffName} numberOfLines={1}>
+                      {formatDate(shift.shift_date)}
+                    </Text>
+                    <Text style={styles.shiftTime} numberOfLines={1}>
+                      {formatTime(shift.start_time)} – {formatTime(shift.end_time)}
+                    </Text>
+                    <Text style={styles.staffPosition} numberOfLines={1}>
+                      {shift.position || '—'}
+                    </Text>
+                    {repeatSummary ? (
+                      <Text style={styles.repeatSummary}>{repeatSummary}</Text>
+                    ) : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#a0aec0" />
+                </TouchableOpacity>
+                {isSeries ? (
+                  <View style={styles.seriesActions}>
+                    <TouchableOpacity
+                      style={[styles.seriesBtn, styles.seriesBtnAccept]}
+                      onPress={() => handleSeriesAck(group, 'accepted')}
+                      disabled={submitting}
+                    >
+                      <Text style={styles.seriesBtnAcceptText}>Accept series</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.seriesBtn, styles.seriesBtnDeny]}
+                      onPress={() => handleSeriesAck(group, 'denied')}
+                      disabled={submitting}
+                    >
+                      <Text style={styles.seriesBtnDenyText}>Deny series</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
             );})}
           </View>
         )}
@@ -1052,8 +1123,8 @@ const SchedulePage = ({ orgId, profileData = {} }) => {
                       <View style={styles.shiftModalIconBg}>
                         <Ionicons name="calendar" size={22} color={Colors.primary} />
                       </View>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={styles.shiftModalDate}>{formatDate(selectedShift.shift_date)}</Text>
+                      <View style={{ flex: 1, marginLeft: 12, minWidth: 0 }}>
+                        <Text style={styles.shiftModalDate} numberOfLines={1}>{formatDate(selectedShift.shift_date)}</Text>
                         <Text style={styles.shiftModalTime}>
                           {formatTime(selectedShift.start_time)} – {formatTime(selectedShift.end_time)}
                         </Text>
@@ -1432,17 +1503,50 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 15, color: '#718096', textAlign: 'center', marginTop: 20 },
   scheduleList: { marginBottom: 24 },
   staffItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
+    gap: 10,
   },
-  staffName: { fontSize: 16, fontWeight: '600', color: '#2d3748' },
+  staffItemMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  staffItemCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  staffName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2d3748',
+    flexShrink: 1,
+  },
   shiftTime: { fontSize: 13, color: '#718096', marginTop: 2 },
-  repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', maxWidth: 220, lineHeight: 16 },
-  staffPosition: { fontSize: 15, color: Colors.primary, fontWeight: '500' },
+  repeatSummary: { fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '600', lineHeight: 16 },
+  staffPosition: { fontSize: 13, color: Colors.primary, fontWeight: '600', marginTop: 4 },
+  seriesActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  seriesBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1.5,
+  },
+  seriesBtnAccept: {
+    backgroundColor: Colors.successSoft,
+    borderColor: Colors.success,
+  },
+  seriesBtnAcceptText: { fontSize: 13, fontWeight: '700', color: Colors.success },
+  seriesBtnDeny: {
+    backgroundColor: Colors.errorSoft,
+    borderColor: Colors.error,
+  },
+  seriesBtnDenyText: { fontSize: 13, fontWeight: '700', color: Colors.error },
 
   // Shift action modal
   shiftModalHandle: {

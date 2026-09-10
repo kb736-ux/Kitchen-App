@@ -169,6 +169,11 @@ async function loadShiftRequests() {
 
     console.log('[ShiftRequests] loaded', (requests || []).length, 'pending requests');
 
+    const visibleRequests = (requests || []).filter((req) => {
+        const type = String(req.request_type || '').trim().toLowerCase();
+        return !SHIFT_ACK_REQUEST_TYPES.includes(type);
+    });
+
     // Also check ALL statuses to verify data exists at all
     const { data: allReqs, error: allErr } = await window.supabaseClient
         .from('shift_requests')
@@ -179,7 +184,7 @@ async function loadShiftRequests() {
     console.log('[ShiftRequests] all statuses:', (allReqs || []).length, 'rows', allErr ? `ERROR: ${allErr.message}` : 'OK');
     if (allReqs?.length) console.log('[ShiftRequests] sample:', JSON.stringify(allReqs[0]));
 
-    if (!requests || requests.length === 0) {
+    if (!visibleRequests.length) {
         container.innerHTML = `
             <div style="text-align:center;padding:40px 0;color:#a0aec0;">
                 <i class="fas fa-check-circle" style="font-size:32px;color:#c6f6d5;margin-bottom:12px;display:block;"></i>
@@ -191,11 +196,11 @@ async function loadShiftRequests() {
 
     // Update badge count
     const badge = document.getElementById('requests-badge');
-    badge.textContent = requests.length;
+    badge.textContent = visibleRequests.length;
     badge.style.display = 'block';
 
     // Fetch the corresponding shift details for each request
-    const shiftIds = [...new Set(requests.map(r => r.shift_id).filter(Boolean))];
+    const shiftIds = [...new Set(visibleRequests.map(r => r.shift_id).filter(Boolean))];
     let shiftsMap = {};
     const requestNameMap = await buildProfileDisplayLabelMap();
     if (shiftIds.length > 0) {
@@ -206,7 +211,7 @@ async function loadShiftRequests() {
         (shifts || []).forEach(s => { shiftsMap[s.id] = s; });
     }
 
-    container.innerHTML = requests.map(req => {
+    container.innerHTML = visibleRequests.map(req => {
         const shift = shiftsMap[req.shift_id] || {};
         const displayRequester = getEmployeeDisplayLabelFromMap(requestNameMap, req.employee_name) || req.employee_name || 'Unknown';
         const displayTarget = getEmployeeDisplayLabelFromMap(requestNameMap, req.target_employee) || req.target_employee || '';
@@ -851,9 +856,23 @@ async function syncSupabaseShiftsToGrid() {
             empName;
         const rS = rs(row.start_time);
         const rE = rs(row.end_time);
+        const rawEnd = String(row.end_time || '').slice(0, 5);
+        const rawStart = String(row.start_time || '').slice(0, 5);
+        const timeDisplay = formatTo12h(rawStart) + ' - ' + formatTo12h(rawEnd);
+        const posSlug = String(row.position || 'line-cook').toLowerCase().replace(/\s+/g, '-');
+        const posLabel = row.position || 'Line Cook';
+        const hours = calculateShiftHours(rawStart, rawEnd);
 
         // Skip if already rendered in the DOM
         if (document.querySelector(`.shift-card[data-shift-id="${row.id}"]`)) return;
+
+        const ackStatus = (window._shiftAckById && row.id && window._shiftAckById[String(row.id)]) || 'accepted';
+        const cardOpts = {
+            compact: true,
+            start24: rawStart,
+            end24: rawEnd,
+            ackStatus,
+        };
 
         // Skip if already in shiftData for this week (prevents duplicates on initial load)
         const alreadyLocal = Object.entries(window.shiftData || {}).some(([key, list]) =>
@@ -865,21 +884,13 @@ async function syncSupabaseShiftsToGrid() {
                 rs(s.endTime) === rE
             )
         );
-        if (alreadyLocal) return;
+        if (alreadyLocal) {
+            const existingCard = createShiftCard(matrixKey || empName, posSlug, timeDisplay, dayKey, hours, posLabel, cardOpts);
+            if (existingCard) existingCard.dataset.shiftId = row.id;
+            return;
+        }
 
-        // Normalize end time: Supabase stores HH:MM:SS so cap at "23:59" for display
-        const rawEnd = String(row.end_time || '').slice(0, 5);
-        const rawStart = String(row.start_time || '').slice(0, 5);
-        const timeDisplay = formatTo12h(rawStart) + ' - ' + formatTo12h(rawEnd);
-        const posSlug = String(row.position || 'line-cook').toLowerCase().replace(/\s+/g, '-');
-        const posLabel = row.position || 'Line Cook';
-        const hours = calculateShiftHours(rawStart, rawEnd);
-
-        const card = createShiftCard(matrixKey || empName, posSlug, timeDisplay, dayKey, hours, posLabel, {
-            compact: true,
-            start24: rawStart,
-            end24: rawEnd,
-        });
+        const card = createShiftCard(matrixKey || empName, posSlug, timeDisplay, dayKey, hours, posLabel, cardOpts);
         if (!card) return;
 
         card.dataset.shiftId = row.id;
@@ -1006,6 +1017,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function initializeScheduling() {
     setupWeekNavigation();
+    setupScheduleViewToggle();
     setupModalHandlers();
     setupTaskAssignment();
     initializeEmployeeHours();
@@ -1101,6 +1113,153 @@ function setupWeekNavigation() {
 
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const SCHEDULE_VIEW_STORAGE_KEY = 'kk_schedule_view_v1';
+const SHIFT_ACK_REQUEST_TYPES = ['shift_ack', 'shift_response'];
+
+class ScheduleView {
+    static EMPLOYEE = 'employee';
+    static POSITION = 'position';
+
+    static current() {
+        const root = document.getElementById('schedule-matrix');
+        const fromDom = root?.dataset?.view;
+        if (fromDom === ScheduleView.POSITION || fromDom === ScheduleView.EMPLOYEE) return fromDom;
+        try {
+            const stored = sessionStorage.getItem(SCHEDULE_VIEW_STORAGE_KEY);
+            if (stored === ScheduleView.POSITION || stored === ScheduleView.EMPLOYEE) return stored;
+        } catch (_) {}
+        return ScheduleView.EMPLOYEE;
+    }
+
+    static isPosition() {
+        return ScheduleView.current() === ScheduleView.POSITION;
+    }
+
+    static set(mode) {
+        const next = mode === ScheduleView.POSITION ? ScheduleView.POSITION : ScheduleView.EMPLOYEE;
+        const root = document.getElementById('schedule-matrix');
+        if (root) {
+            root.dataset.view = next;
+            root.setAttribute(
+                'aria-label',
+                next === ScheduleView.POSITION
+                    ? 'Weekly schedule by position'
+                    : 'Weekly schedule by employee'
+            );
+        }
+        try {
+            sessionStorage.setItem(SCHEDULE_VIEW_STORAGE_KEY, next);
+        } catch (_) {}
+        const empBtn = document.getElementById('sched-view-employee');
+        const posBtn = document.getElementById('sched-view-position');
+        if (empBtn) {
+            empBtn.classList.toggle('is-active', next === ScheduleView.EMPLOYEE);
+            empBtn.setAttribute('aria-selected', next === ScheduleView.EMPLOYEE ? 'true' : 'false');
+        }
+        if (posBtn) {
+            posBtn.classList.toggle('is-active', next === ScheduleView.POSITION);
+            posBtn.setAttribute('aria-selected', next === ScheduleView.POSITION ? 'true' : 'false');
+        }
+    }
+}
+
+function setupScheduleViewToggle() {
+    ScheduleView.set(ScheduleView.current());
+    const empBtn = document.getElementById('sched-view-employee');
+    const posBtn = document.getElementById('sched-view-position');
+    if (empBtn) {
+        empBtn.addEventListener('click', () => {
+            if (ScheduleView.current() === ScheduleView.EMPLOYEE) return;
+            ScheduleView.set(ScheduleView.EMPLOYEE);
+            void updateScheduleMatrixAndSync();
+        });
+    }
+    if (posBtn) {
+        posBtn.addEventListener('click', () => {
+            if (ScheduleView.current() === ScheduleView.POSITION) return;
+            ScheduleView.set(ScheduleView.POSITION);
+            void updateScheduleMatrixAndSync();
+        });
+    }
+}
+
+function normalizeShiftAckStatus(raw) {
+    const s = String(raw || '').trim().toLowerCase();
+    if (s === 'denied' || s === 'declined' || s === 'rejected') return 'denied';
+    if (s === 'pending' || s === 'awaiting' || s === 'awaiting_employee') return 'awaiting';
+    return 'accepted';
+}
+
+function shiftAckLabel(status) {
+    if (status === 'denied') return 'Denied';
+    if (status === 'awaiting') return 'Awaiting';
+    return 'Accepted';
+}
+
+async function fetchShiftAckStatusMap() {
+    const map = {};
+    if (!window.supabaseClient || !window.ORG_ID) return map;
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('shift_requests')
+            .select('shift_id, status, request_type')
+            .eq('org_id', window.ORG_ID)
+            .in('request_type', SHIFT_ACK_REQUEST_TYPES);
+        if (error) return map;
+        (data || []).forEach((row) => {
+            if (!row?.shift_id) return;
+            map[String(row.shift_id)] = normalizeShiftAckStatus(row.status);
+        });
+    } catch (_) {}
+    return map;
+}
+
+function collectSchedulePositionLabels(extra = []) {
+    const labels = new Set();
+    const add = (raw) => {
+        const n = String(raw || '').trim();
+        if (n) labels.add(n);
+    };
+    if (typeof window.kkGetOrgPositionLabelsForScheduling === 'function') {
+        window.kkGetOrgPositionLabelsForScheduling().forEach(add);
+    }
+    (extra || []).forEach(add);
+    Object.values(window.shiftData || {}).forEach((list) => {
+        (list || []).forEach((s) => add(s?.position));
+    });
+    return [...labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function getPositionWeeklyHours(positionLabel, weekStart) {
+    const want = String(positionLabel || '').trim().toLowerCase();
+    if (!want) return 0;
+    let total = 0;
+    Object.values(window.shiftData || {}).forEach((list) => {
+        (list || []).forEach((s) => {
+            if (!s || s.weekStart !== weekStart) return;
+            if (String(s.position || '').trim().toLowerCase() !== want) return;
+            total += Number(s.hours) || 0;
+        });
+    });
+    return total;
+}
+
+function positionSelectValueForLabel(label) {
+    const want = String(label || '').trim();
+    if (!want) return '';
+    const sel = document.getElementById('position-select');
+    if (sel) {
+        const wantLower = want.toLowerCase();
+        for (let i = 0; i < sel.options.length; i++) {
+            const opt = sel.options[i];
+            const text = (opt.textContent || '').trim();
+            if (text.toLowerCase() === wantLower || opt.value === want || opt.value === wantLower) {
+                return opt.value;
+            }
+        }
+    }
+    return want.toLowerCase().replace(/\s+/g, '-');
+}
 
 function updateWeekTitle() {
     const weekDisplay = document.getElementById('current-week');
@@ -1117,9 +1276,20 @@ function decodeEmployeeKeyAttr(raw) {
     }
 }
 
-function findScheduleCell(dayKey, employeeDisplayName) {
+function findScheduleCell(dayKey, employeeDisplayName, positionLabel = '') {
     const matrix = document.getElementById('schedule-matrix');
-    if (!matrix || !dayKey || !employeeDisplayName) return null;
+    if (!matrix || !dayKey) return null;
+    if (ScheduleView.isPosition()) {
+        const wantPos = normEmployeeKey(positionLabel);
+        if (!wantPos) return null;
+        const cells = matrix.querySelectorAll(`.sched-matrix-cell[data-day="${dayKey}"]`);
+        for (const c of cells) {
+            const decoded = decodeEmployeeKeyAttr(c.getAttribute('data-position-key'));
+            if (normEmployeeKey(decoded) === wantPos) return c;
+        }
+        return null;
+    }
+    if (!employeeDisplayName) return null;
     const want = normEmployeeKey(employeeDisplayName);
     if (!want) return null;
     const cells = matrix.querySelectorAll(`.sched-matrix-cell[data-day="${dayKey}"]`);
@@ -1164,6 +1334,15 @@ function scheduleStorageKeyForAssign(employeeSelectValue) {
 
 function updateMatrixRowHours() {
     const ws = getWeekStart(currentWeekStart);
+    if (ScheduleView.isPosition()) {
+        document.querySelectorAll('#schedule-matrix .sched-matrix-row[data-position-key]').forEach((row) => {
+            const pos = decodeEmployeeKeyAttr(row.getAttribute('data-position-key'));
+            if (!pos) return;
+            const el = row.querySelector('.sched-emp-hrs');
+            if (el) el.textContent = ScheduleWeek.formatHours(getPositionWeeklyHours(pos, ws));
+        });
+        return;
+    }
     document.querySelectorAll('#schedule-matrix .sched-matrix-row[data-employee-key]').forEach((row) => {
         const emp = decodeEmployeeKeyAttr(row.getAttribute('data-employee-key'));
         if (!emp) return;
@@ -1396,7 +1575,9 @@ function enterScheduleDuplicateAwaitModeFromCard(card) {
 
 async function executeShiftDragMove(card, targetCell, dragPayload) {
     const targetDateStr = targetCell?.dataset?.date;
-    const targetStorageKey = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-employee-name'));
+    const cellEmployee = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-employee-name'));
+    const cellPosition = decodeEmployeeKeyAttr(targetCell?.getAttribute('data-position-key'));
+    const targetStorageKey = cellEmployee || dragPayload.sourceStorageKey;
     const start24 = dragPayload.start24;
     const end24 = dragPayload.end24;
     const sourceShiftId = dragPayload.shiftId || null;
@@ -1438,9 +1619,10 @@ async function executeShiftDragMove(card, targetCell, dragPayload) {
     const newWeek = getWeekStart(new Date(targetDateStr + 'T12:00:00'));
     const newDay = getDayKeyForDate(targetDateStr);
     const positionLabel =
-        typeof sourceEntry.position === 'string' && sourceEntry.position.trim()
+        (cellPosition && String(cellPosition).trim()) ||
+        (typeof sourceEntry.position === 'string' && sourceEntry.position.trim()
             ? sourceEntry.position.trim()
-            : (card.querySelector('.shift-position')?.textContent || '').trim() || 'Line Cook';
+            : (card.querySelector('.shift-position')?.textContent || '').trim() || 'Line Cook');
     const positionSlug =
         dragPayload.positionSlug ||
         String(positionLabel || 'line-cook').toLowerCase().replace(/\s+/g, '-');
@@ -1698,6 +1880,8 @@ async function renderScheduleMatrix() {
     const root = document.getElementById('schedule-matrix');
     if (!root) return;
 
+    const viewMode = ScheduleView.current();
+    ScheduleView.set(viewMode);
     const weekStart = getWeekStart(currentWeekStart);
     const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
     const sundayDate = new Date(mondayDate);
@@ -1727,15 +1911,19 @@ async function renderScheduleMatrix() {
             : new Set(fromPos);
 
     let fromShifts = [];
+    let fromShiftPositions = [];
     if (window.supabaseClient && window.ORG_ID) {
         const { data } = await window.supabaseClient
             .from('shifts')
-            .select('employee_name')
+            .select('employee_name, position')
             .eq('org_id', window.ORG_ID)
             .gte('shift_date', startStr)
             .lte('shift_date', endStr);
         fromShifts = [
             ...new Set((data || []).map((r) => (r.employee_name || '').trim()).filter(Boolean)),
+        ];
+        fromShiftPositions = [
+            ...new Set((data || []).map((r) => (r.position || '').trim()).filter(Boolean)),
         ];
     }
 
@@ -1751,6 +1939,7 @@ async function renderScheduleMatrix() {
     const roster = Array.from(rosterSet).sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: 'base' })
     );
+    const positionRows = collectSchedulePositionLabels(fromShiftPositions);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1765,8 +1954,9 @@ async function renderScheduleMatrix() {
         }
     }
 
+    const cornerLabel = viewMode === ScheduleView.POSITION ? 'Position' : 'Employee';
     let headerHtml =
-        '<div class="sched-matrix-row sched-matrix-header-row"><div class="sched-corner-cell">Employee</div>';
+        `<div class="sched-matrix-row sched-matrix-header-row"><div class="sched-corner-cell">${cornerLabel}</div>`;
     DAY_NAMES.forEach((dayKey, index) => {
         const d = new Date(currentWeekStart);
         d.setDate(d.getDate() + index);
@@ -1780,18 +1970,8 @@ async function renderScheduleMatrix() {
     });
     headerHtml += '</div>';
 
-    let bodyHtml = '';
-    roster.forEach((emp) => {
-        const disp =
-            typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(emp) : emp;
-        const hrs = getEmployeeWeeklyHours(emp, weekStart);
-        const enc = encodeURIComponent(emp);
-        bodyHtml += `<div class="sched-matrix-row" data-employee-key="${enc}">`;
-        bodyHtml += `<div class="sched-employee-cell"><div class="sched-emp-avatar">${escapeHtml(
-            disp.charAt(0).toUpperCase()
-        )}</div><div class="sched-emp-meta"><span class="sched-emp-name">${escapeHtml(
-            disp
-        )}</span><span class="sched-emp-hrs">${ScheduleWeek.formatHours(hrs)}</span></div></div>`;
+    const dayCellsForRow = (rowAttrs) => {
+        let html = '';
         DAY_NAMES.forEach((dayKey, index) => {
             const d = new Date(currentWeekStart);
             d.setDate(d.getDate() + index);
@@ -1799,20 +1979,60 @@ async function renderScheduleMatrix() {
             let cellCls = 'sched-matrix-cell';
             if (dateStr === todayStr) cellCls += ' sched-matrix-cell-today';
             else if (d < today) cellCls += ' sched-matrix-cell-past';
-            if (employeeCoveredByTimeOffRows(timeOffRows, disp, dateStr)) {
+            if (rowAttrs.employeeDisplay && employeeCoveredByTimeOffRows(timeOffRows, rowAttrs.employeeDisplay, dateStr)) {
                 cellCls += ' sched-matrix-cell-time-off';
             }
-            bodyHtml += `<div class="${cellCls}" data-day="${dayKey}" data-date="${dateStr}" data-employee-name="${enc}">
+            html += `<div class="${cellCls}" data-day="${dayKey}" data-date="${dateStr}" ${rowAttrs.cellAttrs}>
         <button type="button" class="sched-cell-add" title="Add shift" aria-label="Add shift"><i class="fas fa-plus"></i></button>
         <div class="sched-cell-shifts"></div>
       </div>`;
         });
-        bodyHtml += '</div>';
-    });
+        return html;
+    };
 
-    if (!roster.length) {
-        bodyHtml =
-            '<div class="sched-matrix-empty"><p>No employees yet. Add people under <strong>Employees</strong>, then assign shifts.</p></div>';
+    let bodyHtml = '';
+    if (viewMode === ScheduleView.POSITION) {
+        positionRows.forEach((label) => {
+            const enc = encodeURIComponent(label);
+            const hrs = getPositionWeeklyHours(label, weekStart);
+            bodyHtml += `<div class="sched-matrix-row" data-position-key="${enc}">`;
+            bodyHtml += `<div class="sched-employee-cell"><div class="sched-emp-avatar">${escapeHtml(
+                label.charAt(0).toUpperCase()
+            )}</div><div class="sched-emp-meta"><span class="sched-emp-name">${escapeHtml(
+                label
+            )}</span><span class="sched-emp-hrs">${ScheduleWeek.formatHours(hrs)}</span></div></div>`;
+            bodyHtml += dayCellsForRow({
+                employeeDisplay: '',
+                cellAttrs: `data-position-key="${enc}"`,
+            });
+            bodyHtml += '</div>';
+        });
+        if (!positionRows.length) {
+            bodyHtml =
+                '<div class="sched-matrix-empty"><p>No positions yet. Use <strong>New position</strong> in Assign Shift, then fill this week by role.</p></div>';
+        }
+    } else {
+        roster.forEach((emp) => {
+            const disp =
+                typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(emp) : emp;
+            const hrs = getEmployeeWeeklyHours(emp, weekStart);
+            const enc = encodeURIComponent(emp);
+            bodyHtml += `<div class="sched-matrix-row" data-employee-key="${enc}">`;
+            bodyHtml += `<div class="sched-employee-cell"><div class="sched-emp-avatar">${escapeHtml(
+                disp.charAt(0).toUpperCase()
+            )}</div><div class="sched-emp-meta"><span class="sched-emp-name">${escapeHtml(
+                disp
+            )}</span><span class="sched-emp-hrs">${ScheduleWeek.formatHours(hrs)}</span></div></div>`;
+            bodyHtml += dayCellsForRow({
+                employeeDisplay: disp,
+                cellAttrs: `data-employee-name="${enc}"`,
+            });
+            bodyHtml += '</div>';
+        });
+        if (!roster.length) {
+            bodyHtml =
+                '<div class="sched-matrix-empty"><p>No employees yet. Add people under <strong>Employees</strong>, then assign shifts.</p></div>';
+        }
     }
 
     root.innerHTML = headerHtml + bodyHtml;
@@ -1820,14 +2040,46 @@ async function renderScheduleMatrix() {
 
 async function updateScheduleMatrixAndSync() {
     updateWeekTitle();
+    window._shiftAckById = await fetchShiftAckStatusMap();
     await renderScheduleMatrix();
     initializeEmployeeHours();
     if (window.supabaseClient && window.ORG_ID) {
         await syncSupabaseShiftsToGrid();
     }
+    paintLocalShiftsOntoMatrix();
     updateMatrixRowHours();
     setupScheduleMatrixDelegation();
     setupScheduleMatrixDragAndDrop();
+}
+
+/** Re-place shiftData cards after a view switch / matrix rebuild. */
+function paintLocalShiftsOntoMatrix() {
+    const weekStart = getWeekStart(currentWeekStart);
+    Object.entries(window.shiftData || {}).forEach(([key, list]) => {
+        (list || []).forEach((s) => {
+            if (!s || s.weekStart !== weekStart || !s.day || !s.startTime || !s.endTime) return;
+            if (s.shiftId && document.querySelector(`.shift-card[data-shift-id="${s.shiftId}"]`)) return;
+            const start = String(s.startTime).slice(0, 5);
+            const end = String(s.endTime).slice(0, 5);
+            const dup = [...document.querySelectorAll('#schedule-matrix .shift-card')].some((c) => {
+                const sameEmp = normEmployeeKey(c.dataset.shiftStorageKey || c.dataset.employeeName) === normEmployeeKey(key);
+                const sameTimes = c.dataset.startTime24 === start && c.dataset.endTime24 === end;
+                const cell = c.closest('.sched-matrix-cell');
+                return sameEmp && sameTimes && cell?.dataset?.day === s.day;
+            });
+            if (dup) return;
+            const posLabel = s.position || 'Line Cook';
+            const posSlug = String(posLabel).toLowerCase().replace(/\s+/g, '-');
+            const timeDisplay = `${formatTo12h(start)} - ${formatTo12h(end)}`;
+            const card = createShiftCard(key, posSlug, timeDisplay, s.day, s.hours, posLabel, {
+                compact: true,
+                start24: start,
+                end24: end,
+                ackStatus: (s.shiftId && window._shiftAckById && window._shiftAckById[String(s.shiftId)]) || 'accepted',
+            });
+            if (card && s.shiftId) card.dataset.shiftId = s.shiftId;
+        });
+    });
 }
 
 /** Legacy name used elsewhere in this file — refresh week matrix + Supabase shifts */
@@ -1847,7 +2099,9 @@ function setupScheduleMatrixDelegation() {
             const day = cell?.dataset?.day;
             const empEnc = cell?.getAttribute('data-employee-name');
             const emp = decodeEmployeeKeyAttr(empEnc);
-            if (day) void openModal('assign-shift-modal', day, emp || null);
+            const posEnc = cell?.getAttribute('data-position-key');
+            const pos = decodeEmployeeKeyAttr(posEnc);
+            if (day) void openModal('assign-shift-modal', day, emp || null, pos || null);
             return;
         }
         const card = e.target.closest('.shift-card');
@@ -1864,9 +2118,14 @@ function setupScheduleMatrixDelegation() {
             'Prep': 'prep',
             'FOH Manager': 'foh-manager',
         };
-        const posLabel = posEl?.textContent.trim() || '';
+        const posSlug = (card.dataset.positionSlug || '').trim();
+        const posLabel = ScheduleView.isPosition()
+            ? posSlug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+            : (posEl?.textContent.trim() || '');
         const posValue =
-            POS_MAP[posLabel] || (posLabel ? posLabel.toLowerCase().replace(/\s+/g, '-') : 'line-cook');
+            posSlug ||
+            POS_MAP[posLabel] ||
+            (posLabel ? posLabel.toLowerCase().replace(/\s+/g, '-') : 'line-cook');
         const label = (card.dataset.employeeName || empEl?.textContent || '').trim();
         const empKey = label ? label.toLowerCase() : '';
         const timeStr = timeEl?.textContent.trim() || '';
@@ -2416,11 +2675,17 @@ async function updateEmployeeDropdownForDay() {
     });
 }
 
-async function openModal(modalId, preselectedDay = null, preselectedEmployee = null) {
+async function openModal(modalId, preselectedDay = null, preselectedEmployee = null, preselectedPosition = null) {
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
+
+        if (modalId === 'assign-shift-modal' && typeof populatePositionSelect === 'function') {
+            try {
+                await populatePositionSelect();
+            } catch (_) {}
+        }
         
         // If a day is preselected, set it and hide the day selector
         if (preselectedDay && modalId === 'assign-shift-modal') {
@@ -2457,6 +2722,21 @@ async function openModal(modalId, preselectedDay = null, preselectedEmployee = n
                     }
                 }
                 if (!matched) employeeSelect.value = '';
+            }
+            if (preselectedPosition) {
+                const positionSelect = document.getElementById('position-select');
+                if (positionSelect) {
+                    const val = positionSelectValueForLabel(preselectedPosition);
+                    if (val) positionSelect.value = val;
+                    const stillMissing = ![...positionSelect.options].some((o) => o.value === positionSelect.value);
+                    if (stillMissing || !positionSelect.value) {
+                        const opt = document.createElement('option');
+                        opt.value = val || String(preselectedPosition).toLowerCase().replace(/\s+/g, '-');
+                        opt.textContent = preselectedPosition;
+                        positionSelect.appendChild(opt);
+                        positionSelect.value = opt.value;
+                    }
+                }
             }
             updateAssignShiftConfirmState();
         } else if (modalId === 'assign-shift-modal') {
@@ -3378,15 +3658,18 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
         end24 = parts[1] ? parseTo24h(parts[1]) : '';
     }
 
-    const dayColumn = findScheduleCell(day, matrixEmp || bucketName);
+    const dayColumn = findScheduleCell(day, matrixEmp || bucketName, prettyPos);
     if (!dayColumn) {
-        console.warn('[Scheduling] No schedule cell for employee', bucketName, 'day', day);
+        console.warn('[Scheduling] No schedule cell for', ScheduleView.isPosition() ? prettyPos : bucketName, 'day', day);
         return null;
     }
     const shiftsHost = dayColumn.querySelector('.sched-cell-shifts');
     if (!shiftsHost) return null;
 
     const displayTime = (start24 && end24) ? ShiftCardTime.range(start24, end24) : time;
+    const ackStatus = normalizeShiftAckStatus(options.ackStatus || options.status);
+    const ackLabel = shiftAckLabel(ackStatus);
+    const secondaryLabel = ScheduleView.isPosition() ? bucketName : prettyPos;
 
     shiftCard.innerHTML = `
         <span class="shift-card-drag-handle" draggable="true" title="Copy shift" aria-label="Copy shift">
@@ -3395,16 +3678,21 @@ function createShiftCard(employee, position, time, day, hours = null, positionLa
         <div class="shift-card-body">
             <div class="shift-header">
                 <span class="shift-time">${escapeHtml(displayTime)}</span>
-                <span class="shift-position">${escapeHtml(prettyPos)}</span>
+                <span class="shift-ack shift-ack-${ackStatus}">${escapeHtml(ackLabel)}</span>
             </div>
+            <span class="shift-position">${escapeHtml(secondaryLabel)}</span>
         </div>
     `;
+
+    if (ackStatus === 'denied') shiftCard.classList.add('shift-card--denied');
+    if (ackStatus === 'awaiting') shiftCard.classList.add('shift-card--awaiting');
 
     shiftCard.dataset.employeeName = bucketName;
     shiftCard.dataset.shiftStorageKey = rawEmp || matrixEmp || bucketName;
     shiftCard.dataset.startTime24 = start24;
     shiftCard.dataset.endTime24 = end24;
     shiftCard.dataset.positionSlug = posSlug;
+    shiftCard.dataset.ackStatus = ackStatus;
 
     shiftsHost.appendChild(shiftCard);
 
