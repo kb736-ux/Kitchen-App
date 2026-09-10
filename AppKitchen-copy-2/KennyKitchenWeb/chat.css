@@ -2,15 +2,16 @@
 
 .chat-main {
     padding: 0;
-    max-width: 1400px;
-    margin: 0 auto;
+    max-width: none;
+    margin: 0;
+    width: 100%;
     height: calc(100vh - 70px);
     max-height: calc(100vh - 70px);
     min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
 }
 
 .chat-layout {
