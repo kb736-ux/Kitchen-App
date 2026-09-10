@@ -21,6 +21,7 @@ import { applyTaskCompletionToInventory } from './utils/inventorySync';
 import { EmployeeProvider, useEmployee } from './EmployeeContext';
 import LoginScreen from './LoginScreen';
 import { JS_BUNDLE_BUILD } from './constants/buildInfo';
+import { Colors } from './constants/theme';
 
 /** Expo Go on Android (SDK 53+) cannot load expo-notifications — use a dev build for push there. */
 function canUseExpoPushModule() {
@@ -145,7 +146,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     firstName: '',
     lastName: '',
     employeeNameFromProfile: '',
-    avatarColor: '#4CAF50',
+    avatarColor: Colors.primary,
     avatarUrl: null,
   });
   const profileCacheKeyRef = useRef('');
@@ -418,7 +419,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         display_name: adminProfile.display_name || '',
         first_name: adminProfile.first_name || '',
         last_name: adminProfile.last_name || '',
-        avatar_color: '#4CAF50',
+        avatar_color: Colors.primary,
         avatar_url: adminProfile.avatar_url || null,
       };
     }
@@ -434,7 +435,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         firstName: first,
         lastName: last,
         employeeNameFromProfile: (data.employee_name || '').trim(),
-        avatarColor: data.avatar_color || '#4CAF50',
+        avatarColor: data.avatar_color || Colors.primary,
         avatarUrl: avatarUrl,
       };
       setProfileData(nextProfile);
@@ -468,7 +469,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
           firstName: first || prev.firstName || '',
           lastName: last || prev.lastName || '',
           employeeNameFromProfile: (parsed.employeeNameFromProfile || '').trim() || prev.employeeNameFromProfile || '',
-          avatarColor: (parsed.avatarColor || '').trim() || prev.avatarColor || '#4CAF50',
+          avatarColor: (parsed.avatarColor || '').trim() || prev.avatarColor || Colors.primary,
           avatarUrl: (parsed.avatarUrl || '').trim() || prev.avatarUrl || null,
         }));
       } catch (_) {}
@@ -1133,7 +1134,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   if (booting) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Connecting to Sheek...</Text>
       </View>
     );
@@ -1189,7 +1190,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   };
 
   const getTabIcon = (tab, isActive) => {
-    const iconColor = isActive ? '#4CAF50' : '#666';
+    const iconColor = isActive ? Colors.primary : Colors.navInactive;
     const iconSize = 24;
     switch (tab) {
       case 'Home':     return <Ionicons name="home"       size={iconSize} color={iconColor} />;
@@ -1255,7 +1256,7 @@ function InnerApp({ bumpEmployeeIdentity, identityVersion }) {
   if (authLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Loading…</Text>
       </View>
     );
@@ -1287,11 +1288,11 @@ export default function App() {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   /** Shown in dev so you can confirm the phone loaded the latest JS (see constants/buildInfo.js). */
   devBuildStampRoot: {
@@ -1315,12 +1316,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
     gap: 16,
   },
   loadingText: {
     fontSize: 16,
-    color: '#666',
+    color: Colors.textMuted,
     fontWeight: '500',
   },
   content: {
@@ -1336,12 +1337,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    backgroundColor: 'white',
+    backgroundColor: Colors.surface,
     paddingVertical: 12,
     paddingHorizontal: 10,
     paddingBottom: 20,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: Colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
@@ -1356,11 +1357,11 @@ const styles = StyleSheet.create({
   navText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#666',
+    color: Colors.navInactive,
     marginTop: 4,
   },
   navTextActive: {
-    color: '#4CAF50',
+    color: Colors.primary,
     fontWeight: '600',
   },
   taskBadge: {
@@ -1370,7 +1371,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 4,
@@ -1387,6 +1388,6 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
   },
 });

@@ -104,7 +104,7 @@
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
     display: flex;
     align-items: center;
@@ -135,8 +135,8 @@
 }
 
 .radio-label:hover {
-    border-color: #4CAF50;
-    background: #f0fff4;
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
 }
 
 .radio-label input[type="radio"] {
@@ -144,17 +144,17 @@
     cursor: pointer;
     width: 18px;
     height: 18px;
-    accent-color: #4CAF50;
+    accent-color: var(--color-primary);
 }
 
 .radio-label input[type="radio"]:checked + span {
     font-weight: 600;
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .radio-label:has(input[type="radio"]:checked) {
-    border-color: #4CAF50;
-    background: #f0fff4;
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
 }
 
 .radio-label span {
@@ -232,19 +232,19 @@
     padding: 0.6rem 1.3rem;
     border-radius: 10px;
     border: none;
-    background: #4CAF50;
+    background: var(--color-primary);
     color: #fff;
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.25);
+    box-shadow: 0 4px 12px rgba(51, 42, 37, 0.25);
     transition: all 0.25s ease;
 }
 
 .btn-employee-action:hover {
-    background: #45a049;
+    background: var(--color-primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.35);
+    box-shadow: 0 6px 16px rgba(51, 42, 37, 0.35);
 }
 
 .btn-employee-action.btn-secondary-action {
@@ -376,8 +376,8 @@
 
 .modal-employee .form-control:focus {
     outline: none;
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(51, 42, 37, 0.15);
 }
 
 .modal-employee textarea.form-control {
@@ -390,7 +390,7 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.6rem 1.2rem;
-    background: #4CAF50;
+    background: var(--color-primary);
     color: #fff;
     border-radius: 10px;
     border: none;
@@ -401,7 +401,7 @@
 }
 
 .modal-employee .btn-primary:hover {
-    background: #45a049;
+    background: var(--color-primary-hover);
 }
 
 .modal-employee .btn-secondary {
@@ -429,9 +429,9 @@
     gap: 0.4rem;
     padding: 0.6rem 1.1rem;
     background: #fff5f5;
-    color: #c53030;
+    color: var(--color-error);
     border-radius: 10px;
-    border: 2px solid #fed7d7;
+    border: 2px solid var(--color-error-soft);
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
@@ -440,8 +440,8 @@
 }
 
 .modal-employee .btn-danger:hover {
-    background: #fed7d7;
-    border-color: #feb2b2;
+    background: var(--color-error-soft);
+    border-color: var(--color-error-soft);
 }
 
 /* Position checkboxes in modals */
@@ -474,15 +474,15 @@
 }
 
 .position-checkbox-label input[type="checkbox"] {
-    accent-color: #4CAF50;
+    accent-color: var(--color-primary);
     width: 14px;
     height: 14px;
 }
 
 .position-checkbox-label:has(input:checked) {
-    background: rgba(76, 175, 80, 0.1);
-    border-color: #4CAF50;
-    color: #276749;
+    background: rgba(51, 42, 37, 0.1);
+    border-color: var(--color-primary);
+    color: var(--color-success);
 }
 
 .position-checkboxes-empty {
@@ -506,9 +506,9 @@
 }
 
 .btn-edit-positions:hover {
-    background: rgba(76, 175, 80, 0.08);
-    border-color: #4CAF50;
-    color: #276749;
+    background: rgba(51, 42, 37, 0.08);
+    border-color: var(--color-primary);
+    color: var(--color-success);
 }
 
 /* Multi-position role tags */
@@ -524,7 +524,7 @@
     font-weight: 600;
     padding: 0.1rem 0.45rem;
     border-radius: 6px;
-    background: rgba(76, 175, 80, 0.1);
-    color: #276749;
-    border: 1px solid rgba(76, 175, 80, 0.25);
+    background: rgba(51, 42, 37, 0.1);
+    color: var(--color-success);
+    border: 1px solid rgba(51, 42, 37, 0.25);
 }

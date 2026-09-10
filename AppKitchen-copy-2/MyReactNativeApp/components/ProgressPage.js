@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useEmployee } from '../EmployeeContext';
+import { Colors } from '../constants/theme';
 
 const ProgressPage = ({ onBack, tasks, allTasks = [], toggleTask, onTaskPress }) => {
   const { employeeName } = useEmployee();
@@ -88,7 +89,7 @@ const ProgressPage = ({ onBack, tasks, allTasks = [], toggleTask, onTaskPress })
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -130,7 +131,7 @@ const styles = StyleSheet.create({
   inProgressBorder: {
     width: 3,
     height: 20,
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
     marginRight: 12,
     marginTop: 2,
   },

@@ -153,7 +153,7 @@
             <label style="font-size:12px;font-weight:500;color:#374151;">Profile photo</label>
             <div style="display:flex;gap:8px;align-items:center;">
               <input id="admin-avatar-file" type="file" accept="image/*" style="display:none;" />
-              <button id="admin-avatar-pick" type="button" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#fff;color:#16a34a;cursor:pointer;">Choose photo</button>
+              <button id="admin-avatar-pick" type="button" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#fff;color:${SheekColors.primary};cursor:pointer;">Choose photo</button>
               <button id="admin-avatar-clear" type="button" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#fff;color:#6b7280;cursor:pointer;">Clear</button>
             </div>
           </div>
@@ -167,7 +167,7 @@
           <div style="font-size:11px;color:#6b7280;max-width:260px;">
             To change your password, we&apos;ll email you a secure reset link.
           </div>
-          <button id="admin-send-reset" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#ffffff;color:#16a34a;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+          <button id="admin-send-reset" style="border-radius:999px;border:1px solid #e5e7eb;padding:6px 10px;font-size:12px;background:#ffffff;color:${SheekColors.primary};cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
             <i class="fas fa-envelope"></i><span>Send reset email</span>
           </button>
         </div>
@@ -188,7 +188,7 @@
           <button id="admin-settings-cancel" style="border-radius:999px;border:1px solid #e5e7eb;padding:8px 14px;font-size:13px;background:#ffffff;color:#374151;cursor:pointer;">
             Cancel
           </button>
-          <button id="admin-settings-save" style="border-radius:999px;border:none;padding:8px 16px;font-size:13px;font-weight:600;background:#16a34a;color:#ffffff;cursor:pointer;">
+          <button id="admin-settings-save" style="border-radius:999px;border:none;padding:8px 16px;font-size:13px;font-weight:600;background:${SheekColors.primary};color:#ffffff;cursor:pointer;">
             Save changes
           </button>
         </div>

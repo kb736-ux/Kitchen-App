@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="assets/favicon.png" sizes="192x192" />
+    <link rel="icon" type="image/png" href="assets/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <title>Sheek - Scheduling</title>
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="scheduling.css?v=20260910-sched-ui">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -14,7 +18,7 @@
         <!-- Top Navigation -->
         <nav class="top-nav">
             <div class="nav-brand">
-                <i class="fas fa-utensils"></i>
+                <img src="assets/logo.png" alt="" class="nav-logo" width="36" height="36">
                 <span>Sheek</span>
             </div>
             <div class="nav-tabs">
@@ -125,7 +129,7 @@
                            color:#2d3748;background:#fffdf5;outline:none;">
                 </textarea>
                 <button onclick="postAnnouncement()" style="
-                    margin-top:8px;width:100%;background:#4CAF50;color:white;border:none;
+                    margin-top:8px;width:100%;background:#332A25;color:white;border:none;
                     border-radius:8px;padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
                     Post Announcement
                 </button>
@@ -147,7 +151,7 @@
     <div class="modal-overlay" id="shift-requests-modal">
         <div class="modal" style="max-width:600px;">
             <div class="modal-header">
-                <h3><i class="fas fa-inbox" style="margin-right:8px;color:#4CAF50;"></i>Shift Requests</h3>
+                <h3><i class="fas fa-inbox" style="margin-right:8px;color:#332A25;"></i>Shift Requests</h3>
                 <button class="modal-close" onclick="closeModal('shift-requests-modal')">
                     <i class="fas fa-times"></i>
                 </button>
@@ -500,6 +504,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="tokens.js"></script>
     <script src="supabase-config.js?v=20260414-implicit"></script>
     <script src="subscriptionPlans.js?v=1"></script>
     <script src="stripeBilling.js?v=1"></script>

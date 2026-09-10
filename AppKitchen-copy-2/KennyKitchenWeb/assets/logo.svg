@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#F7F4EE"/>
+  <g fill="none" stroke="#332A25" stroke-width="34" stroke-linecap="round">
+    <circle cx="512" cy="512" r="322"/>
+    <path d="M512 246v48M512 730v48M246 512h48M730 512h48"/>
+  </g>
+
+  <!-- Spoon hour-hand (~10:10) -->
+  <g transform="rotate(-58 512 512)" fill="#332A25">
+    <rect x="497" y="330" width="30" height="196" rx="15"/>
+    <ellipse cx="512" cy="300" rx="40" ry="54"/>
+  </g>
+
+  <!-- Fork minute-hand (~1:50) -->
+  <g transform="rotate(56 512 512)" fill="#332A25">
+    <path d="
+      M498 508
+      h28 v-214
+      h18 v-92 a7 7 0 0 0 -14 0 v78
+      h-6 v-86 a7 7 0 0 0 -14 0 v86
+      h-6 v-86 a7 7 0 0 0 -14 0 v86
+      h-6 v-78 a7 7 0 0 0 -14 0 v92
+      h18 z"/>
+  </g>
+
+  <circle cx="512" cy="512" r="30" fill="#332A25"/>
+</svg>

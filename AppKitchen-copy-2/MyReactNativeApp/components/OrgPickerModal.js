@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../constants/theme';
 
 /**
  * Pick another restaurant/org the user belongs to.
@@ -29,7 +30,7 @@ export default function OrgPickerModal({
           <Text style={styles.title}>Switch restaurant</Text>
           <Text style={styles.sub}>{"Choose where you're working today."}</Text>
           {loading ? (
-            <ActivityIndicator style={{ marginVertical: 24 }} color="#4CAF50" />
+            <ActivityIndicator style={{ marginVertical: 24 }} color={Colors.primary} />
           ) : (
             <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
               {orgs.map((o) => {
@@ -44,7 +45,7 @@ export default function OrgPickerModal({
                     <Ionicons
                       name={active ? 'checkmark-circle' : 'business-outline'}
                       size={22}
-                      color={active ? '#4CAF50' : '#718096'}
+                      color={active ? Colors.primary : '#718096'}
                       style={{ marginRight: 12 }}
                     />
                     <Text style={[styles.rowText, active && styles.rowTextActive]}>{o.name}</Text>
@@ -108,7 +109,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#edf2f7',
   },
   rowActive: {
-    backgroundColor: '#f0fff4',
+    backgroundColor: Colors.primarySoft,
     borderRadius: 10,
     borderBottomWidth: 0,
     marginBottom: 4,
@@ -121,7 +122,7 @@ const styles = StyleSheet.create({
   },
   rowTextActive: {
     fontWeight: '600',
-    color: '#276749',
+    color: Colors.success,
   },
   cancelBtn: {
     marginTop: 16,

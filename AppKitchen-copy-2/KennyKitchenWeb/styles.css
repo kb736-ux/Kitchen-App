@@ -1,3 +1,5 @@
+@import url("tokens.css");
+
 /* Reset and Base Styles */
 * {
     margin: 0;
@@ -7,8 +9,8 @@
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    color: #2d3748;
+    background: var(--color-bg);
+    color: var(--color-text);
     line-height: 1.6;
     min-height: 100vh;
 }
@@ -22,15 +24,15 @@ body {
 
 /* Top Navigation */
 .top-nav {
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--color-surface);
     backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid var(--color-border);
     padding: 0 2rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     height: 70px;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-nav);
     position: sticky;
     top: 0;
     z-index: 1000;
@@ -42,13 +44,27 @@ body {
     gap: 0.75rem;
     font-weight: 700;
     font-size: 1.25rem;
-    color: #2d3748;
+    color: var(--color-text);
 }
 
-.nav-brand i {
-    color: #4CAF50;
-    font-size: 1.5rem;
+.nav-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    display: block;
+    object-fit: cover;
+    background: var(--color-bg);
 }
+.nav-brand i {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: url("assets/logo.png") center / cover no-repeat;
+    font-size: 0;
+    color: transparent;
+    line-height: 0;
+}
+.nav-brand i::before { content: none; display: none; }
 
 .nav-tabs {
     display: flex;
@@ -62,7 +78,7 @@ body {
     padding: 0.75rem 1.5rem;
     border: none;
     background: transparent;
-    color: #718096;
+    color: var(--color-text-muted);
     font-weight: 500;
     border-radius: 10px;
     cursor: pointer;
@@ -71,14 +87,14 @@ body {
 }
 
 .nav-tab:hover {
-    background: rgba(76, 175, 80, 0.1);
-    color: #4CAF50;
+    background: rgba(51, 42, 37, 0.1);
+    color: var(--color-primary);
 }
 
 .nav-tab.active {
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 4px 12px rgba(51, 42, 37, 0.3);
 }
 
 .nav-user {
@@ -96,7 +112,7 @@ body {
 }
 
 .notification-bell:hover {
-    background: rgba(76, 175, 80, 0.1);
+    background: rgba(51, 42, 37, 0.1);
 }
 
 .notification-bell i {
@@ -108,7 +124,7 @@ body {
     position: absolute;
     top: 0;
     right: 0;
-    background: #e53e3e;
+    background: var(--color-error);
     color: white;
     border-radius: 50%;
     width: 18px;
@@ -128,8 +144,8 @@ body {
     right: 0;
     width: 360px;
     max-height: 480px;
-    background: #fff;
-    border-radius: 16px;
+    background: var(--color-surface);
+    border-radius: var(--radius);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
     border: 1px solid rgba(0, 0, 0, 0.08);
     z-index: 9999;
@@ -159,14 +175,14 @@ body {
 .notif-dropdown-header h3 {
     font-size: 1rem;
     font-weight: 700;
-    color: #2d3748;
+    color: var(--color-text);
     margin: 0;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 }
 
-.notif-dropdown-header h3 i { color: #4CAF50; }
+.notif-dropdown-header h3 i { color: var(--color-primary); }
 
 .notif-clear-btn {
     font-size: 0.78rem;
@@ -210,7 +226,7 @@ body {
 }
 .notif-dropdown-footer a {
     font-size: 0.85rem;
-    color: #4CAF50;
+    color: var(--color-primary);
     text-decoration: none;
 }
 .notif-dropdown-footer a:hover { text-decoration: underline; }
@@ -235,16 +251,16 @@ body {
     font-size: 0.85rem;
 }
 
-.notif-icon.high  { background: #fed7d7; color: #c53030; }
+.notif-icon.high  { background: var(--color-error-soft); color: var(--color-error); }
 .notif-icon.medium { background: #fefcbf; color: #975a16; }
-.notif-icon.low   { background: #c6f6d5; color: #276749; }
+.notif-icon.low   { background: var(--color-success-soft); color: var(--color-success); }
 .notif-icon.info  { background: #bee3f8; color: #2b6cb0; }
 
 .notif-dropdown-item .notif-body { flex: 1; min-width: 0; }
 
 .notif-dropdown-item .notif-text {
     font-size: 0.85rem;
-    color: #2d3748;
+    color: var(--color-text);
     margin: 0 0 0.2rem;
     line-height: 1.4;
 }
@@ -271,10 +287,10 @@ body {
     transition: opacity 0.15s;
 }
 
-.notif-dropdown-item .notif-approve { background: #c6f6d5; color: #276749; }
-.notif-dropdown-item .notif-approve:hover { background: #9ae6b4; }
-.notif-dropdown-item .notif-deny    { background: #fed7d7; color: #c53030; }
-.notif-dropdown-item .notif-deny:hover    { background: #feb2b2; }
+.notif-dropdown-item .notif-approve { background: var(--color-success-soft); color: var(--color-success); }
+.notif-dropdown-item .notif-approve:hover { background: var(--color-success-soft); }
+.notif-dropdown-item .notif-deny    { background: var(--color-error-soft); color: var(--color-error); }
+.notif-dropdown-item .notif-deny:hover    { background: var(--color-error-soft); }
 
 .notif-dropdown-empty {
     text-align: center;
@@ -304,7 +320,7 @@ body {
     height: 35px;
     border-radius: 50%;
     object-fit: cover;
-    border: 2px solid #4CAF50;
+    border: 2px solid var(--color-primary);
 }
 
 /* Dashboard Main */
@@ -326,7 +342,7 @@ body {
 .dashboard-header h1 {
     font-size: 2rem;
     font-weight: 700;
-    color: #2d3748;
+    color: var(--color-text);
     margin: 0;
 }
 
@@ -343,12 +359,12 @@ body {
 .current-date-header {
     font-size: 1.5rem;
     font-weight: 600;
-    color: #4CAF50;
+    color: var(--color-primary);
     margin: 0;
-    background: rgba(76, 175, 80, 0.1);
+    background: rgba(51, 42, 37, 0.1);
     padding: 0.75rem 1.5rem;
     border-radius: 12px;
-    border: 2px solid rgba(76, 175, 80, 0.2);
+    border: 2px solid rgba(51, 42, 37, 0.2);
 }
 
 .current-time {
@@ -366,7 +382,7 @@ body {
 }
 
 .current-time i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 /* Dashboard Grid */
@@ -379,11 +395,11 @@ body {
 
 /* Dashboard Cards */
 .dashboard-card {
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--color-border);
     overflow: hidden;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
@@ -399,24 +415,24 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    background: var(--color-bg);
 }
 
 .card-header h2 {
     font-size: 1.1rem;
     font-weight: 600;
-    color: #2d3748;
+    color: var(--color-text);
     display: flex;
     align-items: center;
     gap: 0.5rem;
 }
 
 .card-header h2 i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .card-badge {
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
     padding: 0.25rem 0.75rem;
     border-radius: 20px;
@@ -425,7 +441,7 @@ body {
 }
 
 .card-badge.urgent-badge {
-    background: #e53e3e;
+    background: var(--color-error);
 }
 
 /* Urgent Tasks Card */
@@ -435,7 +451,7 @@ body {
 }
 
 .urgent-tasks-card .card-header h2 i {
-    color: #e53e3e;
+    color: var(--color-error);
 }
 
 .urgent-add-row {
@@ -450,11 +466,11 @@ body {
     flex: 1;
     min-width: 180px;
     padding: 0.6rem 1rem;
-    border: 1.5px solid #fed7d7;
+    border: 1.5px solid var(--color-error-soft);
     border-radius: 10px;
     font-size: 0.95rem;
     background: #fff5f5;
-    color: #2d3748;
+    color: var(--color-text);
 }
 
 .urgent-task-input::placeholder {
@@ -463,7 +479,7 @@ body {
 
 .urgent-task-input:focus {
     outline: none;
-    border-color: #e53e3e;
+    border-color: var(--color-error);
     box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.2);
 }
 
@@ -482,7 +498,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     padding: 0.6rem 1.25rem;
-    background: #e53e3e;
+    background: var(--color-error);
     color: white;
     border: none;
     border-radius: 10px;
@@ -493,7 +509,7 @@ body {
 }
 
 .btn-add-urgent:hover {
-    background: #c53030;
+    background: var(--color-error);
 }
 
 .btn-add-urgent:active {
@@ -514,7 +530,7 @@ body {
     margin-bottom: 0.5rem;
     background: #fff5f5;
     border-radius: 10px;
-    border-left: 4px solid #e53e3e;
+    border-left: 4px solid var(--color-error);
     font-size: 0.95rem;
 }
 
@@ -539,8 +555,8 @@ body {
 }
 
 .urgent-tasks-list li .btn-remove-urgent:hover {
-    color: #e53e3e;
-    background: #fed7d7;
+    color: var(--color-error);
+    background: var(--color-error-soft);
 }
 
 .no-urgent-msg {
@@ -573,7 +589,7 @@ body {
 .notif-empty-state i {
     display: block;
     font-size: 2rem;
-    color: #c6f6d5;
+    color: var(--color-success-soft);
     margin-bottom: 0.5rem;
 }
 
@@ -594,8 +610,8 @@ body {
 }
 
 .notification-item.priority-high {
-    border-left-color: #e53e3e;
-    background: #fed7d7;
+    border-left-color: var(--color-error);
+    background: var(--color-error-soft);
 }
 
 .notification-item.priority-medium {
@@ -605,7 +621,7 @@ body {
 
 .notification-item.priority-low {
     border-left-color: #68d391;
-    background: #f0fff4;
+    background: var(--color-primary-soft);
 }
 
 /* Shift request rows (Employees page + Scheduling modal) — must be column layout; do not reuse .notification-item (row flex). */
@@ -659,8 +675,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(76, 175, 80, 0.1);
-    color: #4CAF50;
+    background: rgba(51, 42, 37, 0.1);
+    color: var(--color-primary);
     flex-shrink: 0;
 }
 
@@ -671,7 +687,7 @@ body {
 .notification-content p {
     margin: 0 0 0.25rem 0;
     font-weight: 500;
-    color: #2d3748;
+    color: var(--color-text);
 }
 
 .notification-time {
@@ -695,29 +711,29 @@ body {
 }
 
 .btn-approve {
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
 }
 
 .btn-approve:hover {
-    background: #45a049;
+    background: var(--color-primary-hover);
     transform: translateY(-1px);
 }
 
 .btn-deny {
-    background: #e53e3e;
+    background: var(--color-error);
     color: white;
 }
 
 .btn-deny:hover {
-    background: #c53030;
+    background: var(--color-error);
     transform: translateY(-1px);
 }
 
 /* Shift Styles */
 .shift-time {
-    background: rgba(76, 175, 80, 0.1);
-    color: #4CAF50;
+    background: rgba(51, 42, 37, 0.1);
+    color: var(--color-primary);
     padding: 0.5rem 1rem;
     border-radius: 8px;
     font-weight: 600;
@@ -756,7 +772,7 @@ body {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
     display: flex;
     align-items: center;
@@ -772,7 +788,7 @@ body {
 
 .employee-name {
     font-weight: 600;
-    color: #2d3748;
+    color: var(--color-text);
 }
 
 .employee-role {
@@ -798,7 +814,7 @@ body {
 }
 
 .shift-status.online {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .shift-status.online i {
@@ -824,7 +840,7 @@ body {
 .btn-refresh {
     background: none;
     border: none;
-    color: #4CAF50;
+    color: var(--color-primary);
     cursor: pointer;
     padding: 0.5rem;
     border-radius: 8px;
@@ -832,7 +848,7 @@ body {
 }
 
 .btn-refresh:hover {
-    background: rgba(76, 175, 80, 0.1);
+    background: rgba(51, 42, 37, 0.1);
     transform: rotate(180deg);
 }
 
@@ -870,7 +886,7 @@ body {
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #4CAF50;
+    background: var(--color-primary);
     animation: pulse 2s infinite;
     flex-shrink: 0;
 }
@@ -883,7 +899,7 @@ body {
 
 .task-assignee {
     font-weight: 600;
-    color: #2d3748;
+    color: var(--color-text);
     font-size: 0.9rem;
 }
 
@@ -906,7 +922,7 @@ body {
     height: 20px;
     margin-top: 2px;
     cursor: pointer;
-    accent-color: #4CAF50;
+    accent-color: var(--color-primary);
     flex-shrink: 0;
 }
 
@@ -922,12 +938,12 @@ body {
 }
 
 .progress-item.task-completed {
-    background: #f0fff4;
-    border-left-color: #4CAF50;
+    background: var(--color-primary-soft);
+    border-left-color: var(--color-primary);
 }
 
 .progress-item.task-completed .progress-indicator {
-    background: #4CAF50;
+    background: var(--color-primary);
     animation: none;
 }
 
@@ -954,12 +970,12 @@ body {
 }
 
 .task-status-icon.task-status-complete {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .btn-finish {
     padding: 0.5rem 1rem;
-    background: #4CAF50;
+    background: var(--color-primary);
     color: white;
     border: none;
     border-radius: 8px;
@@ -971,9 +987,9 @@ body {
 }
 
 .btn-finish:hover {
-    background: #45a049;
+    background: var(--color-primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 4px 12px rgba(51, 42, 37, 0.3);
 }
 
 /* Task Filter Dropdown */
@@ -984,19 +1000,19 @@ body {
     font-size: 0.85rem;
     font-weight: 500;
     background: white;
-    color: #2d3748;
+    color: var(--color-text);
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .task-filter-select:hover {
-    border-color: #4CAF50;
+    border-color: var(--color-primary);
 }
 
 .task-filter-select:focus {
     outline: none;
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(51, 42, 37, 0.1);
 }
 
 .task-complete-check {
@@ -1005,7 +1021,7 @@ body {
     gap: 0.5rem;
     font-size: 0.9rem;
     font-weight: 600;
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .task-complete-check i {
@@ -1084,12 +1100,12 @@ body {
 }
 
 .card-content::-webkit-scrollbar-thumb {
-    background: #4CAF50;
+    background: var(--color-primary);
     border-radius: 3px;
 }
 
 .card-content::-webkit-scrollbar-thumb:hover {
-    background: #45a049;
+    background: var(--color-primary-hover);
 }
 
 /* Loading Animation */
@@ -1113,7 +1129,7 @@ body {
 }
 
 .clickable-employee:hover {
-    color: #4CAF50;
+    color: var(--color-primary);
     text-decoration: underline;
 }
 
@@ -1170,7 +1186,7 @@ body {
 .modal-header h3 {
     font-size: 1.25rem;
     font-weight: 700;
-    color: #2d3748;
+    color: var(--color-text);
     margin: 0;
     display: flex;
     align-items: center;
@@ -1178,7 +1194,7 @@ body {
 }
 
 .modal-header h3 i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .modal-close {
@@ -1194,7 +1210,7 @@ body {
 
 .modal-close:hover {
     background: rgba(0, 0, 0, 0.1);
-    color: #2d3748;
+    color: var(--color-text);
 }
 
 .modal-body {
@@ -1227,14 +1243,14 @@ body {
     gap: 0.75rem;
     font-size: 1rem;
     font-weight: 600;
-    color: #2d3748;
+    color: var(--color-text);
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
     border-bottom: 2px solid #e2e8f0;
 }
 
 .tasks-section-title i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .unfinished-tasks-section .tasks-section-title {
@@ -1246,16 +1262,16 @@ body {
 }
 
 .finished-tasks-section .tasks-section-title {
-    border-bottom-color: #4CAF50;
+    border-bottom-color: var(--color-primary);
 }
 
 .finished-tasks-section .tasks-section-title i {
-    color: #4CAF50;
+    color: var(--color-primary);
 }
 
 .task-count {
     background: #e2e8f0;
-    color: #2d3748;
+    color: var(--color-text);
     padding: 0.25rem 0.5rem;
     border-radius: 12px;
     font-size: 0.85rem;
@@ -1269,8 +1285,8 @@ body {
 }
 
 .finished-tasks-section .task-count {
-    background: #f0fff4;
-    color: #22543d;
+    background: var(--color-primary-soft);
+    color: var(--color-success);
 }
 
 .employee-tasks-list {
@@ -1288,13 +1304,13 @@ body {
 }
 
 .employee-task-item:hover {
-    border-color: #4CAF50;
-    box-shadow: 0 2px 4px rgba(76, 175, 80, 0.1);
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 4px rgba(51, 42, 37, 0.1);
 }
 
 .employee-task-item.task-completed {
-    background: #f0fff4;
-    border-color: #4CAF50;
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary);
 }
 
 .no-tasks-message {
@@ -1320,8 +1336,8 @@ body {
 
 .btn-secondary:hover {
     background: #f7fafc;
-    border-color: #4CAF50;
-    color: #4CAF50;
+    border-color: var(--color-primary);
+    color: var(--color-primary);
     transform: translateY(-2px);
 }
 
@@ -1337,8 +1353,8 @@ body {
     height: 28px;
     border-radius: 50%;
     border: none;
-    background: #fed7d7;
-    color: #c53030;
+    background: var(--color-error-soft);
+    color: var(--color-error);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1350,6 +1366,20 @@ body {
 }
 
 .btn-delete-task:hover {
-    background: #feb2b2;
+    background: var(--color-error-soft);
     transform: scale(1.1);
 }
+
+/* Success / completed / clocked-in — muted green, not brand espresso */
+.shift-status.online { color: var(--color-success); }
+.progress-item.task-completed { background: var(--color-success-soft); border-left-color: var(--color-success); }
+.progress-item.task-completed .progress-indicator { background: var(--color-success); }
+.task-status-icon.task-status-complete { color: var(--color-success); }
+.task-complete-check { color: var(--color-success); }
+.notif-empty-state i { color: var(--color-success); }
+.notification-item.priority-low { border-left-color: var(--color-success); background: var(--color-success-soft); }
+.notif-icon.low { background: var(--color-success-soft); color: var(--color-success); }
+.finished-tasks-section .tasks-section-title { border-bottom-color: var(--color-success); }
+.finished-tasks-section .tasks-section-title i { color: var(--color-success); }
+.finished-tasks-section .task-count { background: var(--color-success-soft); color: var(--color-success); }
+.employee-task-item.task-completed { background: var(--color-success-soft); border-color: var(--color-success); }

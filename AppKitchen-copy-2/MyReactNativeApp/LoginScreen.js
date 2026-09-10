@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Alert, Image } from 'react-native';
 import { useEmployee } from './EmployeeContext';
 import { supabase, getOrgId } from './utils/supabase';
 import * as SecureStore from 'expo-secure-store';
+import { Colors } from './constants/theme';
 
 function resolveFromProfile(profileData, email) {
   const localPart = (email || '').split('@')[0];
@@ -185,9 +185,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.card}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="person-circle" size={40} color="#4CAF50" />
-        </View>
+        <Image source={require('./assets/logo.png')} style={styles.logo} />
         <Text style={styles.title}>Sign in to Sheek</Text>
         <Text style={styles.subtitle}>
           Sign in with your work email and password. You can change your display name in Profile.
@@ -196,7 +194,7 @@ export default function LoginScreen() {
         <TextInput
           style={styles.input}
           placeholder="you@example.com"
-          placeholderTextColor="#a0aec0"
+          placeholderTextColor={Colors.textMuted}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -208,7 +206,7 @@ export default function LoginScreen() {
         <TextInput
           style={styles.input}
           placeholder="Password"
-          placeholderTextColor="#a0aec0"
+          placeholderTextColor={Colors.textMuted}
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
@@ -238,7 +236,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.bg,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
@@ -246,23 +244,22 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: 'white',
+    backgroundColor: Colors.surface,
     borderRadius: 16,
     paddingVertical: 32,
     paddingHorizontal: 24,
-    shadowColor: '#000',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowRadius: 16,
     elevation: 6,
   },
-  iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#e8f5e9',
-    justifyContent: 'center',
-    alignItems: 'center',
+  logo: {
+    width: 72,
+    height: 72,
+    borderRadius: 16,
     alignSelf: 'center',
     marginBottom: 16,
   },
@@ -271,40 +268,40 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#1a202c',
+    color: Colors.text,
   },
   subtitle: {
     fontSize: 14,
     textAlign: 'center',
-    color: '#4a5568',
+    color: Colors.textMuted,
     marginBottom: 20,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 10,
+    borderColor: Colors.border,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#1a202c',
+    color: Colors.text,
     marginBottom: 16,
-    backgroundColor: '#fdfdfd',
+    backgroundColor: Colors.surface,
   },
   primaryButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: 10,
   },
   primaryButtonText: {
-    color: 'white',
+    color: Colors.onPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   helperText: {
     fontSize: 12,
-    color: '#718096',
+    color: Colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
   },

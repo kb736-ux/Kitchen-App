@@ -40,7 +40,7 @@
 
 .inventory-search-wrap .inventory-search-input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--color-primary);
 }
 
 .inventory-search-clear {
@@ -99,8 +99,8 @@
 }
 
 .inventory-row:hover {
-    background: rgba(76, 175, 80, 0.08);
-    border-color: #4CAF50;
+    background: rgba(51, 42, 37, 0.08);
+    border-color: var(--color-primary);
 }
 
 .inventory-row-inactive {
@@ -187,9 +187,9 @@
 }
 
 .inventory-adj-btn:hover {
-    border-color: #4CAF50;
-    color: #4CAF50;
-    background: rgba(76, 175, 80, 0.08);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    background: rgba(51, 42, 37, 0.08);
 }
 
 .inventory-qty {
@@ -250,7 +250,7 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 1rem;
-    background: linear-gradient(135deg, #4CAF50, #45a049);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
     color: #fff;
     text-decoration: none;
     border-radius: 10px;
@@ -261,5 +261,5 @@
 
 .inventory-empty-link:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 4px 12px rgba(51, 42, 37, 0.3);
 }

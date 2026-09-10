@@ -6,6 +6,7 @@ import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { shiftRowMatchesEmployee } from '../utils/shiftMatching';
 import { APP_BRAND_NAME } from '../constants/branding';
+import { Colors } from '../constants/theme';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 
@@ -532,7 +533,7 @@ const HomePage = ({
     <>
       <View style={styles.header}>
         <View style={styles.headerBrand}>
-          <Ionicons name="restaurant" size={18} color="#4CAF50" style={{ marginRight: 6 }} />
+          <Image source={require('../assets/logo.png')} style={styles.headerLogo} />
           <View>
             <Text style={styles.brandName}>{APP_BRAND_NAME}</Text>
             {canSwitchOrg && currentOrgName ? (
@@ -557,7 +558,7 @@ const HomePage = ({
               onError={() => setAvatarLoadFailed(true)}
             />
           ) : (
-            <View style={[styles.profileAvatar, { backgroundColor: profileData?.avatarColor || '#4CAF50' }]}>
+            <View style={[styles.profileAvatar, { backgroundColor: profileData?.avatarColor || Colors.primary }]}>
               <Text style={styles.profileAvatarText}>
                 {(profileData?.displayName || employeeName)
                   .split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
@@ -631,7 +632,7 @@ const HomePage = ({
           <View style={styles.shiftCard}>
             <View style={styles.shiftCardLeft}>
               <View style={styles.shiftIconBg}>
-                <Ionicons name="time" size={20} color="#4CAF50" />
+                <Ionicons name="time" size={20} color={Colors.success} />
               </View>
               <View style={{ marginLeft: 12 }}>
                 <Text style={styles.shiftCardLabel}>Today's Shift</Text>
@@ -804,7 +805,7 @@ const HomePage = ({
                   >
                     {claimed && (
                       <View style={styles.urgentClaimedBadge}>
-                        <Ionicons name="checkmark-circle" size={22} color={isMe ? '#4CAF50' : '#b45309'} />
+                        <Ionicons name="checkmark-circle" size={22} color={isMe ? Colors.success : '#b45309'} />
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
@@ -883,7 +884,7 @@ const HomePage = ({
 
             <View style={styles.rosterHeaderRow}>
               <View style={styles.rosterIconBg}>
-                <Ionicons name="people" size={20} color="#4CAF50" />
+                <Ionicons name="people" size={20} color={Colors.primary} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.rosterTitle}>Who's Working</Text>
@@ -904,7 +905,7 @@ const HomePage = ({
             <View style={styles.rosterDivider} />
 
             {loadingRoster ? (
-              <ActivityIndicator color="#4CAF50" style={{ paddingVertical: 30 }} />
+              <ActivityIndicator color={Colors.primary} style={{ paddingVertical: 30 }} />
             ) : rosterShifts.length === 0 ? (
               <View style={styles.rosterEmpty}>
                 <Ionicons name="calendar-outline" size={36} color="#cbd5e0" />
@@ -960,7 +961,8 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flex: 1 },
   headerBrand: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  brandName: { fontSize: 18, fontWeight: '800', color: '#2d3748', letterSpacing: 0.3 },
+  headerLogo: { width: 32, height: 32, borderRadius: 8, marginRight: 8 },
+  brandName: { fontSize: 18, fontWeight: '800', color: Colors.text, letterSpacing: 0.3 },
   orgSubrow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, maxWidth: '92%' },
   orgSubtitle: { fontSize: 13, fontWeight: '600', color: '#64748b' },
   profileBtn: { padding: 2 },
@@ -979,7 +981,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingHorizontal: 20,
     paddingVertical: 15,
-    backgroundColor: 'white',
+    backgroundColor: Colors.surface,
     marginHorizontal: 15,
     borderRadius: 12,
     shadowColor: '#000',
@@ -994,8 +996,8 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     justifyContent: 'center', alignItems: 'center',
   },
-  dateCircleShift: { backgroundColor: '#4CAF50' },
-  dateCircleTimeOff: { backgroundColor: '#e53e3e' },
+  dateCircleShift: { backgroundColor: Colors.primary },
+  dateCircleTimeOff: { backgroundColor: Colors.error },
   dateCircleToday: { backgroundColor: '#2d3748' },
   dateNum: { fontSize: 15, fontWeight: '600', color: '#2d3748' },
   dateNumActive: { color: 'white' },
@@ -1005,7 +1007,7 @@ const styles = StyleSheet.create({
   nameText: { fontSize: 28, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 20 },
 
   newShiftBanner: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     borderRadius: 14,
     padding: 16,
     marginBottom: 16,
@@ -1022,7 +1024,7 @@ const styles = StyleSheet.create({
 
   // Shift card
   shiftCard: {
-    backgroundColor: '#f0fff4',
+    backgroundColor: Colors.successSoft,
     borderRadius: 14,
     padding: 16,
     marginBottom: 14,
@@ -1030,23 +1032,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1.5,
-    borderColor: '#9ae6b4',
+    borderColor: Colors.success,
   },
   shiftCardNext: { backgroundColor: '#ebf8ff', borderColor: '#90cdf4' },
   shiftCardNone: { backgroundColor: '#f7fafc', borderColor: '#e2e8f0' },
   shiftCardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   shiftIconBg: {
     width: 40, height: 40, borderRadius: 10,
-    backgroundColor: '#e8f5e9', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.successSoft, justifyContent: 'center', alignItems: 'center',
   },
-  shiftCardLabel: { fontSize: 11, fontWeight: '700', color: '#276749', textTransform: 'uppercase', letterSpacing: 0.5 },
+  shiftCardLabel: { fontSize: 11, fontWeight: '700', color: Colors.success, textTransform: 'uppercase', letterSpacing: 0.5 },
   shiftCardTime: { fontSize: 17, fontWeight: '700', color: '#2d3748', marginTop: 2 },
   shiftCardSubtime: { fontSize: 13, color: '#718096', marginTop: 1 },
   shiftBadge: {
-    backgroundColor: '#c6f6d5',
+    backgroundColor: Colors.successSoft,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
   },
-  shiftBadgeText: { fontSize: 12, fontWeight: '700', color: '#276749' },
+  shiftBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.success },
 
   // Progress bar
   progressCard: {
@@ -1067,7 +1069,7 @@ const styles = StyleSheet.create({
     height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden',
   },
   progressFill: {
-    height: 8, backgroundColor: '#4CAF50', borderRadius: 4,
+    height: 8, backgroundColor: Colors.success, borderRadius: 4,
   },
   progressPct: { fontSize: 12, color: '#718096', marginTop: 8, textAlign: 'right' },
 
@@ -1120,7 +1122,7 @@ const styles = StyleSheet.create({
 
   // Urgent tasks
   urgentCard: {
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
     borderRadius: 14,
     padding: 18,
     marginBottom: 14,
@@ -1167,7 +1169,7 @@ const styles = StyleSheet.create({
     borderColor: '#fed7d7',
   },
   urgentAddBtn: {
-    backgroundColor: '#e53e3e',
+    backgroundColor: Colors.error,
     borderRadius: 20,
     paddingHorizontal: 18,
     paddingVertical: 9,
@@ -1218,7 +1220,7 @@ const styles = StyleSheet.create({
   rosterHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   rosterIconBg: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: '#f0fff4', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.primarySoft, justifyContent: 'center', alignItems: 'center',
   },
   rosterTitle: { fontSize: 17, fontWeight: '700', color: '#2d3748' },
   rosterSubtitle: { fontSize: 13, color: '#718096', marginTop: 1 },
@@ -1229,23 +1231,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 12,
   },
-  rosterRowMe: { backgroundColor: '#f0fff4', marginHorizontal: -24, paddingHorizontal: 24 },
+  rosterRowMe: { backgroundColor: Colors.primarySoft, marginHorizontal: -24, paddingHorizontal: 24 },
   rosterAvatar: {
     width: 40, height: 40, borderRadius: 12,
     backgroundColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center',
   },
-  rosterAvatarMe: { backgroundColor: '#4CAF50' },
+  rosterAvatarMe: { backgroundColor: Colors.primary },
   rosterAvatarText: { color: 'white', fontWeight: '700', fontSize: 16 },
   rosterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   rosterName: { fontSize: 15, fontWeight: '600', color: '#2d3748' },
-  rosterNameMe: { color: '#276749' },
-  rosterPosition: { fontSize: 12, color: '#4CAF50', fontWeight: '600', marginBottom: 1 },
+  rosterNameMe: { color: Colors.success },
+  rosterPosition: { fontSize: 12, color: Colors.primary, fontWeight: '600', marginBottom: 1 },
   rosterTime: { fontSize: 12, color: '#718096' },
   meBadge: {
-    backgroundColor: '#c6f6d5', borderRadius: 20,
+    backgroundColor: Colors.successSoft, borderRadius: 20,
     paddingHorizontal: 7, paddingVertical: 2,
   },
-  meBadgeText: { fontSize: 10, fontWeight: '700', color: '#276749' },
+  meBadgeText: { fontSize: 10, fontWeight: '700', color: Colors.success },
 });
 
 export default HomePage;

@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, ORG_ID } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
+import { Colors } from '../constants/theme';
 
 const BASE_CHANNELS = [
   {
@@ -774,7 +775,7 @@ const ChatPage = ({ orgId }) => {
             }}
             activeOpacity={0.8}
           >
-            <Ionicons name="add" size={24} color="#4CAF50" />
+            <Ionicons name="add" size={24} color={Colors.primary} />
           </TouchableOpacity>
         </View>
 
@@ -994,7 +995,7 @@ const ChatPage = ({ orgId }) => {
 
       {/* Messages */}
       {loading ? (
-        <ActivityIndicator color="#4CAF50" style={{ flex: 1 }} />
+        <ActivityIndicator color={Colors.primary} style={{ flex: 1 }} />
       ) : (
         <FlatList
           ref={flatListRef}
@@ -1100,7 +1101,7 @@ const ChatPage = ({ orgId }) => {
 export default ChatPage;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.bg },
 
   header: {
     flexDirection: 'row',
@@ -1119,7 +1120,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0fff4',
+    backgroundColor: Colors.primarySoft,
   },
   backBtn: { marginRight: 2 },
   chatHeaderIcon: {
@@ -1185,7 +1186,7 @@ const styles = StyleSheet.create({
 
   avatarCircle: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     justifyContent: 'center', alignItems: 'center',
     flexShrink: 0,
   },
@@ -1204,7 +1205,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06, shadowRadius: 2, elevation: 1,
   },
   bubbleMe: {
-    backgroundColor: '#4CAF50', borderBottomRightRadius: 4,
+    backgroundColor: Colors.primary, borderBottomRightRadius: 4,
   },
   bubbleThem: {
     backgroundColor: 'white', borderBottomLeftRadius: 4,
@@ -1229,10 +1230,10 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     justifyContent: 'center', alignItems: 'center',
   },
-  sendBtnDisabled: { backgroundColor: '#c6f6d5' },
+  sendBtnDisabled: { backgroundColor: Colors.successSoft },
 
   readOnlyBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

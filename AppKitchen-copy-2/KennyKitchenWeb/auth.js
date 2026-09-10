@@ -12,8 +12,8 @@
     const initials = getInitials(name);
     const svg =
       `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>` +
-      `<rect width='100%' height='100%' rx='40' ry='40' fill='#e6fffa'/>` +
-      `<text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' fill='#2f855a' font-family='Inter,Arial,sans-serif' font-size='30' font-weight='700'>${initials}</text>` +
+      `<rect width='100%' height='100%' rx='40' ry='40' fill='${SheekColors.primarySoft}'/>` +
+      `<text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' fill='${SheekColors.primary}' font-family='Inter,Arial,sans-serif' font-size='30' font-weight='700'>${initials}</text>` +
       `</svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   }
@@ -60,7 +60,7 @@
     overlay.id = 'auth-overlay';
     overlay.style.position = 'fixed';
     overlay.style.inset = '0';
-    overlay.style.background = 'rgba(15, 23, 42, 0.92)';
+    overlay.style.background = SheekColors.bg;
     overlay.style.display = 'none';
     overlay.style.alignItems = 'center';
     overlay.style.justifyContent = 'center';
@@ -69,19 +69,18 @@
     const card = document.createElement('div');
     card.style.width = '100%';
     card.style.maxWidth = '420px';
-    card.style.background = '#ffffff';
+    card.style.background = SheekColors.surface;
     card.style.borderRadius = '16px';
     card.style.padding = '28px 24px 24px';
-    card.style.boxShadow = '0 20px 45px rgba(0,0,0,0.35)';
+    card.style.boxShadow = '0 20px 45px rgba(51, 42, 37, 0.12)';
+    card.style.border = `1px solid ${SheekColors.border}`;
     card.style.fontFamily = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 
     card.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-        <div style="width:40px;height:40px;border-radius:999px;background:#e8f5e9;display:flex;align-items:center;justify-content:center;">
-          <i class="fas fa-utensils" style="color:#16a34a;"></i>
-        </div>
+        <img src="assets/logo.png" alt="" width="40" height="40" style="border-radius:10px;background:${SheekColors.bg};">
         <div>
-          <div style="font-size:18px;font-weight:700;color:#111827;">Sheek</div>
+          <div style="font-size:18px;font-weight:700;color:${SheekColors.text};">Sheek</div>
           <div id="auth-subtitle" style="font-size:13px;color:#6b7280;">Manager dashboard</div>
         </div>
       </div>
@@ -110,7 +109,7 @@
           />
         </div>
         <button type="button" id="auth-submit"
-          style="margin-top:6px;border:none;border-radius:999px;background:#16a34a;color:#fff;font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          style="margin-top:6px;border:none;border-radius:999px;background:${SheekColors.primary};color:#fff;font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           <span>Sign in</span>
         </button>
       </div>
@@ -158,7 +157,7 @@
           />
         </div>
         <button type="button" id="auth-signup-submit"
-          style="margin-top:6px;border:none;border-radius:999px;background:#16a34a;color:#fff;font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          style="margin-top:6px;border:none;border-radius:999px;background:${SheekColors.primary};color:#fff;font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           <span>Create restaurant &amp; account</span>
         </button>
         <p style="font-size:11px;color:#9ca3af;margin:0;line-height:1.4;">By continuing you agree to use this account as the manager for this restaurant. Staff use the same restaurant in the mobile app.</p>

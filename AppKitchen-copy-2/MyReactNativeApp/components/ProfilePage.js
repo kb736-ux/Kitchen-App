@@ -10,9 +10,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase, ORG_ID } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
 import { APP_BRAND_NAME } from '../constants/branding';
+import { Colors } from '../constants/theme';
 
 const AVATAR_COLORS = [
-  '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
+  Colors.primary, '#2196F3', '#9C27B0', '#FF5722',
   '#009688', '#E91E63', '#FF9800', '#607D8B',
 ];
 
@@ -533,7 +534,7 @@ const ProfilePage = ({
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
   }
@@ -551,7 +552,7 @@ const ProfilePage = ({
         <Text style={styles.headerTitle}>Profile</Text>
         <TouchableOpacity onPress={saveProfile} disabled={saving} style={styles.saveBtn}>
           {saving
-            ? <ActivityIndicator size="small" color="#4CAF50" />
+            ? <ActivityIndicator size="small" color={Colors.primary} />
             : <Text style={styles.saveBtnText}>Save</Text>}
         </TouchableOpacity>
       </View>
@@ -627,8 +628,8 @@ const ProfilePage = ({
             activeOpacity={0.7}
           >
             <View style={styles.sectionHeaderLeft}>
-              <View style={[styles.sectionIcon, { backgroundColor: '#f0fff4' }]}>
-                <Ionicons name="person-outline" size={18} color="#4CAF50" />
+              <View style={[styles.sectionIcon, { backgroundColor: Colors.primarySoft }]}>
+                <Ionicons name="person-outline" size={18} color={Colors.primary} />
               </View>
               <Text style={styles.sectionTitle}>Personal Info</Text>
             </View>
@@ -782,8 +783,8 @@ const ProfilePage = ({
             <Text style={styles.menuTitle}>Profile Photo</Text>
 
             <TouchableOpacity style={styles.menuItem} onPress={takePhoto}>
-              <View style={[styles.menuItemIcon, { backgroundColor: '#f0fff4' }]}>
-                <Ionicons name="camera-outline" size={22} color="#4CAF50" />
+              <View style={[styles.menuItemIcon, { backgroundColor: Colors.primarySoft }]}>
+                <Ionicons name="camera-outline" size={22} color={Colors.primary} />
               </View>
               <Text style={styles.menuItemText}>Take Photo</Text>
               <Ionicons name="chevron-forward" size={18} color="#cbd5e0" />
@@ -820,7 +821,7 @@ const ProfilePage = ({
 export default ProfilePage;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   header: {
@@ -831,7 +832,7 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#2d3748' },
   saveBtn: { paddingHorizontal: 4, minWidth: 40, alignItems: 'flex-end' },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#4CAF50' },
+  saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.primary },
 
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 24 },
@@ -849,16 +850,16 @@ const styles = StyleSheet.create({
   cameraBadge: {
     position: 'absolute', bottom: 0, right: 0,
     width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#4CAF50', borderWidth: 2, borderColor: 'white',
+    backgroundColor: Colors.primary, borderWidth: 2, borderColor: 'white',
     justifyContent: 'center', alignItems: 'center',
   },
   avatarName: { fontSize: 22, fontWeight: '700', color: '#2d3748' },
   avatarRole: { fontSize: 14, color: '#718096', marginTop: 2, marginBottom: 10 },
   changePhotoBtn: {
-    backgroundColor: '#f0fff4', borderWidth: 1.5, borderColor: '#c6f6d5',
+    backgroundColor: Colors.primarySoft, borderWidth: 1.5, borderColor: Colors.successSoft,
     borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6,
   },
-  changePhotoText: { fontSize: 13, fontWeight: '700', color: '#4CAF50' },
+  changePhotoText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
   // Color picker
   colorSection: { alignItems: 'center', marginBottom: 20 },
@@ -908,7 +909,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#e8f5e9',
+    backgroundColor: Colors.primarySoft,
     marginLeft: 8,
   },
   switchOrgBtnText: { fontSize: 14, fontWeight: '700', color: '#2e7d32' },
@@ -924,8 +925,8 @@ const styles = StyleSheet.create({
 
   primaryBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#4CAF50', borderRadius: 14, paddingVertical: 16, marginTop: 8,
-    shadowColor: '#4CAF50', shadowOffset: { width: 0, height: 4 },
+    backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, marginTop: 8,
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   primaryBtnDisabled: { backgroundColor: '#a8d5a2' },

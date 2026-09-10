@@ -99,7 +99,7 @@ async function loadRecentAnnouncements() {
                         <button onclick="deleteAnnouncement('${a.id}')"
                             title="Delete"
                             style="background:#fff0f0;border:none;border-radius:6px;width:26px;height:26px;
-                                   cursor:pointer;color:#e53e3e;font-size:12px;display:flex;align-items:center;justify-content:center;">
+                                   cursor:pointer;color:${SheekColors.error};font-size:12px;display:flex;align-items:center;justify-content:center;">
                             🗑
                         </button>
                     </div>
@@ -113,7 +113,7 @@ async function loadRecentAnnouncements() {
                     >${escapeHtml(a.message)}</textarea>
                     <div style="display:flex;gap:6px;">
                         <button onclick="saveEditAnnouncement('${a.id}')"
-                            style="flex:1;background:#4CAF50;color:white;border:none;border-radius:7px;
+                            style="flex:1;background:${SheekColors.primary};color:white;border:none;border-radius:7px;
                                    padding:6px;font-size:12px;font-weight:700;cursor:pointer;">
                             Save
                         </button>
@@ -235,7 +235,7 @@ async function loadShiftRequests() {
     if (error) {
         console.warn('[ShiftRequests] load error:', error.message, error.hint || '', error.code || '');
         container.innerHTML = `
-            <div style="text-align:center;padding:40px 0;color:#e53e3e;">
+            <div style="text-align:center;padding:40px 0;color:${SheekColors.error};">
                 <i class="fas fa-exclamation-triangle" style="font-size:32px;margin-bottom:12px;display:block;"></i>
                 Could not load requests: ${error.message || 'unknown error'}
                 <br><small style="color:#a0aec0;font-size:11px;">Run rls-fix-org-members-shifts.sql in Supabase SQL Editor</small>
@@ -317,20 +317,20 @@ async function loadShiftRequests() {
                     <span style="font-size:12px;color:#a0aec0;flex-shrink:0;">${ago}</span>
                 </div>
                 <div class="shift-request-shift-block" style="background:#f7fafc;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;color:#4a5568;">
-                    <i class="fas fa-calendar-day" style="color:#4CAF50;margin-right:6px;"></i>
+                    <i class="fas fa-calendar-day" style="color:${SheekColors.primary};margin-right:6px;"></i>
                     <strong>${shiftDate}</strong>${shiftTime ? ' · ' + shiftTime : ''}
-                    ${shift.position ? `<span style="margin-left:8px;background:#e8f5e9;color:#276749;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(shift.position)}</span>` : ''}
+                    ${shift.position ? `<span style="margin-left:8px;background:${SheekColors.primarySoft};color:${SheekColors.success};padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(shift.position)}</span>` : ''}
                 </div>
                 ${req.note ? `<p style="font-size:13px;color:#718096;margin:0 0 10px;font-style:italic;max-width:100%;overflow-wrap:anywhere;">"${escapeHtml(req.note)}"</p>` : ''}
                 ${req.target_employee ? `<p style="font-size:12px;color:#4a6fa5;margin:0 0 10px;max-width:100%;overflow-wrap:anywhere;">Transfer to: <strong>${escapeHtml(displayTarget)}</strong></p>` : ''}
                 <div class="shift-request-actions">
                     <button type="button" onclick="approveShiftRequest('${req.id}','${safeShiftId}','${escapeHtml(req.employee_name)}','${escapeHtml(shift.position || '')}','${req.request_type}','${req.target_employee || ''}')"
-                        style="background:#4CAF50;color:white;border:none;border-radius:8px;padding:9px;
+                        style="background:${SheekColors.primary};color:white;border:none;border-radius:8px;padding:9px;
                                font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-check"></i> Approve
                     </button>
                     <button type="button" onclick="denyShiftRequest('${req.id}','${escapeHtml(req.employee_name)}')"
-                        style="background:#fff0f0;color:#e53e3e;border:1.5px solid #fed7d7;border-radius:8px;
+                        style="background:#fff0f0;color:${SheekColors.error};border:1.5px solid #fed7d7;border-radius:8px;
                                padding:9px;font-weight:700;font-size:13px;cursor:pointer;">
                         <i class="fas fa-times"></i> Deny
                     </button>
@@ -2489,7 +2489,7 @@ async function updateEmployeeDropdownForDay() {
             
             if (hasDrop) {
                 option.textContent += ' (Approved Drop)';
-                option.style.color = '#e53e3e';
+                option.style.color = SheekColors.error;
                 option.style.fontStyle = 'italic';
             } else {
                 option.style.color = '';
@@ -3812,7 +3812,7 @@ function getNotificationIcon(type) {
 
 function getNotificationColor(type) {
     const colors = {
-        'success': '#4CAF50',
+        'success': SheekColors.success,
         'error': '#f56565',
         'warning': '#ed8936',
         'info': '#4299e1'
