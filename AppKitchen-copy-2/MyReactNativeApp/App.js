@@ -16,7 +16,7 @@ import ChatPage from './components/ChatPage';
 import ProfilePage from './components/ProfilePage';
 import OrgPickerModal from './components/OrgPickerModal';
 import { supabase, getOrgId, listOrgsForCurrentUser, switchToOrg } from './utils/supabase';
-import { shiftRowMatchesEmployee } from './utils/shiftMatching';
+import { ShiftMatching, shiftRowMatchesEmployee } from './utils/shiftMatching';
 import { applyTaskCompletionToInventory } from './utils/inventorySync';
 import { EmployeeProvider, useEmployee } from './EmployeeContext';
 import LoginScreen from './LoginScreen';
@@ -848,7 +848,24 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       .from('profiles')
       .select('id, employee_name, display_name, first_name, last_name, email, user_id')
       .eq('org_id', oid);
-    const candidateNames = buildVerifiedIdentity(profileRows || []).originalNames;
+    const candidateNames = ShiftMatching.collectNameCandidates(
+      {
+        employeeId,
+        authUserId,
+        email,
+        employeeName,
+        displayName,
+        defaultEmployeeName,
+        firstName,
+        lastName,
+        profileData,
+      },
+      profileRows || []
+    );
+    const knownIds = ShiftMatching.profileIdsForMember(profileRows || [], {
+      employeeId,
+      authUserId,
+    });
 
     const { data: shiftsToday, error: errToday } = await supabase
       .from('shifts')
@@ -861,7 +878,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     }
 
     const myToday = (shiftsToday || []).filter((s) =>
-      shiftRowMatchesEmployee(s, employeeId, candidateNames, authUserId)
+      ShiftMatching.rowMatchesEmployee(s, employeeId, candidateNames, authUserId, knownIds)
     );
     const nowMs = Date.now();
     const stillRelevant = myToday.filter((s) => {
@@ -905,7 +922,9 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       }
 
       const nextData =
-        (upcoming || []).find((s) => shiftRowMatchesEmployee(s, employeeId, candidateNames, authUserId)) || null;
+        (upcoming || []).find((s) =>
+          ShiftMatching.rowMatchesEmployee(s, employeeId, candidateNames, authUserId, knownIds)
+        ) || null;
 
       setNextShift(nextData);
     } else {

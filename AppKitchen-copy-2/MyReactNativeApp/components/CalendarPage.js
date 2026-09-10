@@ -128,14 +128,16 @@ const CalendarPage = ({ onBack }) => {
 
           {/* Calendar Days */}
           <View style={styles.calendarGrid}>
-            {days.map((dateObj, index) => {
+            {Array.from({ length: 6 }, (_, wi) => (
+              <View key={wi} style={styles.calendarWeekRow}>
+                {days.slice(wi * 7, wi * 7 + 7).map((dateObj, di) => {
               const isSelected = selectedDate && 
                 selectedDate.toDateString() === dateObj.date.toDateString();
               const isWorking = isWorkDay(dateObj);
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={di}
                   style={[
                     styles.dayCell,
                     !dateObj.isCurrentMonth && styles.dayCellInactive,
@@ -154,7 +156,9 @@ const CalendarPage = ({ onBack }) => {
                   </Text>
                 </TouchableOpacity>
               );
-            })}
+                })}
+              </View>
+            ))}
           </View>
         </View>
 
@@ -236,26 +240,31 @@ const styles = StyleSheet.create({
     color: '#4a5568',
   },
   calendarGrid: {
+    width: '100%',
+  },
+  calendarWeekRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    width: '100%',
   },
   dayCell: {
-    width: '14.28%', // 100% / 7 days
+    flex: 1,
+    minWidth: 0,
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
-    margin: 1,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
   dayCellInactive: {
     opacity: 0.3,
   },
   dayCellSelected: {
     backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   dayCellWorking: {
-    backgroundColor: '#e8f5e8',
-    borderWidth: 2,
+    backgroundColor: Colors.primarySoft,
     borderColor: Colors.primary,
   },
   dayText: {
@@ -271,7 +280,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   dayTextWorking: {
-    color: '#2e7d32',
+    color: Colors.primary,
     fontWeight: '600',
   },
   requestButton: {

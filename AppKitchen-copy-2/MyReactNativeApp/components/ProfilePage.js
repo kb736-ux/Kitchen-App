@@ -912,7 +912,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primarySoft,
     marginLeft: 8,
   },
-  switchOrgBtnText: { fontSize: 14, fontWeight: '700', color: '#2e7d32' },
+  switchOrgBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
   fieldReadOnlyText: { fontSize: 15, color: '#a0aec0' },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, backgroundColor: '#f7fafc', borderRadius: 8, padding: 10 },
   infoText: { fontSize: 13, color: '#718096', flex: 1 },

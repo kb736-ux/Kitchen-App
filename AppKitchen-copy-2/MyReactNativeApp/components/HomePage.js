@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { supabase } from '../utils/supabase';
 import { useEmployee } from '../EmployeeContext';
-import { shiftRowMatchesEmployee } from '../utils/shiftMatching';
+import { ShiftMatching, shiftRowMatchesEmployee } from '../utils/shiftMatching';
 import { APP_BRAND_NAME } from '../constants/branding';
 import { Colors } from '../constants/theme';
 
@@ -221,17 +221,39 @@ const HomePage = ({
   async function fetchWeekShifts() {
     const { monday, sunday, fmt } = getVisibleWeekRange();
 
-    const { data } = await supabase
-      .from('shifts')
-      .select('shift_date, employee_name, employee_id')
-      .eq('org_id', orgId)
-      .gte('shift_date', fmt(monday))
-      .lte('shift_date', fmt(sunday));
+    const [{ data }, { data: profileRows }] = await Promise.all([
+      supabase
+        .from('shifts')
+        .select('shift_date, employee_name, employee_id')
+        .eq('org_id', orgId)
+        .gte('shift_date', fmt(monday))
+        .lte('shift_date', fmt(sunday)),
+      supabase
+        .from('profiles')
+        .select('id, user_id, employee_name, display_name, first_name, last_name, email')
+        .eq('org_id', orgId)
+        .limit(400),
+    ]);
 
-    const candidates = buildHomeNameCandidates();
+    const identity = {
+      employeeId,
+      authUserId,
+      email,
+      employeeName,
+      displayName,
+      defaultEmployeeName,
+      firstName,
+      lastName,
+      profileData,
+    };
+    const candidates = ShiftMatching.collectNameCandidates(identity, profileRows || []);
+    const knownIds = ShiftMatching.profileIdsForMember(profileRows || [], identity);
     const dates = new Set();
     (data || []).forEach((row) => {
-      if (shiftRowMatchesEmployee(row, employeeId, candidates, authUserId)) dates.add(row.shift_date);
+      if (ShiftMatching.rowMatchesEmployee(row, employeeId, candidates, authUserId, knownIds)) {
+        const key = ShiftMatching.dateKey(row.shift_date);
+        if (key) dates.add(key);
+      }
     });
     setShiftDates(dates);
   }
