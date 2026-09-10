@@ -35,7 +35,7 @@ class ShiftWriteIdentity {
     }
 }
 
-/** GCal-style chip times: "9a–5p", "9:30a–2p". */
+/** Chip times with full am/pm: "9am–5pm", "9:30am–2pm". */
 class ShiftCardTime {
     static compact(time24) {
         const raw = String(time24 || '').slice(0, 5);
@@ -43,7 +43,7 @@ class ShiftCardTime {
         const h = Number(hStr);
         const m = Number(mStr) || 0;
         if (!Number.isFinite(h)) return '';
-        const period = h >= 12 ? 'p' : 'a';
+        const period = h >= 12 ? 'pm' : 'am';
         const h12 = h % 12 || 12;
         return m ? `${h12}:${String(m).padStart(2, '0')}${period}` : `${h12}${period}`;
     }
