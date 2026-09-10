@@ -345,14 +345,15 @@
         .maybeSingle(),
       window.supabaseClient
         .from('org_members')
-        .select('org_id')
+        .select('org_id, role')
         .eq('user_id', user.id)
-        .eq('role', 'manager')
-        .limit(1),
+        .in('role', ['manager', 'owner'])
+        .limit(5),
     ]);
 
     const isAdminUser = !!(adminRow && adminRow.is_admin);
     const isOrgManager = Array.isArray(mgrRows) && mgrRows.length > 0;
+    window.kkCanManageOrg = false;
 
     if (adminError) {
       console.warn('[Auth] admin_users lookup failed:', adminError.message);
@@ -371,6 +372,7 @@
     }
 
     window.currentAdminUser = user;
+    window.kkCanManageOrg = true;
     try {
       if (typeof window.resolveOrgFromAuth === 'function') {
         const prevOrg = window.ORG_ID || null;
@@ -510,6 +512,7 @@
   try {
     window.kkGetAdminIdentity = getAdminIdentity;
     window.kkRefreshNavIdentity = refreshNavIdentity;
+    if (typeof window.kkCanManageOrg !== 'boolean') window.kkCanManageOrg = false;
   } catch (_) {}
 
   function readSelectedSignupPlan() {
