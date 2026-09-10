@@ -11,7 +11,6 @@ import SchedulePage from './components/SchedulePage';
 import RecipesPage from './components/RecipesPage';
 import ProgressPage from './components/ProgressPage';
 import TaskDetailPage from './components/TaskDetailPage';
-import CalendarPage from './components/CalendarPage';
 import ChatPage from './components/ChatPage';
 import ProfilePage from './components/ProfilePage';
 import OrgPickerModal from './components/OrgPickerModal';
@@ -127,8 +126,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   const [showProgress, setShowProgress] = useState(false);
   const [showTaskDetail, setShowTaskDetail] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
-  const [showCalendar, setShowCalendar] = useState(false);
-
   const { employeeName, displayName, defaultEmployeeName, employeeId, authUserId, email, firstName, lastName, authLoading } = useEmployee();
 
   // Org state (no auth needed)
@@ -1100,9 +1097,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   };
   const handleBackFromTaskDetail = () => { setShowTaskDetail(false); setSelectedTask(null); };
 
-  const handleCalendarPress = () => setShowCalendar(true);
-  const handleBackFromCalendar = () => setShowCalendar(false);
-
   const handleProfilePress = () => setShowProfile(true);
   const handleBackFromProfile = () => setShowProfile(false);
 
@@ -1167,9 +1161,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     if (showProgress) {
         return <ProgressPage onBack={handleBackFromProgress} tasks={displayedTasks} allTasks={displayedTasks} toggleTask={toggleTask} onTaskPress={handleTaskPress} />;
     }
-    if (showCalendar) {
-      return <CalendarPage onBack={handleBackFromCalendar} orgId={orgId} />;
-    }
     if (showProfile) {
       return (
         <ProfilePage
@@ -1224,10 +1215,10 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      <View style={[styles.content, (showProgress || showTaskDetail || showCalendar || showProfile) && styles.contentFullScreen]}>
+      <View style={[styles.content, (showProgress || showTaskDetail || showProfile) && styles.contentFullScreen]}>
         {renderCurrentPage()}
       </View>
-      {!showProgress && !showTaskDetail && !showCalendar && !showProfile && (
+      {!showProgress && !showTaskDetail && !showProfile && (
         <View style={styles.bottomNav}>
           {['Home', 'Tasks', 'Schedule', 'Recipes', 'Chat'].map((tab) => (
             <TouchableOpacity
