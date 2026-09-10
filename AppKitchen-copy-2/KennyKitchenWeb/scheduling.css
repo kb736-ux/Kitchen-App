@@ -1,6 +1,5 @@
 /* Scheduling Page Specific Styles
-   Toolbar reuses .dashboard-header from styles.css (flat, like Home/Employees).
-   Matrix is the only glass card. */
+   Toolbar reuses .dashboard-header from styles.css (flat, like Home/Employees). */
 
 .scheduling-page .dashboard-main {
     padding-top: 1.5rem;
@@ -61,6 +60,23 @@
     background: #f7fafc;
     border-color: var(--color-primary);
     color: var(--color-primary);
+}
+
+#calendar-history-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0.5rem 0;
+    box-shadow: none;
+}
+
+#calendar-history-btn:hover {
+    color: var(--color-primary);
+    background: none;
+    border: none;
 }
 
 /* Week Navigation — inline with page title, not a second card */
@@ -146,9 +162,6 @@
 
 /* Schedule Grid */
 .schedule-container {
-    background: #fff;
-    border-radius: 14px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
     overflow: hidden;
     border: 1px solid #e2e8f0;
 }
