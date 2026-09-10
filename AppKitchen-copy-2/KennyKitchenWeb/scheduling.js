@@ -1124,6 +1124,19 @@ class ScheduleWeek {
         return `${rounded}h`;
     }
 
+    static defaultAssignableDayKey(weekStart) {
+        const names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(weekStart);
+            d.setDate(d.getDate() + i);
+            d.setHours(0, 0, 0, 0);
+            if (d >= today) return names[i];
+        }
+        return names[0];
+    }
+
     static syncThisWeekButton(weekStart) {
         const btn = document.getElementById('this-week-btn');
         if (!btn) return;
@@ -2530,12 +2543,14 @@ async function openModal(modalId, preselectedDay = null, preselectedEmployee = n
             }
             updateAssignShiftConfirmState();
         } else if (modalId === 'assign-shift-modal') {
-            // Show day selector if opened from button (no preselected day)
             const daySelectGroup = document.getElementById('day-select-group');
             if (daySelectGroup) {
                 daySelectGroup.style.display = 'block';
             }
-            // Update employee dropdown for default day
+            const daySelect = document.getElementById('day-select');
+            if (daySelect) {
+                daySelect.value = ScheduleWeek.defaultAssignableDayKey(currentWeekStart);
+            }
             await updateEmployeeDropdownForDay();
             updateAssignShiftConfirmState();
         }
