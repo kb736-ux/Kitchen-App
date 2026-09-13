@@ -119,6 +119,19 @@
                     </div>
                 </section>
 
+                <!-- Clock punches (shown only when Sheek clock in/out is enabled) -->
+                <section class="dashboard-card clock-punches-card" id="clock-punches-card" style="display:none;">
+                    <div class="card-header">
+                        <h2><i class="fas fa-user-clock"></i> Clock punches</h2>
+                        <span class="card-badge" id="clock-punches-badge">This week</span>
+                    </div>
+                    <div class="card-content">
+                        <p class="clock-punches-hint">Early clock-ins are blocked until the scheduled shift start. Staff punch from the Sheek app.</p>
+                        <div id="clock-punches-list"></div>
+                        <p class="no-tasks-message" id="clock-punches-empty">No punches this week.</p>
+                    </div>
+                </section>
+
                 <!-- Urgent Tasks Section -->
                 <section class="dashboard-card urgent-tasks-card">
                     <div class="card-header">
@@ -186,8 +199,9 @@
     <script src="subscriptionPlans.js?v=1"></script>
     <script src="stripeBilling.js?v=1"></script>
     <script src="auth.js?v=20250308"></script>
-    <script src="adminSettings.js"></script>
+    <script src="adminSettings.js?v=20260913-clock"></script>
     <script src="employees.js?v=20260426-otp-invite"></script>
     <script src="script.js"></script>
+    <script src="timeClock.js?v=20260913-clock"></script>
 </body>
 </html>
