@@ -101,6 +101,20 @@
     card.style.padding = '22px 24px 20px';
     card.style.boxShadow = '0 18px 40px rgba(0,0,0,0.35)';
     card.style.fontFamily = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    card.style.maxHeight = '90vh';
+    card.style.overflowY = 'auto';
+    if (!document.getElementById('sheek-toggle-style')) {
+      const toggleCss = document.createElement('style');
+      toggleCss.id = 'sheek-toggle-style';
+      toggleCss.textContent =
+        '.sheek-toggle{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0}' +
+        '.sheek-toggle input{opacity:0;width:0;height:0}' +
+        '.sheek-toggle-slider{position:absolute;inset:0;background:#d1d5db;border-radius:999px;cursor:pointer;transition:background .15s ease}' +
+        '.sheek-toggle-slider:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .15s ease;box-shadow:0 1px 3px rgba(0,0,0,.2)}' +
+        '.sheek-toggle input:checked + .sheek-toggle-slider{background:#332A25}' +
+        '.sheek-toggle input:checked + .sheek-toggle-slider:before{transform:translateX(18px)}';
+      document.head.appendChild(toggleCss);
+    }
 
     card.innerHTML = `
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
@@ -178,6 +192,18 @@
         <div style="display:flex;flex-direction:column;gap:4px;">
           <label for="admin-restaurant-logo" style="font-size:12px;font-weight:500;color:#374151;">Restaurant logo URL (optional)</label>
           <input id="admin-restaurant-logo" type="text" placeholder="https://..." style="border-radius:10px;border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;" />
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#111827;">Sheek clock in/out</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:2px;line-height:1.4;">
+              Let staff punch in and out in the Sheek app. Early clock-ins are blocked until the scheduled shift start. Off by default.
+            </div>
+          </div>
+          <label class="sheek-toggle" title="Enable Sheek clock in/out">
+            <input id="admin-clock-in-out-enabled" type="checkbox" />
+            <span class="sheek-toggle-slider"></span>
+          </label>
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
@@ -407,7 +433,7 @@
 
       const [
         { data: profile },
-        { data: orgRow, error: orgError },
+        { data: orgRowLoaded, error: orgError },
         { data: profileByEmail },
         { data: profileByUserIdAnyOrg },
         { count: profileCount, error: profileCountError },
@@ -420,7 +446,7 @@
           .catch(() => ({ data: null })),
         supa
           .from('orgs')
-          .select('name, subscription_plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status')
+          .select('name, subscription_plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status, clock_in_out_enabled')
           .eq('id', window.ORG_ID)
           .maybeSingle()
           .then((r) => ({ data: r.data, error: r.error })),
@@ -446,6 +472,25 @@
       ]);
       if (profileCountError) {
         console.warn('[AdminSettings] Profile count failed:', profileCountError.message);
+      }
+
+      let orgRow = orgRowLoaded;
+      if (orgError) {
+        console.warn('[AdminSettings] Could not load org name:', orgError.message);
+        const missingClockCol = (orgError.message || '').toLowerCase().includes('clock_in_out_enabled');
+        if (missingClockCol) {
+          const retry = await supa
+            .from('orgs')
+            .select('name, subscription_plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status')
+            .eq('id', window.ORG_ID)
+            .maybeSingle();
+          if (retry?.data) orgRow = retry.data;
+        }
+      }
+
+      const clockEl = document.getElementById('admin-clock-in-out-enabled');
+      if (clockEl) {
+        clockEl.checked = !!(orgRow && orgRow.clock_in_out_enabled);
       }
 
       const planSel = document.getElementById('admin-subscription-plan');
@@ -500,10 +545,6 @@
           .catch(() => ({ data: [] }));
         const rows = byEmailRes?.data || [];
         profileByEmailRow = pickBestProfileRow(rows, adminUser.email || '');
-      }
-
-      if (orgError) {
-        console.warn('[AdminSettings] Could not load org name:', orgError.message);
       }
 
       const profileByUserIdAnyOrgRow = pickBestProfileRow(profileByUserIdAnyOrg, adminUser.email || '');
@@ -776,6 +817,10 @@
       if (!stripeSubIdForSave) {
         orgUpdate.subscription_plan = newPlan;
       }
+      const clockEl = document.getElementById('admin-clock-in-out-enabled');
+      if (clockEl) {
+        orgUpdate.clock_in_out_enabled = !!clockEl.checked;
+      }
 
       const { error: orgErr } = await supa
         .from('orgs')
@@ -787,7 +832,13 @@
         if ((msg || '').toLowerCase().includes('subscription_plan')) {
           throw new Error(`${msg} Run orgs-subscription-plan.sql in Supabase to add the column.`);
         }
+        if ((msg || '').toLowerCase().includes('clock_in_out_enabled')) {
+          throw new Error(`${msg} Run supabase-clock-in-out.sql in Supabase to add the clock-in column.`);
+        }
         throw new Error(msg);
+      }
+      if (typeof window.kkLoadManagerPunches === 'function') {
+        try { await window.kkLoadManagerPunches(); } catch (_) {}
       }
       // Nav/header always shows product name "Sheek" (orgs.name is still saved for records).
       if (typeof updateOrgBranding === 'function') {

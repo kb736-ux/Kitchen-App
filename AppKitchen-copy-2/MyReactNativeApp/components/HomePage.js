@@ -7,6 +7,7 @@ import { useEmployee } from '../EmployeeContext';
 import { ShiftMatching, shiftRowMatchesEmployee } from '../utils/shiftMatching';
 import { APP_BRAND_NAME } from '../constants/branding';
 import { Colors } from '../constants/theme';
+import ClockCard from './ClockCard';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'Th', 'F', 'S', 'S'];
 
@@ -704,6 +705,8 @@ const HomePage = ({
             </View>
           </View>
         )}
+
+        <ClockCard orgId={orgId} todayShift={todayShift} />
 
         {/* Task Progress — shift day or any assigned tasks */}
         {showWorkMode && (
