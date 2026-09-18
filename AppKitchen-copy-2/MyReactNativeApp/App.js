@@ -1048,11 +1048,12 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     if (!task || task.employee_name || task.employee_id) return;
     const nextName = displayName || employeeName;
     const claim = { employee_name: nextName, employee_id: employeeId };
+    const wasMine = tasks.some(t => t.id === taskId);
     setHomeUrgentTasks(prev =>
       prev.map(t => t.id === taskId ? { ...t, ...claim } : t)
     );
     setTasks(prev => {
-      if (prev.some(t => t.id === taskId)) {
+      if (wasMine) {
         return prev.map(t => t.id === taskId ? { ...t, ...claim } : t);
       }
       return [{ ...task, ...claim }, ...prev];
@@ -1073,9 +1074,12 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       setHomeUrgentTasks(prev =>
         prev.map(t => t.id === taskId ? { ...t, employee_name: null, employee_id: null } : t)
       );
-      setTasks(prev =>
-        prev.map(t => t.id === taskId ? { ...t, employee_name: null, employee_id: null } : t)
-      );
+      setTasks(prev => {
+        if (wasMine) {
+          return prev.map(t => t.id === taskId ? { ...t, employee_name: null, employee_id: null } : t);
+        }
+        return prev.filter(t => t.id !== taskId);
+      });
     }
   };
 
