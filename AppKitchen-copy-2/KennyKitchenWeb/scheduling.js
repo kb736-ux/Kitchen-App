@@ -723,25 +723,95 @@ async function sendPushToEmployee(employeeName, title, body) {
     }).catch((err) => console.warn('[Push] send failed:', err?.message || err));
 }
 
-// Poll badge count on load — MUST use window (supabase-config dispatches on window, not document)
-window.addEventListener('supabase-ready', async () => {
+/**
+ * Monday–Sunday of the week currently on screen, as local YYYY-MM-DD.
+ * The grid query is already limited to this range; boot must not widen it.
+ */
+function visibleScheduleWeekBounds() {
+    const weekStart = getWeekStart(currentWeekStart);
+    const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
+    const sundayDate = new Date(mondayDate);
+    sundayDate.setDate(mondayDate.getDate() + 6);
+    return {
+        weekStart,
+        startStr: formatLocalYmd(mondayDate),
+        endStr: formatLocalYmd(sundayDate),
+    };
+}
+
+/** This week's shift rows only. null = query failed (caller may retry); [] = none. */
+async function fetchVisibleWeekShiftRows() {
+    if (!window.supabaseClient || !window.ORG_ID) return null;
+    const { startStr, endStr } = visibleScheduleWeekBounds();
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('shifts')
+            .select('id, shift_date, start_time, end_time, position, employee_name')
+            .eq('org_id', window.ORG_ID)
+            .gte('shift_date', startStr)
+            .lte('shift_date', endStr)
+            .order('shift_date', { ascending: true });
+        if (error) {
+            console.warn('[Supabase] week shifts:', error.message);
+            return null;
+        }
+        return data || [];
+    } catch (e) {
+        console.warn('[Supabase] week shifts:', e?.message || e);
+        return null;
+    }
+}
+
+/**
+ * One scheduling boot.
+ * In parallel: this week's shifts, roster (profiles + employee_positions), pending-request count.
+ * Position labels come from employee_positions plus those week rows — not every shift ever.
+ * Past-shift cleanup stays on the requests panel. Tasks load per shift when a card opens.
+ */
+let schedulingPageBootPromise = null;
+
+async function bootSchedulingPage() {
     if (!window.supabaseClient || !window.ORG_ID) return;
+    const weekAtStart = visibleScheduleWeekBounds().startStr;
 
-    // Clean up any past-dated requests on load
-    await cleanupPastShiftRequests();
+    const rosterPromise = typeof loadEmployeePositionsFromSupabase === 'function'
+        ? loadEmployeePositionsFromSupabase().catch((e) => {
+            console.warn('[Scheduling] roster load failed:', e?.message || e);
+            return null;
+        })
+        : Promise.resolve(null);
 
-    const { count } = await window.supabaseClient
+    const pendingPromise = window.supabaseClient
         .from('shift_requests')
         .select('*', { count: 'exact', head: true })
         .eq('org_id', window.ORG_ID)
         .eq('status', 'pending');
+
+    const [weekShiftRows, , pendingRes] = await Promise.all([
+        fetchVisibleWeekShiftRows(),
+        rosterPromise,
+        pendingPromise,
+    ]);
+
+    const count = pendingRes && pendingRes.count;
     if (count > 0) {
         const badge = document.getElementById('requests-badge');
         if (badge) { badge.textContent = count; badge.style.display = 'block'; }
     }
 
-    // Rebuild matrix + sync current week's Supabase shifts
-    await updateScheduleMatrixAndSync();
+    const sameWeek = visibleScheduleWeekBounds().startStr === weekAtStart;
+    const preloaded = sameWeek && Array.isArray(weekShiftRows) ? weekShiftRows : undefined;
+    await populatePositionSelect({ weekShiftRows: preloaded });
+    await updateScheduleMatrixAndSync({
+        skipRosterLoad: true,
+        weekShiftRows: preloaded,
+    });
+}
+
+// MUST use window (supabase-config dispatches on window, not document).
+window.addEventListener('supabase-ready', () => {
+    if (!window.supabaseClient || !window.ORG_ID) return;
+    if (!schedulingPageBootPromise) schedulingPageBootPromise = bootSchedulingPage();
 });
 
 /** Normalize DB/UI times to HH:MM for comparison (handles 03:19:00 vs 03:19). */
@@ -784,39 +854,34 @@ function findShiftIndexInBucket(bucket, day, weekStart, start24, end24, shiftId)
  * missing from the visual grid.  This exposes "ghost" duplicates that exist in
  * the DB but were never rendered (e.g. from a past session or a bug).
  */
-async function syncSupabaseShiftsToGrid() {
+async function syncSupabaseShiftsToGrid(options = {}) {
     if (!window.supabaseClient || !window.ORG_ID) return;
 
     const hasGrid = document.querySelector('#schedule-matrix .sched-matrix-cell[data-day]');
     if (!hasGrid) {
         syncSupabaseShiftsToGrid._retries = (syncSupabaseShiftsToGrid._retries || 0) + 1;
         if (syncSupabaseShiftsToGrid._retries <= 24) {
-            setTimeout(() => void syncSupabaseShiftsToGrid(), 250);
+            setTimeout(() => void syncSupabaseShiftsToGrid(options), 250);
         }
         return;
     }
     syncSupabaseShiftsToGrid._retries = 0;
 
-    const weekStart = getWeekStart(currentWeekStart);
-    const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
-    const sundayDate = new Date(mondayDate);
-    sundayDate.setDate(mondayDate.getDate() + 6);
-    const localYmd = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
-    const startStr = localYmd(mondayDate);
-    const endStr = localYmd(sundayDate);
+    const { weekStart, startStr, endStr } = visibleScheduleWeekBounds();
 
-    const { data: rows, error } = await window.supabaseClient
-        .from('shifts')
-        .select('id, shift_date, start_time, end_time, position, employee_name')
-        .eq('org_id', window.ORG_ID)
-        .gte('shift_date', startStr)
-        .lte('shift_date', endStr)
-        .order('shift_date', { ascending: true });
+    let rows = options.weekShiftRows;
+    let error = null;
+    if (!Array.isArray(rows)) {
+        const res = await window.supabaseClient
+            .from('shifts')
+            .select('id, shift_date, start_time, end_time, position, employee_name')
+            .eq('org_id', window.ORG_ID)
+            .gte('shift_date', startStr)
+            .lte('shift_date', endStr)
+            .order('shift_date', { ascending: true });
+        rows = res.data;
+        error = res.error;
+    }
 
     if (error) {
         console.warn('[Supabase] syncSupabaseShiftsToGrid error:', error.message);
@@ -1001,7 +1066,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     initializeScheduling();
     setupNotificationBell();
-    void updateScheduleMatrixAndSync();
 });
 
 function initializeScheduling() {
@@ -1694,24 +1758,13 @@ function setupScheduleMatrixDragAndDrop() {
     });
 }
 
-async function renderScheduleMatrix() {
+async function renderScheduleMatrix(options = {}) {
     const root = document.getElementById('schedule-matrix');
     if (!root) return;
 
-    const weekStart = getWeekStart(currentWeekStart);
-    const mondayDate = new Date(String(weekStart).slice(0, 10) + 'T12:00:00');
-    const sundayDate = new Date(mondayDate);
-    sundayDate.setDate(mondayDate.getDate() + 6);
-    const localYmd = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
-    const startStr = localYmd(mondayDate);
-    const endStr = localYmd(sundayDate);
+    const { weekStart, startStr, endStr } = visibleScheduleWeekBounds();
 
-    if (typeof loadEmployeePositionsFromSupabase === 'function') {
+    if (!options.skipRosterLoad && typeof loadEmployeePositionsFromSupabase === 'function') {
         try {
             await loadEmployeePositionsFromSupabase();
         } catch (_) {}
@@ -1727,7 +1780,11 @@ async function renderScheduleMatrix() {
             : new Set(fromPos);
 
     let fromShifts = [];
-    if (window.supabaseClient && window.ORG_ID) {
+    if (Array.isArray(options.weekShiftRows)) {
+        fromShifts = [
+            ...new Set(options.weekShiftRows.map((r) => (r.employee_name || '').trim()).filter(Boolean)),
+        ];
+    } else if (window.supabaseClient && window.ORG_ID) {
         const { data } = await window.supabaseClient
             .from('shifts')
             .select('employee_name')
@@ -1818,12 +1875,12 @@ async function renderScheduleMatrix() {
     root.innerHTML = headerHtml + bodyHtml;
 }
 
-async function updateScheduleMatrixAndSync() {
+async function updateScheduleMatrixAndSync(options = {}) {
     updateWeekTitle();
-    await renderScheduleMatrix();
+    await renderScheduleMatrix(options);
     initializeEmployeeHours();
     if (window.supabaseClient && window.ORG_ID) {
-        await syncSupabaseShiftsToGrid();
+        await syncSupabaseShiftsToGrid(options);
     }
     updateMatrixRowHours();
     setupScheduleMatrixDelegation();
@@ -2274,7 +2331,7 @@ function canonicalPositionLabelForSchedulingDropdown(raw) {
     return hit || t;
 }
 
-async function populatePositionSelect() {
+async function populatePositionSelect(options = {}) {
     const positionSelect = document.getElementById('position-select');
     const shiftDetailsPosition = document.getElementById('shift-details-position');
     if (!positionSelect && !shiftDetailsPosition) return;
@@ -2294,7 +2351,24 @@ async function populatePositionSelect() {
         window.kkGetOrgPositionLabelsForScheduling().forEach((p) => addPos(p));
     }
 
-    if (window.supabaseClient && window.ORG_ID) {
+    const cachedPositions = typeof getEmployeePositions === 'function' ? getEmployeePositions() : null;
+    const cachedNames = cachedPositions ? Object.keys(cachedPositions) : [];
+    if (cachedNames.length) {
+        cachedNames.forEach((name) => {
+            let arr = cachedPositions[name];
+            if (typeof arr === 'string') {
+                try {
+                    arr = JSON.parse(arr);
+                } catch (_) {
+                    arr = [];
+                }
+            }
+            (arr || []).forEach((p) => {
+                const label = typeof p === 'string' ? p.trim() : String(p?.name || '').trim();
+                addPos(label);
+            });
+        });
+    } else if (window.supabaseClient && window.ORG_ID) {
         const { data } = await window.supabaseClient
             .from('employee_positions')
             .select('positions')
@@ -2313,15 +2387,22 @@ async function populatePositionSelect() {
                 addPos(label);
             });
         });
+    }
 
+    let weekRows = options.weekShiftRows;
+    if (!Array.isArray(weekRows) && window.supabaseClient && window.ORG_ID) {
+        const { startStr, endStr } = visibleScheduleWeekBounds();
         const { data: shiftRows } = await window.supabaseClient
             .from('shifts')
             .select('position')
-            .eq('org_id', window.ORG_ID);
-        (shiftRows || []).forEach((row) => {
-            addPos(String(row?.position || '').trim());
-        });
+            .eq('org_id', window.ORG_ID)
+            .gte('shift_date', startStr)
+            .lte('shift_date', endStr);
+        weekRows = shiftRows || [];
     }
+    (weekRows || []).forEach((row) => {
+        addPos(String(row?.position || '').trim());
+    });
 
     const opts = '<option value="">Select Position</option>' + [...positions].sort().map(p => {
         const val = POSITION_SLUG_MAP[p] || p.toLowerCase().replace(/\s+/g, '-');
@@ -4007,10 +4088,50 @@ async function loadExistingTasksForEmployee(employeeName, container, groupElemen
             console.warn('[ShiftDetails] sibling shift lookup failed:', e?.message || e);
         }
     }
-    
-    // Get tasks from window.kitchenTasks
+
+    // This shift only — not every task in the org. Boot used to download tasks.*.
     const existingTasks = [];
-    if (typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
+    let loadedShiftTasksFromDb = false;
+    if (allowedShiftIds && allowedShiftIds.size && window.supabaseClient && window.ORG_ID) {
+        try {
+            const { data: dbTasks, error: dbErr } = await window.supabaseClient
+                .from('tasks')
+                .select('id, text, employee_name, employee_id, shift_id, status, completed_at')
+                .eq('org_id', window.ORG_ID)
+                .in('shift_id', [...allowedShiftIds]);
+            if (dbErr) {
+                console.warn('[ShiftDetails] shift task load failed:', dbErr.message);
+            } else {
+                loadedShiftTasksFromDb = true;
+                (dbTasks || []).forEach((task) => {
+                    if (schedulingTaskRowCompleted(task)) return;
+                    const description = (task.text || '').trim();
+                    if (!description) return;
+                    const nameKey =
+                        (typeof window.getEmployeeNameFromId === 'function' && task.employee_id
+                            ? window.getEmployeeNameFromId(task.employee_id)
+                            : null) ||
+                        task.employee_name ||
+                        '';
+                    const mappedName = nameKey
+                        ? ((typeof window.getEmployeeDisplayName === 'function'
+                            ? window.getEmployeeDisplayName(nameKey)
+                            : null) || nameKey)
+                        : 'Unassigned';
+                    existingTasks.push({
+                        assignee: mappedName,
+                        description,
+                        shift_id: task.shift_id ? String(task.shift_id) : null,
+                    });
+                });
+            }
+        } catch (e) {
+            console.warn('[ShiftDetails] shift task load failed:', e?.message || e);
+        }
+    }
+
+    // Get tasks from window.kitchenTasks when this shift could not be read from the DB.
+    if (!loadedShiftTasksFromDb && typeof window.kitchenTasks !== 'undefined' && window.kitchenTasks.length > 0) {
         window.kitchenTasks.forEach(task => {
             const taskShiftId = task.shift_id ? String(task.shift_id) : null;
             if (
@@ -4718,56 +4839,5 @@ notificationStyles.textContent = `
 `;
 document.head.appendChild(notificationStyles);
 
-// ── Supabase task sync ────────────────────────────────────────────────────────
-// When Supabase is ready, treat DB task rows as the source of truth for web task UI.
-window.addEventListener('supabase-ready', async function () {
-    if (!window.supabaseClient || !window.ORG_ID) return;
-
-    if (typeof loadEmployeePositionsFromSupabase === 'function') {
-        await loadEmployeePositionsFromSupabase();
-    }
-
-    await populateEmployeeSelectFromOrg();
-    await populatePositionSelect();
-
-    if (typeof window.kitchenTasks === 'undefined') window.kitchenTasks = [];
-
-    const { data: tasks, error } = await window.supabaseClient
-        .from('tasks')
-        .select('*')
-        .eq('org_id', window.ORG_ID);
-
-    if (error) { console.warn('[Supabase] Task load failed:', error.message); return; }
-    const nextKitchenTasks = [];
-    (tasks || []).forEach(task => {
-        if (schedulingTaskRowCompleted(task)) return;
-        const nameKey =
-            (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
-            || task.employee_name
-            || task.assigned_to
-            || null;
-        const mappedName = nameKey
-            ? ((typeof window.getEmployeeDisplayName === 'function'
-                ? window.getEmployeeDisplayName(nameKey)
-                : null) || nameKey)
-            : 'Unassigned';
-        const kt = {
-            assignee: mappedName,
-            description: task.text,
-            timestamp: task.created_at,
-            completed: false,
-            supabase_id: task.id
-        };
-        if (task.shift_id) kt.shift_id = task.shift_id;
-        nextKitchenTasks.push(kt);
-    });
-
-    nextKitchenTasks.sort((a, b) => (Number(a.supabase_id) || 0) - (Number(b.supabase_id) || 0));
-    window.kitchenTasks = nextKitchenTasks;
-    localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-    if (typeof loadStoredTasks === 'function') loadStoredTasks();
-
-    if (document.getElementById('schedule-matrix') && typeof updateScheduleMatrixAndSync === 'function') {
-        void updateScheduleMatrixAndSync();
-    }
-});
+// Tasks are not loaded for the whole org on boot. Open shift cards query by shift_id
+// (see loadExistingTasksForEmployee). There is no separate Tasks page on this screen.

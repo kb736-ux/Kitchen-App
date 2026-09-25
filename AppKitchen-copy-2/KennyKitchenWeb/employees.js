@@ -112,6 +112,21 @@ const positionResponsibilities = {};
 // Structure: { "Rohan": ["Server", "Bartend"], "Kenny": ["Server"], ... }
 
 async function loadEmployeePositionsFromSupabase() {
+    // Scheduling boot and this file's supabase-ready listener both call this on the
+    // same tick. Share one request so the roster (including shift-name fold-in) runs once.
+    if (loadEmployeePositionsFromSupabase._inflight) {
+        return loadEmployeePositionsFromSupabase._inflight;
+    }
+    const pending = loadEmployeePositionsFromSupabaseUncoalesced();
+    loadEmployeePositionsFromSupabase._inflight = pending;
+    try {
+        return await pending;
+    } finally {
+        loadEmployeePositionsFromSupabase._inflight = null;
+    }
+}
+
+async function loadEmployeePositionsFromSupabaseUncoalesced() {
     if (!window.supabaseClient || !window.ORG_ID) return null;
     window._profileBackedEmployeeNames = new Set();
 
