@@ -15,6 +15,7 @@
 })(typeof window !== 'undefined' ? window : globalThis, function () {
   const SHIFT_END_GRACE_MS = 30 * 60 * 1000;
   const NO_SHIFT_OPEN_MS = 12 * 60 * 60 * 1000;
+  const WEEKLY_REGULAR_HOURS = 40;
   const NOTE_MISSING = 'Missing clock-out';
   const NOTE_OPEN = 'Still clocked in';
 
@@ -199,10 +200,24 @@
     return false;
   }
 
-  function closedHours(inAt, outAt) {
-    const ms = new Date(outAt).getTime() - new Date(inAt).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return null;
-    return Math.round((ms / 3600000) * 100) / 100;
+  /** Visible timesheet week: weekStart local midnight, exclusive end seven calendar days later. */
+  function weekRange(weekStart) {
+    const start = new Date(weekStart);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+    return { start, end };
+  }
+
+  /** Closed-punch hours that fall inside the workweek. Open punches are not passed here. */
+  function hoursInWeek(inAt, outAt, weekStart, weekEnd) {
+    const a = new Date(inAt).getTime();
+    const b = new Date(outAt).getTime();
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+    const start = Math.max(a, weekStart.getTime());
+    const end = Math.min(b, weekEnd.getTime());
+    if (end <= start) return 0;
+    return Math.round(((end - start) / 3600000) * 100) / 100;
   }
 
   function formatExportHours(hours) {
@@ -234,7 +249,7 @@
         if (missingClockOut) note = NOTE_MISSING;
         else if (open) note = NOTE_OPEN;
         const hours = pair.in && pair.out
-          ? closedHours(pair.in.punched_at, pair.out.punched_at)
+          ? hoursInWeek(pair.in.punched_at, pair.out.punched_at, start, end)
           : null;
         return {
           pair,
@@ -280,25 +295,69 @@
     return lines.join('\n');
   }
 
-  function totalsCsv(rows) {
-    const byName = new Map();
-    (rows || []).forEach((row) => {
-      const key = row.employee || 'Staff';
-      if (!byName.has(key)) byName.set(key, { hours: 0, hasHours: false, missing: 0 });
-      const bucket = byName.get(key);
-      if (row.hours != null && Number.isFinite(Number(row.hours))) {
-        bucket.hours += Number(row.hours);
-        bucket.hasHours = true;
-      }
-      if (row.missingClockOut) bucket.missing += 1;
+  /**
+   * Oregon-style weekly overtime for the timesheet workweek (Monday 00:00 through
+   * the next Monday). No daily overtime. Open punches are excluded so a missing
+   * clock-out cannot add hours. Returns one row per employee.
+   */
+  function computeHours(punches, weekStart, opts = {}) {
+    const { start, end } = weekRange(weekStart);
+    const rows = buildTimesheetRows({
+      punches,
+      shifts: opts.shifts || [],
+      weekStart: start,
+      weekEnd: end,
+      now: opts.now || new Date(),
     });
-    const lines = [['Employee', 'Hours', 'Missing clock-outs'].join(',')];
-    [...byName.keys()].sort().forEach((name) => {
-      const bucket = byName.get(name);
+    const buckets = new Map();
+    rows.forEach((row) => {
+      const anchor = row.pair.in || row.pair.out;
+      const key = employeeKey(anchor);
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          employee: row.employee,
+          totalHours: 0,
+          hasClosed: false,
+          missingClockOut: false,
+        });
+      }
+      const bucket = buckets.get(key);
+      bucket.employee = row.employee || bucket.employee;
+      if (row.missingClockOut) bucket.missingClockOut = true;
+      if (!row.open && row.hours != null) {
+        bucket.totalHours += row.hours;
+        bucket.hasClosed = true;
+      }
+    });
+    return [...buckets.values()].map((bucket) => {
+      if (!bucket.hasClosed) {
+        return {
+          employee: bucket.employee,
+          totalHours: null,
+          regularHours: null,
+          overtimeHours: null,
+          missingClockOut: bucket.missingClockOut,
+        };
+      }
+      const totalHours = Math.round(bucket.totalHours * 100) / 100;
+      return {
+        employee: bucket.employee,
+        totalHours,
+        regularHours: Math.round(Math.min(totalHours, WEEKLY_REGULAR_HOURS) * 100) / 100,
+        overtimeHours: Math.round(Math.max(0, totalHours - WEEKLY_REGULAR_HOURS) * 100) / 100,
+        missingClockOut: bucket.missingClockOut,
+      };
+    }).sort((a, b) => a.employee.localeCompare(b.employee));
+  }
+
+  function totalsCsv(punches, weekStart, opts) {
+    const lines = [['Employee', 'Regular hours', 'Overtime hours', 'Missing clock-out'].join(',')];
+    computeHours(punches, weekStart, opts).forEach((row) => {
       lines.push([
-        name,
-        bucket.hasHours ? formatExportHours(Math.round(bucket.hours * 100) / 100) : '',
-        String(bucket.missing),
+        row.employee,
+        formatExportHours(row.regularHours),
+        formatExportHours(row.overtimeHours),
+        row.missingClockOut ? NOTE_MISSING : '',
       ].map(csvEscape).join(','));
     });
     return lines.join('\n');
@@ -309,6 +368,9 @@
     NO_SHIFT_OPEN_MS,
     NOTE_MISSING,
     NOTE_OPEN,
+    WEEKLY_REGULAR_HOURS,
+    hoursInWeek,
+    computeHours,
     parseLocalDateTime,
     shiftEndDate,
     scheduledShiftEnd,

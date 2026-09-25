@@ -7,6 +7,10 @@
   const LOOKBACK_MS = 45 * 24 * 60 * 60 * 1000;
   let visibleWeekStart = mondayOf(new Date());
   let currentRows = [];
+  let loadedPunches = [];
+  let loadedShifts = [];
+  let loadedWeekStart = null;
+  let loadedNow = null;
   let editing = null;
   let uiBound = false;
 
@@ -112,6 +116,29 @@
     });
   }
 
+  function renderHours(totals) {
+    const wrap = document.getElementById('timesheet-hours');
+    const body = document.getElementById('timesheet-hours-body');
+    const api = window.MissingClockOut;
+    if (!wrap || !body || !api) return;
+    wrap.hidden = !totals.length;
+    body.innerHTML = '';
+    totals.forEach((row) => {
+      const tr = document.createElement('tr');
+      if (row.missingClockOut) tr.className = 'timesheet-row timesheet-row-missing';
+      const regular = row.regularHours == null ? '—' : api.formatExportHours(row.regularHours);
+      const overtime = row.overtimeHours == null ? '—' : api.formatExportHours(row.overtimeHours);
+      const note = row.missingClockOut ? api.NOTE_MISSING : '';
+      tr.innerHTML = `
+        <td>${escapeHtml(row.employee)}</td>
+        <td>${escapeHtml(regular)}</td>
+        <td>${escapeHtml(overtime)}</td>
+        <td class="${row.missingClockOut ? 'timesheet-note-missing' : ''}">${escapeHtml(note)}</td>
+      `;
+      body.appendChild(tr);
+    });
+  }
+
   function downloadCsv(filename, text) {
     const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -139,8 +166,11 @@
 
   function exportTotals() {
     const api = window.MissingClockOut;
-    if (!api || !confirmExport()) return;
-    downloadCsv(`sheek-timesheet-totals-${ymd(visibleWeekStart)}.csv`, api.totalsCsv(currentRows));
+    if (!api || !loadedWeekStart || !confirmExport()) return;
+    downloadCsv(
+      `sheek-timesheet-totals-${ymd(visibleWeekStart)}.csv`,
+      api.totalsCsv(loadedPunches, loadedWeekStart, { shifts: loadedShifts, now: loadedNow }),
+    );
   }
 
   function showEditError(message) {
@@ -331,7 +361,9 @@
     if (punchRes.error) {
       console.warn('[Clock] punches:', punchRes.error.message);
       currentRows = [];
+      loadedPunches = [];
       renderRows([]);
+      renderHours([]);
       if (empty) {
         empty.style.display = 'block';
         empty.textContent = punchRes.error.message.includes('time_punches')
@@ -344,15 +376,24 @@
       console.warn('[Clock] shifts:', shiftRes.error.message);
     }
 
+    loadedPunches = punchRes.data || [];
+    loadedShifts = shiftRes.error ? [] : (shiftRes.data || []);
+    loadedWeekStart = weekStart;
+    loadedNow = new Date();
     currentRows = api.buildTimesheetRows({
-      punches: punchRes.data || [],
-      shifts: shiftRes.error ? [] : (shiftRes.data || []),
+      punches: loadedPunches,
+      shifts: loadedShifts,
       weekStart,
       weekEnd,
-      now: new Date(),
+      now: loadedNow,
+    });
+    const totals = api.computeHours(loadedPunches, loadedWeekStart, {
+      shifts: loadedShifts,
+      now: loadedNow,
     });
     if (empty) empty.textContent = 'No punches this week.';
     renderRows(currentRows);
+    renderHours(totals);
   }
 
   window.kkLoadManagerPunches = loadManagerPunches;
