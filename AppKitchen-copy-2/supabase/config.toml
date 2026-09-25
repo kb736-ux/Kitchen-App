@@ -1,5 +1,5 @@
 # Supabase CLI — https://supabase.com/docs/guides/cli
-# Run from repo: supabase functions deploy stripe-checkout stripe-portal stripe-webhook stripe-onboard-checkout onboard-complete-signup invite-employee publish-week
+# Run from repo: supabase functions deploy stripe-checkout stripe-portal stripe-webhook stripe-onboard-checkout onboard-complete-signup invite-employee
 
 [functions.stripe-checkout]
 verify_jwt = true
@@ -23,8 +23,4 @@ verify_jwt = false
 
 # Manager sends employee invite (Admin API invite email → set password)
 [functions.invite-employee]
-verify_jwt = true
-
-# Manager publishes a week and emails staff whose shifts changed (Resend).
-[functions.publish-week]
 verify_jwt = true
