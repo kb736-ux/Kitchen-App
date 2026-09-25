@@ -15,18 +15,7 @@ import ChatPage from './components/ChatPage';
 import ProfilePage from './components/ProfilePage';
 import OrgPickerModal from './components/OrgPickerModal';
 import { supabase, getOrgId, listOrgsForCurrentUser, switchToOrg } from './utils/supabase';
-import { ShiftMatching } from './utils/shiftMatching';
-import {
-  TASK_LIST_COLUMNS,
-  TASK_LIST_LIMIT,
-  URGENT_TASK_COLUMNS,
-  URGENT_TASK_LIMIT,
-  SHIFT_CARD_COLUMNS,
-  TODAY_SHIFT_LIMIT,
-  UPCOMING_SHIFT_LIMIT,
-  employeeOrFilter,
-  taskIsCompleted,
-} from './utils/expoHotpathQueries';
+import { ShiftMatching, shiftRowMatchesEmployee } from './utils/shiftMatching';
 import { applyTaskCompletionToInventory } from './utils/inventorySync';
 import { EmployeeProvider, useEmployee } from './EmployeeContext';
 import LoginScreen from './LoginScreen';
@@ -274,39 +263,79 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
   const orgIdRef = useRef(orgId);
   orgIdRef.current = orgId;
   const chatSeenAtRef = useRef(null);
-  const identityRef = useRef({});
-  const taskFetchSeq = useRef(0);
-  const shiftFetchSeq = useRef(0);
-  identityRef.current = {
-    employeeId,
-    authUserId,
-    email,
-    employeeName,
-    displayName,
-    defaultEmployeeName,
-    firstName,
-    lastName,
-    profileData,
-  };
 
-  function signedInIdentity() {
-    return identityRef.current;
+  const myNameKeys = () =>
+    new Set(
+      [employeeName, displayName, profileData?.displayName, (email || '').split('@')[0], email]
+        .map(v => (v || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+  const myLooseNameKeys = () =>
+    new Set(
+      [employeeName, displayName, profileData?.displayName, (email || '').split('@')[0], email]
+        .map(v => (v || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
+        .filter(Boolean)
+    );
+
+  function buildVerifiedIdentity(profileRows = []) {
+    const authEmail = String(email || '').trim().toLowerCase();
+    const emailLocal = authEmail.split('@')[0] || '';
+    const baseNames = [employeeName, defaultEmployeeName, emailLocal]
+      .map((n) => (n || '').trim())
+      .filter(Boolean);
+
+    const verifiedProfiles = (profileRows || []).filter((p) => {
+      const pEmail = String(p?.email || '').trim().toLowerCase();
+      const pEmp = String(p?.employee_name || '').trim().toLowerCase();
+      if (authUserId && p?.user_id && String(p.user_id) === String(authUserId)) return true;
+      if (employeeId && p?.id && String(p.id) === String(employeeId)) return true;
+      if (authEmail && pEmail && pEmail === authEmail) return true;
+      if (employeeName && pEmp && pEmp === String(employeeName).trim().toLowerCase()) return true;
+      if (emailLocal && pEmp && pEmp === emailLocal) return true;
+      return false;
+    });
+
+    const derivedNames = [];
+    verifiedProfiles.forEach((p) => {
+      const first = (p?.first_name || '').trim();
+      const last = (p?.last_name || '').trim();
+      const combined = [first, last].filter(Boolean).join(' ').trim();
+      derivedNames.push(
+        p?.employee_name || '',
+        p?.display_name || '',
+        first,
+        last,
+        combined
+      );
+    });
+
+    const originalNames = Array.from(
+      new Set([...baseNames, ...derivedNames].map((n) => (n || '').trim()).filter(Boolean))
+    );
+
+    return {
+      profileIds: new Set(
+        verifiedProfiles.map((p) => p?.id).filter(Boolean)
+      ),
+      originalNames,
+      lowerNames: new Set(originalNames.map((n) => n.toLowerCase())),
+    };
   }
 
   async function fetchTaskNotifCount(oid) {
     if (!oid) return;
-    const { employeeId: myId, employeeName: myName } = signedInIdentity();
     let query = supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
       .eq('org_id', oid)
       .eq('type', 'task_assigned')
       .eq('read', false);
-
-    if (myId) {
-      query = query.eq('employee_id', myId);
+      
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId);
     } else {
-      query = query.eq('employee_name', myName);
+      query = query.eq('employee_name', employeeName);
     }
 
     const { count, error } = await query;
@@ -442,22 +471,21 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         }));
       } catch (_) {}
     })();
-  }, [email]);
+  }, [email, displayName, employeeName]);
 
   async function markTaskNotifsRead(oid) {
     if (!oid) return;
-    const { employeeId: myId, employeeName: myName } = signedInIdentity();
     let query = supabase
       .from('notifications')
       .select('id')
       .eq('org_id', oid)
       .eq('type', 'task_assigned')
       .eq('read', false);
-
-    if (myId) {
-      query = query.eq('employee_id', myId);
+      
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId);
     } else {
-      query = query.eq('employee_name', myName);
+      query = query.eq('employee_name', employeeName);
     }
 
     const { data } = await query;
@@ -465,20 +493,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       await supabase.from('notifications').update({ read: true }).in('id', data.map(n => n.id));
       setTaskNotifCount(0);
     }
-  }
-
-  /** Exists-check: one row newer than seenAt. Falls back if the self-exclusion column is missing. */
-  async function rowExistsAfter(table, oid, seenAt, excludeColumn) {
-    const { employeeId: myId } = signedInIdentity();
-    const base = () =>
-      supabase.from(table).select('id').eq('org_id', oid).gt('created_at', seenAt).limit(1);
-    if (myId && excludeColumn) {
-      const filtered = await base().or(`${excludeColumn}.is.null,${excludeColumn}.neq.${myId}`);
-      if (!filtered.error) return (filtered.data || []).length > 0;
-    }
-    const plain = await base();
-    if (plain.error) return null;
-    return (plain.data || []).length > 0;
   }
 
   async function fetchChatUnreadDot(oid) {
@@ -494,12 +508,41 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       return;
     }
 
-    const [hasAnn, hasMsg] = await Promise.all([
-      rowExistsAfter('announcements', oid, seenAt, 'created_by_id'),
-      rowExistsAfter('messages', oid, seenAt, 'employee_id'),
+    const [annRes, msgRes] = await Promise.all([
+      supabase
+        .from('announcements')
+        .select('created_at, created_by, created_by_id')
+        .eq('org_id', oid)
+        .order('created_at', { ascending: false })
+        .limit(120),
+      supabase
+        .from('messages')
+        .select('created_at, sender, employee_id')
+        .eq('org_id', oid)
+        .order('created_at', { ascending: false })
+        .limit(200),
     ]);
-    if (hasAnn == null && hasMsg == null) return;
-    setChatUnreadDot(hasAnn === true || hasMsg === true);
+
+    const names = myNameKeys();
+    const looseNames = myLooseNameKeys();
+    const isMine = (row) => {
+      if (employeeId && row?.employee_id && row.employee_id === employeeId) return true;
+      const sender = String(row?.sender || row?.created_by || '').trim().toLowerCase();
+      const senderLoose = sender.replace(/[^a-z0-9]/g, '');
+      return names.has(sender) || looseNames.has(senderLoose);
+    };
+    const hasUnreadAnn = (annRes.data || []).some((a) => {
+      const ts = Date.parse(a.created_at || '');
+      if (Number.isNaN(ts) || ts <= seenMs) return false;
+      if (employeeId && a?.created_by_id && a.created_by_id === employeeId) return false;
+      return !isMine(a);
+    });
+    const hasUnreadMsg = (msgRes.data || []).some((m) => {
+      const ts = Date.parse(m.created_at || '');
+      if (Number.isNaN(ts) || ts <= seenMs) return false;
+      return !isMine(m);
+    });
+    setChatUnreadDot(hasUnreadAnn || hasUnreadMsg);
   }
 
   async function markScheduleNotifsRead(oid) {
@@ -511,11 +554,10 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       .eq('org_id', oid)
       .in('type', scheduleTypes)
       .eq('read', false);
-    const { employeeId: myId, employeeName: myName } = signedInIdentity();
-    if (myId) {
-      query = query.or(`employee_id.eq.${myId},employee_id.is.null`);
-    } else if (myName) {
-      query = query.or(`employee_name.eq.${myName},employee_name.is.null`);
+    if (employeeId) {
+      query = query.or(`employee_id.eq.${employeeId},employee_id.is.null`);
+    } else if (employeeName) {
+      query = query.or(`employee_name.eq.${employeeName},employee_name.is.null`);
     }
     const { data } = await query;
     if (data?.length) {
@@ -532,11 +574,10 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       .eq('org_id', oid)
       .in('type', scheduleTypes)
       .eq('read', false);
-    const { employeeId: myId, employeeName: myName } = signedInIdentity();
-    if (myId) {
-      query = query.or(`employee_id.eq.${myId},employee_id.is.null`);
-    } else if (myName) {
-      query = query.or(`employee_name.eq.${myName},employee_name.is.null`);
+    if (employeeId) {
+      query = query.or(`employee_id.eq.${employeeId},employee_id.is.null`);
+    } else if (employeeName) {
+      query = query.or(`employee_name.eq.${employeeName},employee_name.is.null`);
     }
     const { count, error } = await query;
     if (!error) setScheduleUnreadDot((count || 0) > 0);
@@ -554,7 +595,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     setScheduleUnreadDot(false);
   }
 
-  // ── Boot: load org, badges, profile, push token. Tasks/shifts wait for employeeId.
+  // ── Boot: load org, fetch tasks, register push token ──────────────────────
   useEffect(() => {
     async function boot() {
       const oid = await getOrgId();
@@ -580,7 +621,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
             console.log('[Boot] shift_requests RLS test:', srRows?.length ?? 0, 'rows', srErr ? `ERROR: ${srErr.message}` : 'OK');
             if (srErr) console.warn('[Boot] shift_requests ERROR detail:', srErr.message, srErr.hint || '', srErr.code || '');
             if (srRows?.length > 0) console.log('[Boot] shift_requests sample:', JSON.stringify(srRows[0]));
-            const { data: taskRows, error: taskErr } = await supabase.from('tasks').select(TASK_LIST_COLUMNS).eq('org_id', oid).limit(8);
+            const { data: taskRows, error: taskErr } = await supabase.from('tasks').select('*').eq('org_id', oid).limit(8);
             console.log('[Boot] tasks RLS test:', taskRows?.length ?? 0, 'rows', taskErr ? `ERROR: ${taskErr.message}` : 'OK');
             if (taskErr) console.warn('[Boot] tasks ERROR detail:', taskErr.message, taskErr.hint || '', taskErr.code || '');
             if (taskRows?.length > 0) {
@@ -596,6 +637,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       if (oid) {
         if (!chatSeenAtRef.current) chatSeenAtRef.current = new Date().toISOString();
         void Promise.all([
+          fetchTasks(oid),
           fetchTaskNotifCount(oid),
           fetchProfileData(oid),
           fetchChatUnreadDot(oid),
@@ -633,7 +675,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       notificationListener.current?.remove();
       responseListener.current?.remove();
     };
-  }, [email]);
+  }, [employeeName, email]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -657,7 +699,7 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       fetchScheduleUnreadDot(orgId);
     }, 10000);
     return () => clearInterval(id);
-  }, [orgId]);
+  }, [orgId, employeeId, employeeName, displayName, email]);
 
   useEffect(() => {
     let cancelled = false;
@@ -676,90 +718,111 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     return () => { cancelled = true; };
   }, [orgId, identityVersion]);
 
-  function mapTaskRow(t, completed) {
-    return {
-      id: t.id,
-      text: t.text,
-      completed,
-      is_urgent: t.is_urgent ?? false,
-      status: t.status,
-      created_at: t.created_at || null,
-      completed_at: t.completed_at || null,
-      shift_id: t.shift_id || null,
-      employee_name: t.employee_name || null,
-      employee_id: t.employee_id || null,
-    };
-  }
-
-  function myEmployeeOrFilter() {
-    const idn = signedInIdentity();
-    if (!idn.employeeId) return '';
-    const names = ShiftMatching.collectNameCandidates(idn, []);
-    return employeeOrFilter([idn.employeeId, idn.authUserId], names);
-  }
-
   // ── Fetch tasks from Supabase ─────────────────────────────────────────────
-  // Tasks UI is still Home + Tasks tab. Scope to this employee; do not select('*').
   async function fetchTasks(oid) {
     if (!oid) {
       console.warn('[Tasks] No orgId — cannot fetch');
       return;
     }
-    const idn = signedInIdentity();
-    if (!idn.employeeId) return;
-    const names = ShiftMatching.collectNameCandidates(idn, []);
-    const ids = [idn.employeeId, idn.authUserId];
-    const orFilter = employeeOrFilter(ids, names, ['assigned_to']);
-    if (!orFilter) return;
-    const seq = ++taskFetchSeq.current;
 
-    const mineQuery = (filter) =>
-      supabase
-        .from('tasks')
-        .select(TASK_LIST_COLUMNS)
-        .eq('org_id', oid)
-        .or(filter)
-        .order('created_at', { ascending: false })
-        .limit(TASK_LIST_LIMIT);
-
-    const [firstMine, urgentRes] = await Promise.all([
-      mineQuery(orFilter),
-      supabase
-        .from('tasks')
-        .select(URGENT_TASK_COLUMNS)
-        .eq('org_id', oid)
-        .eq('is_urgent', true)
-        .neq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .limit(URGENT_TASK_LIMIT),
+    const [{ data: profiles }, { data, error }] = await Promise.all([
+      supabase.from('profiles').select('id, employee_name, display_name, first_name, last_name, email, user_id').eq('org_id', oid),
+      supabase.from('tasks').select('*').eq('org_id', oid).order('created_at', { ascending: true }),
     ]);
 
-    let mineRes = firstMine;
-    if (mineRes.error && /assigned_to/i.test(mineRes.error.message || '')) {
-      mineRes = await mineQuery(employeeOrFilter(ids, names));
-    }
+    const identity = buildVerifiedIdentity(profiles || []);
+    const nameCandidates = Array.from(identity.lowerNames);
+    const taskNameCandidates = identity.originalNames;
 
-    if (taskFetchSeq.current !== seq) return;
+    const profileById = {};
+    const myProfileIds = new Set(identity.profileIds);
+    (profiles || []).forEach((p) => {
+      if (!p?.id) return;
+      profileById[p.id] = p;
+    });
+    if (employeeId) myProfileIds.add(employeeId);
 
-    if (mineRes.error) {
-      console.warn('[Tasks] Fetch failed:', mineRes.error.message);
+    if (error) {
+      console.warn('[Tasks] Fetch failed:', error.message);
       setTasks([]);
-    } else {
-      const mine = (mineRes.data || [])
-        .map((t) => mapTaskRow(t, taskIsCompleted(t)))
-        .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-      setTasks(mine);
-      if (__DEV__) console.log('[Tasks] fetched', mine.length, 'mine (limit', TASK_LIST_LIMIT + ')');
+      return;
     }
 
-    if (urgentRes.error) {
-      console.warn('[Tasks] Urgent fetch failed:', urgentRes.error.message);
-    } else {
-      const urgentAll = (urgentRes.data || [])
-        .filter((t) => !taskIsCompleted(t))
-        .map((t) => ({ ...mapTaskRow(t, false), is_urgent: true }));
-      setHomeUrgentTasks(urgentAll);
+    const all = data || [];
+    const isTaskCompleted = (t) => {
+      const normalizedStatus = (t?.status || '').toString().trim().toLowerCase();
+      if (normalizedStatus === 'completed' || normalizedStatus === 'complete' || normalizedStatus === 'done' || normalizedStatus === 'archived' || normalizedStatus === 'cancelled') {
+        return true;
+      }
+      if (t?.completed === true) return true;
+      if (t?.completed_at) return true;
+      return false;
+    };
+    const mine = all
+      .filter((t) => {
+        const assignedId = t.employee_id || t.assigned_to || null;
+        if (assignedId && myProfileIds.has(assignedId)) return true;
+        if (assignedId && employeeId && String(assignedId) === String(employeeId)) return true;
+        if (assignedId && authUserId && String(assignedId) === String(authUserId)) return true;
+        const assignedNameRaw = (t.employee_name || t.assignee || '').trim();
+        if (!assignedNameRaw) return false;
+        if (nameCandidates.includes(assignedNameRaw.toLowerCase())) return true;
+        return shiftRowMatchesEmployee(
+          { employee_name: assignedNameRaw, employee_id: assignedId },
+          employeeId,
+          taskNameCandidates,
+          authUserId
+        );
+      })
+      .map(t => {
+        const assignedId = t.employee_id || t.assigned_to || null;
+        const profile = assignedId ? profileById[assignedId] : null;
+        return {
+          id: t.id,
+          text: t.text,
+          completed: isTaskCompleted(t),
+          is_urgent: t.is_urgent ?? false,
+          status: t.status,
+          created_at: t.created_at || null,
+          completed_at: t.completed_at || null,
+          shift_id: t.shift_id || null,
+          employee_name: t.employee_name || profile?.display_name || profile?.employee_name || null,
+          employee_id: assignedId,
+        };
+      });
+
+    setTasks(mine);
+
+    if (__DEV__) {
+      console.log(
+        '[Tasks] fetched',
+        all.length,
+        'rows →',
+        mine.length,
+        'mine | nameCandidates:',
+        nameCandidates.slice(0, 6),
+        'myProfileIds:',
+        myProfileIds.size
+      );
     }
+
+    // Home urgent card should mirror web: org-wide urgent tasks (not only my assigned tasks)
+    const urgentAll = all
+      .filter(t => !isTaskCompleted(t) && !!t.is_urgent)
+      .map(t => {
+        const assignedId = t.employee_id || t.assigned_to || null;
+        const profile = assignedId ? profileById[assignedId] : null;
+        return {
+          id: t.id,
+          text: t.text,
+          completed: false,
+          is_urgent: true,
+          status: t.status,
+          employee_name: t.employee_name || profile?.display_name || profile?.employee_name || null,
+          employee_id: assignedId,
+        };
+      });
+    setHomeUrgentTasks(urgentAll);
   }
 
   /** Parse shift start/end as local Date; extend end to next calendar day if overnight. */
@@ -772,41 +835,48 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
     return { start, end };
   }
 
-  function myShiftQuery(oid) {
-    const orFilter = myEmployeeOrFilter();
-    let query = supabase.from('shifts').select(SHIFT_CARD_COLUMNS).eq('org_id', oid);
-    if (orFilter) query = query.or(orFilter);
-    return { query, orFilter };
-  }
-
   // ── Fetch today's shift + next upcoming shift for this employee ───────────
   async function checkTodayShift(oid) {
     if (!oid) return;
-    const idn = signedInIdentity();
-    if (!idn.employeeId) return;
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    const candidateNames = ShiftMatching.collectNameCandidates(idn, []);
-    const knownIds = ShiftMatching.profileIdsForMember([], {
-      employeeId: idn.employeeId,
-      authUserId: idn.authUserId,
+    const { data: profileRows } = await supabase
+      .from('profiles')
+      .select('id, employee_name, display_name, first_name, last_name, email, user_id')
+      .eq('org_id', oid);
+    const candidateNames = ShiftMatching.collectNameCandidates(
+      {
+        employeeId,
+        authUserId,
+        email,
+        employeeName,
+        displayName,
+        defaultEmployeeName,
+        firstName,
+        lastName,
+        profileData,
+      },
+      profileRows || []
+    );
+    const knownIds = ShiftMatching.profileIdsForMember(profileRows || [], {
+      employeeId,
+      authUserId,
     });
-    const matchesMe = (s) =>
-      ShiftMatching.rowMatchesEmployee(s, idn.employeeId, candidateNames, idn.authUserId, knownIds);
 
-    const todayBuilt = myShiftQuery(oid);
-    if (!todayBuilt.orFilter) return;
-    const seq = ++shiftFetchSeq.current;
-    const { data: shiftsToday, error: errToday } = await todayBuilt.query
-      .eq('shift_date', todayStr)
-      .limit(TODAY_SHIFT_LIMIT);
+    const { data: shiftsToday, error: errToday } = await supabase
+      .from('shifts')
+      .select('*')
+      .eq('org_id', oid)
+      .eq('shift_date', todayStr);
 
     if (errToday && __DEV__) {
       console.warn('[Shifts] today query:', errToday.message);
     }
 
-    const myToday = (shiftsToday || []).filter(matchesMe);
+    const myToday = (shiftsToday || []).filter((s) =>
+      ShiftMatching.rowMatchesEmployee(s, employeeId, candidateNames, authUserId, knownIds)
+    );
     const nowMs = Date.now();
     const stillRelevant = myToday.filter((s) => {
       const b = shiftTimeBounds(s);
@@ -820,7 +890,6 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       return ba.start.getTime() - bb.start.getTime();
     });
     const todayData = stillRelevant[0] || null;
-    if (shiftFetchSeq.current !== seq) return;
 
     if (todayData?.id && todayData.shift_date && todayData.start_time && todayData.end_time) {
       const { data: siblingRows } = await supabase
@@ -832,37 +901,78 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
         .eq('end_time', todayData.end_time)
         .eq('employee_name', todayData.employee_name || '');
       const relatedShiftIds = [...new Set((siblingRows || []).map((s) => String(s.id)).filter(Boolean))];
-      if (shiftFetchSeq.current !== seq) return;
       setTodayShift({ ...todayData, related_shift_ids: relatedShiftIds });
     } else {
       setTodayShift(todayData);
     }
 
     if (!todayData) {
-      const upcomingBuilt = myShiftQuery(oid);
-      const { data: upcoming, error: errUp } = await upcomingBuilt.query
+      const { data: upcoming, error: errUp } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('org_id', oid)
         .gt('shift_date', todayStr)
-        .order('shift_date', { ascending: true })
-        .limit(UPCOMING_SHIFT_LIMIT);
+        .order('shift_date', { ascending: true });
 
       if (errUp && __DEV__) {
         console.warn('[Shifts] upcoming query:', errUp.message);
       }
 
-      const nextData = (upcoming || []).find(matchesMe) || null;
-      if (shiftFetchSeq.current !== seq) return;
+      const nextData =
+        (upcoming || []).find((s) =>
+          ShiftMatching.rowMatchesEmployee(s, employeeId, candidateNames, authUserId, knownIds)
+        ) || null;
+
       setNextShift(nextData);
     } else {
       setNextShift(null);
     }
   }
 
-  // One fetch once this employee is known. Name hydration must not refetch.
+  // Re-resolve shifts after profile/org identity is ready (boot used to run checkTodayShift too early).
   useEffect(() => {
-    if (!orgId || booting || authLoading || !employeeId) return;
-    fetchTasks(orgId);
+    if (!orgId || booting || authLoading) return;
     checkTodayShift(orgId);
-  }, [orgId, booting, authLoading, employeeId]);
+  }, [
+    orgId,
+    booting,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    defaultEmployeeName,
+    email,
+    firstName,
+    lastName,
+    profileData.displayName,
+    profileData.firstName,
+    profileData.lastName,
+    profileData.employeeNameFromProfile,
+  ]);
+
+  // Refetch when identity or profile changes — boot runs fetchTasks in parallel with fetchProfileData,
+  // so the first run often had incomplete name candidates; this effect must re-run after profile loads.
+  useEffect(() => {
+    if (!orgId || booting || authLoading) return;
+    fetchTasks(orgId);
+  }, [
+    orgId,
+    booting,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    email,
+    defaultEmployeeName,
+    firstName,
+    lastName,
+    profileData.displayName,
+    profileData.employeeNameFromProfile,
+    profileData.firstName,
+    profileData.lastName,
+  ]);
 
   // ── Toggle task complete / incomplete ──────────────────────────────────────
   const toggleTask = async (taskId) => {
@@ -1019,11 +1129,13 @@ function MainApp({ bumpEmployeeIdentity, identityVersion = 0 }) {
       orgIdRef.current = newOrgId;
       if (newOrgId) {
         void Promise.all([
+          fetchTasks(newOrgId),
           fetchTaskNotifCount(newOrgId),
           fetchProfileData(newOrgId),
           fetchChatUnreadDot(newOrgId),
           fetchScheduleUnreadDot(newOrgId),
         ]);
+        checkTodayShift(newOrgId);
         void registerForPushNotifications(newOrgId, employeeName, email);
       }
     } catch (e) {

@@ -96,24 +96,54 @@ const HomePage = ({
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   useEffect(() => {
-    if (!orgId || authLoading || !employeeId) return;
+    if (!orgId || authLoading) return;
     fetchWeekShifts();
     fetchApprovedTimeOffWeek();
     fetchAnnouncements();
     fetchRecentRequests();
     fetchNewShiftNotifCount();
-  }, [orgId, authLoading, employeeId]);
+  }, [
+    orgId,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    email,
+    firstName,
+    lastName,
+    defaultEmployeeName,
+    profileData?.displayName,
+    profileData?.employeeNameFromProfile,
+    profileData?.firstName,
+    profileData?.lastName,
+  ]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && orgId && employeeId) {
+      if (state === 'active' && orgId) {
         fetchNewShiftNotifCount();
         fetchRecentRequests();
         fetchApprovedTimeOffWeek();
       }
     });
     return () => sub?.remove();
-  }, [orgId, employeeId]);
+  }, [
+    orgId,
+    authLoading,
+    authUserId,
+    employeeId,
+    employeeName,
+    displayName,
+    email,
+    firstName,
+    lastName,
+    defaultEmployeeName,
+    profileData?.displayName,
+    profileData?.employeeNameFromProfile,
+    profileData?.firstName,
+    profileData?.lastName,
+  ]);
 
   async function fetchNewShiftNotifCount() {
     if (!orgId) return;
