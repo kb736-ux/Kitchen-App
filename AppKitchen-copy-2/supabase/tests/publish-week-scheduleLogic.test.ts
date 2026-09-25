@@ -46,12 +46,31 @@ test("one person with two shifts is one email recipient", () => {
     rangeLabel: "Sep 21–Sep 27",
     appUrl: "https://sheekapp.com",
   });
+  assert.equal(message.subject, "Your shifts at Kenny's · Sep 21");
   assert.match(message.html, /Get the Sheek app/);
   assert.match(message.html, /Scheduled with Sheek/);
   assert.match(message.text, /Mon, Sep 21 · 9 AM–5 PM · Line Cook/);
   assert.match(message.text, /Tue, Sep 22 · 4 PM–10 PM · Server/);
   assert.match(message.html, /Kenny&#39;s|Kenny's/);
   assert.equal(message.html.includes("<script"), false);
+
+  const weekOfSep28 = weekRangeLabel("2026-09-28");
+  assert.equal(weekOfSep28, "Sep 28–Oct 4");
+  const fallback = buildMessage({
+    person: { ...adaPerson, kind: "new" },
+    orgName: "  ",
+    rangeLabel: weekOfSep28,
+    appUrl: "https://sheekapp.com",
+  });
+  assert.equal(fallback.subject, "Your shifts this week · Sep 28");
+  const removed = buildMessage({
+    person: { ...adaPerson, kind: "cleared", shifts: [] },
+    orgName: "Kenny's",
+    rangeLabel: weekOfSep28,
+    appUrl: "https://sheekapp.com",
+  });
+  assert.equal(removed.subject, "Your shifts at Kenny's changed · Sep 28");
+  assert.match(removed.text, /Scheduled with Sheek/);
 });
 
 test("re-publish emails only the person whose shifts changed", () => {

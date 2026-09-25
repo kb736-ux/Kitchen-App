@@ -278,14 +278,21 @@ export function buildMessage(input: {
   appUrl: string;
 }): { subject: string; html: string; text: string } {
   const { person, orgName, rangeLabel, appUrl } = input;
-  const where = orgName ? ` at ${orgName}` : "";
-  let subject = `Your Sheek schedule · ${rangeLabel}`;
+  const restaurant = orgName.trim();
+  const where = restaurant ? ` at ${restaurant}` : "";
+  const weekStartLabel = rangeLabel.split("–")[0].trim() || rangeLabel;
+  const removed = person.kind === "cleared";
+  const subject = restaurant
+    ? (removed
+      ? `Your shifts at ${restaurant} changed · ${weekStartLabel}`
+      : `Your shifts at ${restaurant} · ${weekStartLabel}`)
+    : (removed
+      ? `Your shifts this week changed · ${weekStartLabel}`
+      : `Your shifts this week · ${weekStartLabel}`);
   let intro = `Here are your shifts${where} for the week of ${rangeLabel}.`;
   if (person.kind === "updated") {
-    subject = `Your Sheek schedule changed · ${rangeLabel}`;
     intro = `Your shifts${where} for the week of ${rangeLabel} were updated.`;
-  } else if (person.kind === "cleared") {
-    subject = `Your Sheek shifts were removed · ${rangeLabel}`;
+  } else if (removed) {
     intro = `You no longer have shifts scheduled${where} for the week of ${rangeLabel}.`;
   }
 
