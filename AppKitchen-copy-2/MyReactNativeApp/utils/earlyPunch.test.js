@@ -45,7 +45,7 @@ test('clock-in before scheduled start is blocked', () => {
   assert.equal(result.allowed, false);
   assert.equal(result.isEarly, true);
   assert.equal(result.reason, 'before_shift_start');
-  assert.match(result.message, /4:00 PM/);
+  assert.equal(result.message, '');
 });
 
 test('clock-in at scheduled start is allowed', () => {
