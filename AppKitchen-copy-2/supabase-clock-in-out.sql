@@ -139,12 +139,36 @@ WITH CHECK (
   )
 );
 
--- No staff UPDATE/DELETE. Managers can remove a mistaken punch if needed.
+-- No staff UPDATE/DELETE. Managers can correct a punch (pencil on the timesheet)
+-- and remove a mistaken one. No new tables: these policies write time_punches.
 DROP POLICY IF EXISTS "time_punches_manager_delete" ON public.time_punches;
 CREATE POLICY "time_punches_manager_delete"
 ON public.time_punches
 FOR DELETE
 TO authenticated
 USING (public.kk_auth_is_org_manager(org_id));
+
+DROP POLICY IF EXISTS "time_punches_manager_update" ON public.time_punches;
+CREATE POLICY "time_punches_manager_update"
+ON public.time_punches
+FOR UPDATE
+TO authenticated
+USING (public.kk_auth_is_org_manager(org_id))
+WITH CHECK (public.kk_auth_is_org_manager(org_id));
+
+DROP POLICY IF EXISTS "time_punches_manager_insert" ON public.time_punches;
+CREATE POLICY "time_punches_manager_insert"
+ON public.time_punches
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  public.kk_auth_is_org_manager(org_id)
+  AND EXISTS (
+    SELECT 1
+    FROM public.orgs o
+    WHERE o.id = time_punches.org_id
+      AND o.clock_in_out_enabled = true
+  )
+);
 
 SELECT pg_notify('pgrst', 'reload schema');

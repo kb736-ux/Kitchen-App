@@ -1384,52 +1384,134 @@ body {
 .finished-tasks-section .task-count { background: var(--color-success-soft); color: var(--color-success); }
 .employee-task-item.task-completed { background: var(--color-success-soft); border-color: var(--color-success); }
 
-/* Sheek clock in/out (manager dashboard) */
-.clock-punches-hint {
-    font-size: 0.8rem;
-    color: var(--color-text-muted);
+/* Sheek clock in/out timesheet (manager home) */
+.clock-punches-card {
+    grid-column: 1 / -1;
+}
+.clock-punches-card:hover {
+    transform: none;
+}
+.timesheet-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+.timesheet-toolbar-gap { flex: 1; }
+.timesheet-week-btn,
+.timesheet-edit-btn {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.timesheet-week-btn {
+    width: 32px;
+    height: 32px;
+}
+.timesheet-export-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+}
+.timesheet-flag-warning {
+    color: var(--color-warning);
+    font-weight: 600;
+    font-size: 0.9rem;
     margin: 0 0 0.75rem;
     line-height: 1.4;
 }
-.clock-punch-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.7rem 0;
-    border-bottom: 1px solid var(--color-border);
+.timesheet-scroll { overflow-x: auto; }
+.timesheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
 }
-.clock-punch-row:last-child { border-bottom: none; }
-.clock-punch-who {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    min-width: 0;
-}
-.clock-punch-name {
-    font-weight: 600;
-    color: var(--color-text);
-    font-size: 0.92rem;
-}
-.clock-punch-meta {
-    font-size: 0.78rem;
-    color: var(--color-text-muted);
-}
-.clock-punch-type {
+.timesheet-table th {
+    text-align: left;
     font-size: 0.75rem;
-    font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    border-radius: 999px;
-    padding: 0.25rem 0.65rem;
-    flex-shrink: 0;
+    color: var(--color-text-muted);
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
 }
-.clock-punch-in { background: var(--color-success-soft); color: var(--color-success); }
-.clock-punch-out { background: var(--color-primary-soft); color: var(--color-secondary); }
-.clock-punch-early {
-    margin-left: 0.35rem;
+.timesheet-table td {
+    padding: 0.55rem 0.6rem;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+    color: var(--color-text);
+}
+.timesheet-row-missing {
+    background: var(--color-warning-soft);
+}
+.timesheet-table td.timesheet-note-missing {
     color: var(--color-warning);
+    font-weight: 600;
 }
+.timesheet-table td.timesheet-note-open {
+    color: var(--color-text-muted);
+}
+.timesheet-edit-col { width: 2.5rem; }
+.timesheet-edit-btn {
+    width: 32px;
+    height: 32px;
+}
+.timesheet-edit-btn:hover,
+.timesheet-week-btn:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+.timesheet-edit-who {
+    margin: 0 0 0.35rem;
+    font-weight: 600;
+}
+.timesheet-edit-hint,
+.timesheet-edit-error {
+    color: var(--color-warning);
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin: 0 0 0.75rem;
+}
+.timesheet-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+.timesheet-field input {
+    font: inherit;
+    font-weight: 500;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text);
+    background: var(--color-surface);
+}
+.timesheet-save-btn {
+    padding: 0.75rem 1.5rem;
+    background: var(--color-primary);
+    color: var(--color-on-primary, #fff);
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.timesheet-save-btn:disabled { opacity: 0.55; cursor: default; }
 
 .sheek-toggle {
     position: relative;
