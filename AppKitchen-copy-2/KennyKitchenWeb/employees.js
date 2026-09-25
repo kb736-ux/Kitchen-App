@@ -112,14 +112,25 @@ const positionResponsibilities = {};
 // Structure: { "Rohan": ["Server", "Bartend"], "Kenny": ["Server"], ... }
 
 async function loadEmployeePositionsFromSupabase() {
+    // Scheduling boot and this file's supabase-ready listener both call this on the
+    // same tick. Share one request so the roster (including shift-name fold-in) runs once.
+    if (loadEmployeePositionsFromSupabase._inflight) {
+        return loadEmployeePositionsFromSupabase._inflight;
+    }
+    const pending = loadEmployeePositionsFromSupabaseUncoalesced();
+    loadEmployeePositionsFromSupabase._inflight = pending;
+    try {
+        return await pending;
+    } finally {
+        loadEmployeePositionsFromSupabase._inflight = null;
+    }
+}
+
+async function loadEmployeePositionsFromSupabaseUncoalesced() {
     if (!window.supabaseClient || !window.ORG_ID) return null;
     window._profileBackedEmployeeNames = new Set();
-    // Names from recent shifts (fold into profile canonicals; see filter after merge).
-    const rosterSince = new Date();
-    rosterSince.setFullYear(rosterSince.getFullYear() - 1);
-    const rosterSinceStr = ymd(rosterSince);
 
-    const [{ data, error }, { data: profilesData, error: profilesError }, { data: shiftsData, error: shiftsError }] = await Promise.all([
+    const [{ data, error }, { data: profilesData, error: profilesError }] = await Promise.all([
         window.supabaseClient
             .from('employee_positions')
             .select('id, employee_name, positions')
@@ -128,13 +139,6 @@ async function loadEmployeePositionsFromSupabase() {
             .from('profiles')
             .select('id, user_id, employee_name, display_name, full_name, email')
             .eq('org_id', window.ORG_ID),
-        window.supabaseClient
-            .from('shifts')
-            .select('employee_name')
-            .eq('org_id', window.ORG_ID)
-            .gte('shift_date', rosterSinceStr)
-            .not('employee_name', 'is', null)
-            .limit(4000),
     ]);
     if (error) {
         console.warn('[Supabase] Employee positions load failed:', error.message);
@@ -143,9 +147,6 @@ async function loadEmployeePositionsFromSupabase() {
     }
     if (profilesError) {
         console.warn('[Supabase] Profiles load failed:', profilesError.message);
-    }
-    if (shiftsError) {
-        console.warn('[Supabase] Shifts roster names load failed:', shiftsError.message);
     }
 
     // Do NOT filter profiles by org_members here: with typical RLS, managers only see their *own*
@@ -204,20 +205,10 @@ async function loadEmployeePositionsFromSupabase() {
         _employeeDisplayByName[name] = deriveEmployeeLabel(p, name);
     });
 
-    // Include shift / employee_positions spellings so mergeDuplicateRosterMap can fold them into
+    // Include employee_positions spellings so mergeDuplicateRosterMap can fold them into
     // the profile's canonical employee_name (e.g. "Kenneth-bae" → "Kenneth Bae"). Rows with no
     // matching profile are removed after merge (roster is auth-backed profiles only).
     Object.keys(positionsByEmployee).forEach((en) => {
-        if (map[en]) return;
-        map[en] = positionsByEmployee[en] || [];
-        if (!_employeeDisplayByName[en]) _employeeDisplayByName[en] = en;
-    });
-
-    const shiftNamesSeen = new Set();
-    (shiftsData || []).forEach((row) => {
-        const en = (row.employee_name || '').trim();
-        if (!en || shiftNamesSeen.has(en)) return;
-        shiftNamesSeen.add(en);
         if (map[en]) return;
         map[en] = positionsByEmployee[en] || [];
         if (!_employeeDisplayByName[en]) _employeeDisplayByName[en] = en;
@@ -650,6 +641,9 @@ function getEmployeePositions() {
 
 window.addEventListener('supabase-ready', async function () {
     if (!window.supabaseClient || !window.ORG_ID) return;
+    // Home and Scheduling include this file. Their own boots load the roster.
+    // Running it here as well scanned the org twice on Home.
+    if (!document.querySelector('.employees-card')) return;
 
     // Only load employee roster from Supabase-backed data.
     const fromDb = await loadEmployeePositionsFromSupabase();
@@ -1730,6 +1724,7 @@ async function inviteEmployeeByEmail(employeeName, email, isManager, positionLab
 // so task assignment can look up UUIDs by display name.
 window.addEventListener('supabase-ready', async function () {
     if (!window.supabaseClient || !window.ORG_ID) return;
+    if (!document.querySelector('.employees-card')) return;
 
     const { data: members, error } = await window.supabaseClient
         .from('org_members')

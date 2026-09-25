@@ -1249,17 +1249,8 @@ function supabaseErrText(err) {
 
 const NOTIF_DAYS = 3; // Show notifications from last N days in bell
 
-/** Org tasks — order by id first (avoids 400 when created_at column missing). */
-async function fetchTasksForOrgOrdered() {
-    if (!window.supabaseClient || !window.ORG_ID) return { data: [], error: null };
-    const base = () =>
-        window.supabaseClient.from('tasks').select('*').eq('org_id', window.ORG_ID);
-    let res = await base().order('id', { ascending: true });
-    if (res.error && /column|does not exist|400/i.test(supabaseErrText(res.error))) {
-        res = await base();
-    }
-    return res;
-}
+/** Columns Home actually renders for a shift's tasks. */
+const HOME_SHIFT_TASK_COLUMNS = 'id, text, status, employee_id, employee_name, shift_id, created_at, completed_at';
 
 async function fetchNotificationsFromSupabase(daysBack = NOTIF_DAYS) {
     if (!window.supabaseClient || !window.ORG_ID) return [];
@@ -1709,48 +1700,7 @@ async function refreshProgress() {
         setTimeout(() => { refreshBtn.style.transform = 'rotate(0deg)'; }, 500);
     }
     if (window.supabaseClient && window.ORG_ID) {
-        if (typeof loadEmployeePositionsFromSupabase === 'function') {
-            await loadEmployeePositionsFromSupabase();
-        }
-        await loadTodayShifts();
-        const { data: tasks, error } = await fetchTasksForOrgOrdered();
-        if (!error && tasks) {
-            if (typeof window.kitchenTasks === 'undefined') window.kitchenTasks = [];
-            let changed = false;
-            tasks.forEach(task => {
-                const local = window.kitchenTasks.find(t => t.supabase_id === task.id);
-                const mappedName = (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null) || 'Unassigned';
-                if (local) {
-                    if (local.completed !== (task.status === 'completed')) {
-                        local.completed = task.status === 'completed';
-                        changed = true;
-                    }
-                    if (local.assignee !== mappedName) {
-                        local.assignee = mappedName;
-                        changed = true;
-                    }
-                    if (task.shift_id && String(local.shift_id || '') !== String(task.shift_id)) {
-                        local.shift_id = task.shift_id;
-                        changed = true;
-                    }
-                } else if (task.status !== 'completed') {
-                    const row = {
-                        assignee: mappedName,
-                        description: task.text,
-                        timestamp: task.created_at,
-                        completed: false,
-                        supabase_id: task.id
-                    };
-                    if (task.shift_id) row.shift_id = task.shift_id;
-                    window.kitchenTasks.push(row);
-                    changed = true;
-                }
-            });
-            if (changed) localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-            loadStoredTasks();
-            if (typeof loadUrgentTasks === 'function') loadUrgentTasks();
-            if (typeof updateNavNotifBadge === 'function') updateNavNotifBadge();
-        }
+        await bootHomeDashboard();
     }
     showNotificationToast('Progress data refreshed!', 'success');
 }
@@ -1821,8 +1771,7 @@ async function loadUrgentTasks() {
     const listEl = document.getElementById('urgent-tasks-list');
     const emptyEl = document.getElementById('no-urgent-msg');
     const countEl = document.getElementById('urgent-tasks-count');
-    const assignSelect = document.getElementById('urgent-assign-to');
-    
+
     if (!listEl) return;
 
     if (!window.supabaseClient || !window.ORG_ID) {
@@ -1832,20 +1781,29 @@ async function loadUrgentTasks() {
         return;
     }
 
-    // Populate dropdown dynamically if empty/not populated
-    if (assignSelect && assignSelect.options.length <= 1) { // 1 is "All staff"
-        const { data: profiles } = await window.supabaseClient.from('profiles').select('employee_name, display_name').eq('org_id', window.ORG_ID);
-        if (profiles && profiles.length > 0) {
-            assignSelect.innerHTML = '<option value="">All staff</option>';
-            profiles.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.employee_name;
-                opt.textContent = p.display_name || p.employee_name;
-                assignSelect.appendChild(opt);
-            });
-        }
-    }
+    fillUrgentAssignFromRoster();
+    const tasks = await fetchUrgentTaskRows();
+    renderUrgentTaskList(tasks);
+}
 
+function fillUrgentAssignFromRoster() {
+    const assignSelect = document.getElementById('urgent-assign-to');
+    if (!assignSelect || assignSelect.options.length > 1) return;
+    if (typeof getEmployeePositions !== 'function') return;
+    const names = Object.keys(getEmployeePositions() || {}).filter(Boolean);
+    if (!names.length) return;
+    assignSelect.innerHTML = '<option value="">All staff</option>';
+    names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).forEach((name) => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        const label = typeof getEmployeeDisplayName === 'function' ? getEmployeeDisplayName(name) : name;
+        opt.textContent = label || name;
+        assignSelect.appendChild(opt);
+    });
+}
+
+async function fetchUrgentTaskRows() {
+    if (!window.supabaseClient || !window.ORG_ID) return [];
     const urgentBase = () =>
         window.supabaseClient
             .from('tasks')
@@ -1867,16 +1825,22 @@ async function loadUrgentTasks() {
     if (error && /column|does not exist|400/i.test(supabaseErrText(error))) {
         ({ data, error } = await urgentBaseMinimal());
     }
-
     if (error) {
         console.warn('[Supabase] loadUrgentTasks failed:', supabaseErrText(error));
-        return;
+        return [];
     }
+    return data || [];
+}
 
-    const tasks = data || [];
+function renderUrgentTaskList(tasks) {
+    const listEl = document.getElementById('urgent-tasks-list');
+    const emptyEl = document.getElementById('no-urgent-msg');
+    const countEl = document.getElementById('urgent-tasks-count');
+    if (!listEl) return;
+    const rows = tasks || [];
     listEl.innerHTML = '';
 
-    tasks.forEach(t => {
+    rows.forEach(t => {
         const li = document.createElement('li');
         li.dataset.taskId = t.id;
         li.innerHTML = `
@@ -1890,8 +1854,8 @@ async function loadUrgentTasks() {
         listEl.appendChild(li);
     });
 
-    if (emptyEl) emptyEl.style.display = tasks.length ? 'none' : 'block';
-    if (countEl) countEl.textContent = tasks.length;
+    if (emptyEl) emptyEl.style.display = rows.length ? 'none' : 'block';
+    if (countEl) countEl.textContent = rows.length;
 }
 
 window.addUrgentTaskFromWeb = async function() {
@@ -2049,36 +2013,124 @@ function dashboardShiftIsActiveNow(shift, dateYmd, nowMs) {
     return nowMs >= b.start.getTime() && nowMs < b.end.getTime();
 }
 
-// Team overview: only employees **currently** within shift hours; task progress for those rows only.
-async function loadTodayShifts() {
+function dashboardRosterPosition(empName) {
+    if (typeof getEmployeePositions !== 'function') return '';
+    const want = dashboardNormName(empName);
+    const posData = getEmployeePositions() || {};
+    const key = Object.keys(posData).find((name) => dashboardNormName(name) === want);
+    if (!key) return '';
+    const labels = (posData[key] || [])
+        .map((p) => (typeof p === 'string' ? p.trim() : String(p?.name || '').trim()))
+        .filter(Boolean);
+    return labels[0] || '';
+}
+
+/** Tasks linked to today's shifts. Narrow columns; no org-wide tasks scan. */
+async function fetchTasksForShiftIds(shiftIds) {
+    if (!window.supabaseClient || !window.ORG_ID || !shiftIds || !shiftIds.length) return [];
+    const run = (cols) =>
+        window.supabaseClient
+            .from('tasks')
+            .select(cols)
+            .eq('org_id', window.ORG_ID)
+            .in('shift_id', shiftIds);
+    let res = await run(HOME_SHIFT_TASK_COLUMNS);
+    if (res.error && /column|does not exist|400/i.test(supabaseErrText(res.error))) {
+        res = await run('id, text, status, employee_id, shift_id');
+    }
+    if (res.error && /shift_id|column|does not exist|400/i.test(supabaseErrText(res.error))) {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        res = await window.supabaseClient
+            .from('tasks')
+            .select('id, text, status, employee_id, employee_name, created_at, completed_at')
+            .eq('org_id', window.ORG_ID)
+            .gte('created_at', start.toISOString())
+            .lt('created_at', end.toISOString());
+    }
+    if (res.error) {
+        console.warn('[Supabase] tasks load failed:', supabaseErrText(res.error));
+        return [];
+    }
+    return res.data || [];
+}
+
+function replaceOpenKitchenTasks(tasks) {
+    const nextKitchenTasks = [];
+    (tasks || []).forEach((task) => {
+        if (webTaskRowCompleted(task)) return;
+        const nameKey =
+            (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
+            || task.employee_name
+            || task.assigned_to
+            || null;
+        const mappedName = nameKey
+            ? ((typeof window.getEmployeeDisplayName === 'function'
+                ? window.getEmployeeDisplayName(nameKey)
+                : null) || nameKey)
+            : 'Unassigned';
+        const row = {
+            assignee: mappedName,
+            description: task.text,
+            timestamp: task.created_at,
+            completed: false,
+            supabase_id: task.id
+        };
+        if (task.shift_id) row.shift_id = task.shift_id;
+        nextKitchenTasks.push(row);
+    });
+    nextKitchenTasks.sort((a, b) => (Number(a.supabase_id) || 0) - (Number(b.supabase_id) || 0));
+    window.kitchenTasks = nextKitchenTasks;
+    try {
+        localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
+    } catch (_) {}
+}
+
+/**
+ * Home boot. Roster, today's shifts, and urgent tasks start together.
+ * Shift tasks wait only for today's shift ids, then use those ids — not every task in the org.
+ */
+async function bootHomeDashboard() {
     if (!window.supabaseClient || !window.ORG_ID) return;
     const now = new Date();
     const nowMs = now.getTime();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    const [shiftsRes, positionsRes, tasksRes] = await Promise.all([
-        window.supabaseClient
-            .from('shifts')
-            .select('id, employee_name, position, start_time, end_time')
-            .eq('org_id', window.ORG_ID)
-            .eq('shift_date', todayStr)
-            .order('start_time', { ascending: true }),
-        window.supabaseClient
-            .from('employee_positions')
-            .select('employee_name, position')
-            .eq('org_id', window.ORG_ID)
-            .order('employee_name', { ascending: true }),
-        window.supabaseClient.from('tasks').select('*').eq('org_id', window.ORG_ID),
+    const rosterP = typeof loadEmployeePositionsFromSupabase === 'function'
+        ? loadEmployeePositionsFromSupabase()
+        : Promise.resolve(null);
+    const shiftsP = window.supabaseClient
+        .from('shifts')
+        .select('id, employee_name, position, start_time, end_time')
+        .eq('org_id', window.ORG_ID)
+        .eq('shift_date', todayStr)
+        .order('start_time', { ascending: true });
+    const urgentP = fetchUrgentTaskRows();
+
+    const shiftsRes = await shiftsP;
+    if (shiftsRes.error) console.warn('[Supabase] Shifts load failed:', shiftsRes.error.message);
+    const shifts = shiftsRes.data || [];
+    const shiftIds = shifts.map((s) => s.id).filter((id) => id != null);
+
+    const [taskRows, urgentRows] = await Promise.all([
+        fetchTasksForShiftIds(shiftIds),
+        urgentP,
+        rosterP,
     ]);
 
-    if (shiftsRes.error) console.warn('[Supabase] Shifts load failed:', shiftsRes.error.message);
-    if (positionsRes.error) console.warn('[Supabase] employee_positions load failed:', positionsRes.error.message);
-    if (tasksRes.error) console.warn('[Supabase] tasks load failed:', tasksRes.error.message);
+    renderTodayShiftOverview(shifts, taskRows, todayStr, nowMs);
+    replaceOpenKitchenTasks(taskRows);
+    loadStoredTasks();
+    fillUrgentAssignFromRoster();
+    renderUrgentTaskList(urgentRows);
+    if (typeof updateNavNotifBadge === 'function') updateNavNotifBadge();
+}
 
-    const shifts = shiftsRes.data || [];
-    const positions = positionsRes.data || [];
-    const taskRows = tasksRes.data || [];
-    const taskRowsForTodaySummary = taskRows.filter((t) => dashboardTaskCountsTowardToday(t, todayStr));
+// Team overview: only employees **currently** within shift hours; task progress for those rows only.
+function renderTodayShiftOverview(shifts, taskRows, todayStr, nowMs) {
+    const taskRowsForTodaySummary = (taskRows || []).filter((t) => dashboardTaskCountsTowardToday(t, todayStr));
 
     const activeShiftRowsByKey = new Map();
     shifts.forEach((s) => {
@@ -2108,12 +2160,6 @@ async function loadTodayShifts() {
     });
 
     window.todayShiftNames = new Set(rosterNames);
-
-    const positionByName = new Map();
-    positions.forEach((p) => {
-        const n = (p.employee_name || '').trim();
-        if (n) positionByName.set(dashboardNormName(n), p.position || '');
-    });
 
     const countsByKey = new Map();
     taskRowsForTodaySummary.forEach((t) => {
@@ -2148,7 +2194,7 @@ async function loadTodayShifts() {
         const shiftRow = onShiftToday.get(key);
         const role =
             (shiftRow && shiftRow.position) ||
-            positionByName.get(key) ||
+            dashboardRosterPosition(empName) ||
             '—';
         const bounds = shiftRow ? dashboardShiftBounds(shiftRow, todayStr) : null;
         const untilStr =
@@ -2187,53 +2233,9 @@ async function loadTodayShifts() {
 }
 
 // ── Supabase task sync (home/dashboard page) ──────────────────────────────────
-// When Supabase is ready, fetch the latest task list from the DB and re-render
-// the progress list so the manager sees live status from employee mobile updates.
-window.addEventListener('supabase-ready', async function () {
+window.addEventListener('supabase-ready', function () {
     if (!isHomeDashboardPage()) return;
-    if (!window.supabaseClient || !window.ORG_ID) return;
-
-    if (typeof loadEmployeePositionsFromSupabase === 'function') {
-        await loadEmployeePositionsFromSupabase();
-    }
-
-    await loadTodayShifts();
-
-    const { data: tasks, error } = await fetchTasksForOrgOrdered();
-
-    if (error) { console.warn('[Supabase] Dashboard task load failed:', error.message); return; }
-
-    const nextKitchenTasks = [];
-    (tasks || []).forEach(task => {
-        if (webTaskRowCompleted(task)) return;
-        const nameKey =
-            (typeof window.getEmployeeNameFromId === 'function' ? window.getEmployeeNameFromId(task.employee_id) : null)
-            || task.employee_name
-            || task.assigned_to
-            || null;
-        const mappedName = nameKey
-            ? ((typeof window.getEmployeeDisplayName === 'function'
-                ? window.getEmployeeDisplayName(nameKey)
-                : null) || nameKey)
-            : 'Unassigned';
-        const row = {
-            assignee: mappedName,
-            description: task.text,
-            timestamp: task.created_at,
-            completed: false,
-            supabase_id: task.id
-        };
-        if (task.shift_id) row.shift_id = task.shift_id;
-        nextKitchenTasks.push(row);
-    });
-
-    nextKitchenTasks.sort((a, b) => (Number(a.supabase_id) || 0) - (Number(b.supabase_id) || 0));
-    window.kitchenTasks = nextKitchenTasks;
-    localStorage.setItem('kitchenTasks', JSON.stringify(window.kitchenTasks));
-    loadStoredTasks(); // Re-render Kitchen Progress from merged kitchenTasks
-
-    loadUrgentTasks();
-    updateNavNotifBadge();
+    bootHomeDashboard();
 });
 
 /**
