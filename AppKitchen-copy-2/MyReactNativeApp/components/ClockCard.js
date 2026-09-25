@@ -109,9 +109,7 @@ const ClockCard = ({ orgId, todayShift }) => {
         now: new Date(),
       });
       if (!result.ok) {
-        // Early clock-in is already a disabled button. Do not repeat a warning.
-        if (result.blockedEarly) return;
-        setMessageTone('error');
+        setMessageTone(result.blockedEarly ? 'warn' : 'error');
         setMessage(result.message || 'Could not save punch.');
         return;
       }
@@ -150,10 +148,18 @@ const ClockCard = ({ orgId, todayShift }) => {
         <ActivityIndicator color={Colors.primary} style={{ marginVertical: 12 }} />
       ) : (
         <>
+          {!clockedIn && decision.isEarly ? (
+            <View style={styles.warnBox}>
+              <Ionicons name="alert-circle-outline" size={16} color={Colors.warning} />
+              <Text style={styles.warnText}>{decision.message}</Text>
+            </View>
+          ) : null}
+
           {message ? (
             <Text
               style={[
                 styles.feedback,
+                messageTone === 'warn' && styles.feedbackWarn,
                 messageTone === 'error' && styles.feedbackError,
                 messageTone === 'ok' && styles.feedbackOk,
               ]}
@@ -239,7 +245,18 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontWeight: '700' },
   statusInText: { color: Colors.success },
   statusOutText: { color: Colors.secondary },
+  warnBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: Colors.warningSoft,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  warnText: { flex: 1, fontSize: 13, color: Colors.warning, fontWeight: '600' },
   feedback: { fontSize: 13, marginBottom: 8, color: Colors.textMuted },
+  feedbackWarn: { color: Colors.warning, fontWeight: '600' },
   feedbackError: { color: Colors.error },
   feedbackOk: { color: Colors.success },
   punchBtn: {

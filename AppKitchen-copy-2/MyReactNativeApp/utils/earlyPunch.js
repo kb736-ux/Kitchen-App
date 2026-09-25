@@ -122,7 +122,7 @@ export function evaluateClockIn({ now = new Date(), scheduledStart = null, grace
       isEarly: true,
       reason: 'before_shift_start',
       scheduledStart: start,
-      message: '',
+      message: `Too early to clock in. Your shift starts at ${formatClockTime(start)}.`,
     };
   }
   return {
