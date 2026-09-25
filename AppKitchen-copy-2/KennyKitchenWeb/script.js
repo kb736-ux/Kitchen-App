@@ -145,31 +145,41 @@ async function updateOrgBranding() {
 }
 
 /** Dropdown to switch active restaurant (multi-org managers). */
+let orgSwitcherInitGen = 0;
+
+function removeOrgSwitchers() {
+    document.querySelectorAll('#kk-org-switcher').forEach((el) => el.remove());
+}
+
 async function initOrgSwitcher() {
+    const gen = ++orgSwitcherInitGen;
     try {
         if (!window.supabaseClient || typeof window.kkListUserOrgs !== 'function') return;
-        if (document.getElementById('kk-org-switcher')) return;
         const nav = document.querySelector('.top-nav');
         if (!nav) return;
 
         const orgs = await window.kkListUserOrgs();
-        if (!orgs || orgs.length <= 1) return;
+        if (gen !== orgSwitcherInitGen) return;
+        if (!orgs || orgs.length <= 1) {
+            removeOrgSwitchers();
+            return;
+        }
 
         const wrap = document.createElement('div');
         wrap.id = 'kk-org-switcher';
         wrap.setAttribute('title', 'Switch restaurant');
-        wrap.style.cssText = 'margin-left:10px;display:flex;align-items:center;gap:6px;flex-shrink:0;';
+        wrap.style.cssText = 'margin-left:12px;display:flex;align-items:center;gap:8px;flex-shrink:0;';
 
         const label = document.createElement('span');
         label.textContent = 'Location';
-        label.style.cssText = 'font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;';
+        label.style.cssText = 'font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;';
         if (window.matchMedia('(max-width: 900px)').matches) {
             label.style.display = 'none';
         }
 
         const sel = document.createElement('select');
         sel.style.cssText =
-            'max-width:160px;font-size:13px;font-weight:600;color:#1e293b;padding:6px 8px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;';
+            'max-width:200px;font-size:16px;font-weight:600;color:#1e293b;padding:8px 12px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;';
         orgs.forEach((o) => {
             const opt = document.createElement('option');
             opt.value = o.id;
@@ -184,6 +194,9 @@ async function initOrgSwitcher() {
 
         wrap.appendChild(label);
         wrap.appendChild(sel);
+
+        if (gen !== orgSwitcherInitGen) return;
+        removeOrgSwitchers();
 
         const brand = nav.querySelector('.nav-brand');
         if (brand && brand.nextElementSibling) {
