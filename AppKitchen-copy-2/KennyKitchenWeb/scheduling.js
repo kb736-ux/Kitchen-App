@@ -1070,6 +1070,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function initializeScheduling() {
     setupWeekNavigation();
+    setupPublishWeek();
     setupModalHandlers();
     setupTaskAssignment();
     initializeEmployeeHours();
@@ -1165,6 +1166,132 @@ function setupWeekNavigation() {
 
 const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/**
+ * Publish records the week and emails staff. It does not hide shifts.
+ * Expo and this grid already read public.shifts as soon as they are saved;
+ * gating on schedule_publications would blank schedules already in use.
+ * Re-publish emails only people whose shifts changed (enforced in publish-week).
+ */
+function setupPublishWeek() {
+    const btn = document.getElementById('publish-week-btn');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+        void publishCurrentWeek();
+    });
+}
+
+async function refreshPublishWeekStatus() {
+    const statusEl = document.getElementById('publish-week-status');
+    if (!statusEl) return;
+    if (!window.supabaseClient || !window.ORG_ID) {
+        statusEl.hidden = true;
+        return;
+    }
+    const weekStart = getWeekStart(currentWeekStart);
+    const { data, error } = await window.supabaseClient
+        .from('schedule_publications')
+        .select('published_at')
+        .eq('org_id', window.ORG_ID)
+        .eq('week_start', weekStart)
+        .maybeSingle();
+    if (error) {
+        statusEl.hidden = true;
+        console.warn('[Publish] status:', error.message);
+        return;
+    }
+    statusEl.hidden = false;
+    if (!data?.published_at) {
+        statusEl.textContent = 'Not published';
+        statusEl.classList.remove('is-published');
+        return;
+    }
+    const when = new Date(data.published_at);
+    const label = when.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+    statusEl.textContent = `Published ${label}`;
+    statusEl.classList.add('is-published');
+}
+
+function publishWeekResultMessage(body) {
+    const emailed = Number(body?.emailed) || 0;
+    const cleared = Number(body?.cleared) || 0;
+    const unchanged = Number(body?.unchanged) || 0;
+    const skipped = Array.isArray(body?.skipped_no_email) ? body.skipped_no_email.length : 0;
+    const failed = Array.isArray(body?.failed) ? body.failed.length : 0;
+    if (!emailed && !cleared && !skipped && !failed) {
+        return unchanged
+            ? `No new emails. ${unchanged} staff already have this schedule.`
+            : 'Week published. Nobody has shifts to email.';
+    }
+    const parts = [];
+    if (emailed) parts.push(`Emailed ${emailed}`);
+    if (cleared) parts.push(`${cleared} notified their shifts were removed`);
+    if (unchanged) parts.push(`${unchanged} unchanged`);
+    if (skipped) parts.push(`${skipped} missing an email`);
+    if (failed) parts.push(`${failed} failed — publish again to retry`);
+    return `${parts.join('. ')}.`;
+}
+
+async function publishCurrentWeek() {
+    const btn = document.getElementById('publish-week-btn');
+    if (!window.supabaseClient || !window.ORG_ID) {
+        showNotification('Sign in before publishing this week.', 'error');
+        return;
+    }
+    const weekStart = getWeekStart(currentWeekStart);
+    const label = document.getElementById('current-week')?.textContent || weekStart;
+    const ok = window.confirm(
+        `Publish the week of ${label}?\n\nStaff with shifts get one email. People whose shifts did not change since the last publish are not emailed again.`
+    );
+    if (!ok) return;
+
+    const previousLabel = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Publishing…';
+    }
+    try {
+        const { data: sessionData } = await window.supabaseClient.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) {
+            showNotification('Sign in again to publish the week.', 'error');
+            return;
+        }
+        const res = await fetch(`${window.SUPABASE_URL}/functions/v1/publish-week`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+                apikey: window.SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ org_id: window.ORG_ID, week_start: weekStart }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const message = body?.error || 'Could not publish this week.';
+            showNotification(message, 'error');
+            return;
+        }
+        const failed = Array.isArray(body?.failed) ? body.failed.length : 0;
+        const skipped = Array.isArray(body?.skipped_no_email) ? body.skipped_no_email.length : 0;
+        showNotification(publishWeekResultMessage(body), failed || skipped ? 'warning' : 'success');
+        await refreshPublishWeekStatus();
+    } catch (e) {
+        console.warn('[Publish]', e);
+        showNotification('Could not reach the publish service.', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = previousLabel;
+        }
+    }
+}
 
 function updateWeekTitle() {
     const weekDisplay = document.getElementById('current-week');
@@ -1885,6 +2012,7 @@ async function updateScheduleMatrixAndSync(options = {}) {
     updateMatrixRowHours();
     setupScheduleMatrixDelegation();
     setupScheduleMatrixDragAndDrop();
+    void refreshPublishWeekStatus();
 }
 
 /** Legacy name used elsewhere in this file — refresh week matrix + Supabase shifts */
