@@ -1,0 +1,678 @@
+/* Timesheet page — larger type, centered column (scroll is fine) */
+body .dashboard-main {
+    max-width: 1080px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 1.75rem 1.5rem 3rem;
+}
+
+.timesheet-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 1.35rem;
+    padding: 1.5rem 1.75rem;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.timesheet-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #242220;
+    margin: 0;
+    text-align: center;
+}
+
+.week-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.35rem;
+    padding: 1.35rem 1.5rem;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.week-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.9rem 1.4rem;
+    background: rgba(51, 42, 37, 0.1);
+    color: #332A25;
+    border: 2px solid rgba(76, 175, 80, 0.2);
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1.05rem;
+    transition: all 0.3s ease;
+}
+
+.week-nav-btn:hover {
+    background: #332A25;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.3);
+}
+
+.week-display h2 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    color: #242220;
+    margin: 0;
+    text-align: center;
+}
+
+.timesheet-page-body {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    padding: 1.75rem 1.75rem 2rem;
+}
+
+.btn-sm {
+    padding: 0.7rem 1.15rem;
+    font-size: 1.05rem;
+}
+
+/* Clock settings */
+.clock-settings-card {
+    background: #FFFEFB;
+    border: 1px solid #DED8D1;
+    border-radius: 16px;
+    padding: 1.5rem 1.55rem 1.4rem;
+    margin-bottom: 1.5rem;
+}
+
+.clock-settings-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.25rem;
+    margin-bottom: 1.15rem;
+}
+
+.clock-settings-title {
+    margin: 0;
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: #242220;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.clock-settings-title i { color: #332A25; }
+
+.clock-settings-desc {
+    margin: 0.5rem 0 0;
+    font-size: 1.08rem;
+    color: #746E69;
+    line-height: 1.5;
+    max-width: 42rem;
+}
+
+.clock-settings-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+}
+
+@media (min-width: 760px) {
+    .clock-settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.clock-settings-field {
+    background: #F7F4EE;
+    border: 1px solid #EBE6E0;
+    border-radius: 14px;
+    padding: 1.15rem 1.2rem;
+}
+
+.clock-settings-field-wide {
+    grid-column: 1 / -1;
+}
+
+.clock-settings-gps-hint {
+    margin: 0 0 0.7rem;
+    font-size: 1.05rem;
+    color: #746E69;
+    line-height: 1.5;
+}
+
+.clock-address-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10020;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.clock-address-modal.is-open {
+    display: flex;
+}
+
+.clock-address-card {
+    width: 100%;
+    max-width: 520px;
+    background: #FFFEFB;
+    border-radius: 18px;
+    padding: 1.5rem 1.55rem 1.35rem;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.clock-address-card h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1.35rem;
+    color: #332A25;
+}
+
+.clock-address-desc {
+    margin: 0 0 1rem;
+    font-size: 1.05rem;
+    color: #746E69;
+    line-height: 1.5;
+}
+
+.clock-address-label {
+    display: block;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #332A25;
+    margin-bottom: 0.4rem;
+}
+
+.clock-address-search-wrap {
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+
+.clock-address-search-wrap input {
+    width: 100%;
+    border: 1px solid #EBE6E0;
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    font-size: 1.15rem;
+    box-sizing: border-box;
+}
+
+.clock-address-suggestions {
+    list-style: none;
+    margin: 0.3rem 0 0;
+    padding: 0;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 2;
+    background: #FFFEFB;
+    border: 1px solid #EBE6E0;
+    border-radius: 12px;
+    max-height: 260px;
+    overflow-y: auto;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.clock-address-suggestions button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.85rem 1rem;
+    font-size: 1.05rem;
+    color: #332A25;
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.clock-address-suggestions button:hover {
+    background: #F7F4EE;
+}
+
+.clock-address-picked {
+    margin-bottom: 0.85rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 12px;
+    background: #ecfdf5;
+    border: 1px solid #bbf7d0;
+    font-size: 1.05rem;
+    color: #166534;
+    line-height: 1.45;
+}
+
+.clock-address-radius-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+}
+
+.clock-address-radius-row label {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #332A25;
+}
+
+.clock-address-radius-row input {
+    width: 7rem;
+    border: 1px solid #EBE6E0;
+    border-radius: 10px;
+    padding: 0.65rem 0.75rem;
+    font-size: 1.1rem;
+}
+
+.clock-address-error {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    color: #b91c1c;
+}
+
+.clock-address-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.65rem;
+}
+
+.clock-address-inline-search {
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+
+.clock-address-inline-search input {
+    width: 100%;
+    border: 1px solid #EBE6E0;
+    border-radius: 12px;
+    padding: 0.95rem 1.05rem;
+    font-size: 1.2rem;
+    box-sizing: border-box;
+    background: #FFFEFB;
+}
+
+.clock-address-inline-suggestions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+}
+
+.clock-address-inline-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.clock-address-inline-row label {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #332A25;
+}
+
+.clock-address-inline-row input[type="number"] {
+    width: 6.25rem;
+    border: 1px solid #EBE6E0;
+    border-radius: 10px;
+    padding: 0.7rem 0.75rem;
+    font-size: 1.1rem;
+    background: #FFFEFB;
+}
+
+.clock-gps-row input[type="number"] {
+    max-width: 9.5rem;
+}
+
+.clock-settings-field-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.85rem;
+    margin-bottom: 0.7rem;
+}
+
+.clock-settings-field-top > label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #332A25;
+}
+
+.clock-nolimit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 1.02rem;
+    font-weight: 600;
+    color: #746E69;
+    cursor: pointer;
+    user-select: none;
+}
+
+.clock-nolimit input[type="checkbox"] {
+    width: 1.15rem;
+    height: 1.15rem;
+}
+
+.clock-settings-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.clock-settings-input-row input[type="number"] {
+    width: 6.5rem;
+    border: 1px solid #DED8D1;
+    border-radius: 12px;
+    padding: 0.7rem 0.8rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #242220;
+    background: #fff;
+}
+
+.clock-settings-input-row input[type="number"]:disabled {
+    opacity: 0.45;
+    background: #F7F4EE;
+}
+
+.clock-settings-input-row span {
+    font-size: 1.05rem;
+    color: #746E69;
+}
+
+.clock-settings-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.85rem;
+    margin-top: 1.15rem;
+    flex-wrap: wrap;
+}
+
+.clock-settings-status {
+    font-size: 1.05rem;
+    color: #746E69;
+    margin-right: auto;
+    line-height: 1.4;
+}
+
+.clock-settings-status.is-ok { color: #52705A; font-weight: 600; }
+.clock-settings-status.is-err { color: #A94F47; font-weight: 600; }
+
+.clock-settings-card.clock-settings-disabled .clock-settings-grid {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* Keep address field interactive even when clock is off, so managers can set it first */
+.clock-settings-card.clock-settings-disabled #clock-address-field {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sheek-toggle {
+    position: relative;
+    display: inline-block;
+    width: 56px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
+.sheek-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.sheek-toggle-slider {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+    background: #DED8D1;
+    border-radius: 999px;
+    transition: background 0.2s ease;
+}
+
+.sheek-toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 24px;
+    width: 24px;
+    left: 4px;
+    top: 4px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.sheek-toggle input:checked + .sheek-toggle-slider {
+    background: #332A25;
+}
+
+.sheek-toggle input:checked + .sheek-toggle-slider::before {
+    transform: translateX(24px);
+}
+
+.timesheet-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.1rem;
+}
+
+.timesheet-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.timesheet-hint {
+    margin: 0;
+    color: #746E69;
+    font-size: 1.08rem;
+    line-height: 1.45;
+}
+
+.timesheet-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    background: #FFFEFB;
+    border: 1px solid #DED8D1;
+    border-radius: 16px;
+}
+
+.timesheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1.12rem;
+}
+
+.timesheet-table thead th {
+    text-align: left;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #746E69;
+    padding: 1rem 1.1rem;
+    border-bottom: 2px solid #DED8D1;
+    background: #F7F4EE;
+    white-space: nowrap;
+}
+
+.timesheet-table tbody td {
+    padding: 1rem 1.1rem;
+    border-bottom: 1px solid #EBE6E0;
+    color: #242220;
+    vertical-align: middle;
+}
+
+.timesheet-table tbody tr:hover {
+    background: #FBF9F6;
+}
+
+.timesheet-hours {
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+}
+
+.timesheet-note-warn {
+    color: #9C5B1E;
+}
+
+.timesheet-empty-row td {
+    text-align: center;
+    color: #746E69;
+    padding: 2rem 1rem;
+    font-size: 1.12rem;
+}
+
+/* Primary actions on this page a bit larger */
+.timesheet-page-body .btn-primary,
+.timesheet-page-body .btn-secondary {
+    font-size: 1.05rem;
+    padding: 0.75rem 1.2rem;
+}
+
+.timesheet-edit-cell {
+    width: 3.25rem;
+    text-align: right;
+}
+
+.timesheet-row-edit {
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 8px;
+    border: 1px solid #DED8D1;
+    background: #FFFEFB;
+    color: #332A25;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+}
+
+.timesheet-row-edit:hover {
+    background: #332A25;
+    color: #FFFEFB;
+    border-color: #332A25;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.timesheet-editor-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10030;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.timesheet-editor-modal.is-open {
+    display: flex;
+}
+
+.timesheet-editor-card {
+    width: 100%;
+    max-width: 440px;
+    background: #FFFEFB;
+    border-radius: 16px;
+    padding: 1.35rem 1.4rem 1.2rem;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+
+.timesheet-editor-card h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1.35rem;
+    color: #332A25;
+}
+
+.timesheet-editor-desc,
+.timesheet-editor-hint {
+    margin: 0 0 0.9rem;
+    font-size: 0.95rem;
+    color: #746E69;
+    line-height: 1.45;
+}
+
+.timesheet-editor-label {
+    display: block;
+    margin: 0.65rem 0 0.3rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #332A25;
+}
+
+.timesheet-editor-card select,
+.timesheet-editor-card input[type="datetime-local"] {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #EBE6E0;
+    border-radius: 10px;
+    padding: 0.7rem 0.75rem;
+    font-size: 1rem;
+    background: #fff;
+}
+
+.timesheet-editor-error {
+    margin: 0.75rem 0 0;
+    color: #A94F47;
+    font-size: 0.92rem;
+}
+
+.timesheet-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    margin-top: 1rem;
+}
+
+@media (max-width: 640px) {
+    body .dashboard-main {
+        padding: 1.15rem 0.85rem 2.25rem;
+    }
+
+    .timesheet-header h1 {
+        font-size: 2rem;
+    }
+
+    .week-display h2 {
+        font-size: 1.25rem;
+    }
+
+    .week-nav-btn {
+        padding: 0.7rem 0.9rem;
+        font-size: 0.95rem;
+    }
+}

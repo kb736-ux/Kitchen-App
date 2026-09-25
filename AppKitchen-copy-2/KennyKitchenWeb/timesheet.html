@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="assets/favicon.png" sizes="192x192" />
+    <link rel="icon" type="image/png" href="assets/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <title>Sheek - Timesheet</title>
+    <link rel="stylesheet" href="tokens.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="timesheet.css?v=20260924-restore">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <img src="assets/logo.png" alt="" class="nav-logo" width="36" height="36">
+                <span>Sheek</span>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab" data-tab="home" onclick="window.location.href='index.html'">
+                    <i class="fas fa-home"></i>
+                    Home
+                </button>
+                <button class="nav-tab" data-tab="scheduling" onclick="window.location.href='scheduling.html'">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scheduling
+                </button>
+                <button class="nav-tab active" data-tab="timesheet">
+                    <i class="fas fa-clock"></i>
+                    Timesheet
+                </button>
+                <button class="nav-tab" data-tab="employees" onclick="window.location.href='employees.html'">
+                    <i class="fas fa-users"></i>
+                    Employees
+                </button>
+                <button class="nav-tab" data-tab="recipes" onclick="window.location.href='recipes.html'">
+                    <i class="fas fa-book"></i>
+                    Recipes
+                </button>
+                <button class="nav-tab" data-tab="inventory" onclick="window.location.href='inventory.html'">
+                    <i class="fas fa-boxes"></i>
+                    Inventory
+                </button>
+                <button class="nav-tab" data-tab="chat" onclick="window.location.href='chat.html'">
+                    <i class="fas fa-comments"></i>
+                    Chat
+                </button>
+            </div>
+            <div class="nav-user">
+                <div class="notification-bell" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="nav-notif-badge" style="display:none;">0</span>
+                </div>
+                <div class="user-profile">
+                    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="User" class="user-avatar">
+                    <span>Admin</span>
+                </div>
+            </div>
+        </nav>
+
+        <main class="dashboard-main">
+            <div class="timesheet-header">
+                <h1>Timesheet</h1>
+            </div>
+
+            <div class="week-navigation">
+                <button class="week-nav-btn" id="prev-week" type="button">
+                    <i class="fas fa-chevron-left"></i>
+                    Previous
+                </button>
+                <div class="week-display">
+                    <h2 id="current-week">Week of …</h2>
+                </div>
+                <button class="week-nav-btn" id="next-week" type="button">
+                    Next
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+
+            <div class="timesheet-page-body">
+                <div class="clock-settings-card" id="clock-settings-card">
+                    <div class="clock-settings-header">
+                        <div>
+                            <h3 class="clock-settings-title"><i class="fas fa-user-clock"></i> Clock in / out</h3>
+                            <p class="clock-settings-desc">Staff see a punch button on Home when this is on. Turning it on asks for the restaurant address (looked up and pinned for clock-in).</p>
+                        </div>
+                        <label class="sheek-toggle" title="Enable Sheek clock in/out">
+                            <input type="checkbox" id="clock-settings-enabled" />
+                            <span class="sheek-toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="clock-settings-grid" id="clock-settings-limits">
+                        <div class="clock-settings-field">
+                            <div class="clock-settings-field-top">
+                                <label for="clock-early-minutes">Earliest clock-in</label>
+                                <label class="clock-nolimit">
+                                    <input type="checkbox" id="clock-early-nolimit" />
+                                    No limit
+                                </label>
+                            </div>
+                            <div class="clock-settings-input-row">
+                                <input type="number" id="clock-early-minutes" min="0" max="720" step="1" value="10" />
+                                <span>minutes before shift start</span>
+                            </div>
+                        </div>
+                        <div class="clock-settings-field">
+                            <div class="clock-settings-field-top">
+                                <label for="clock-late-minutes">Latest clock-out</label>
+                                <label class="clock-nolimit">
+                                    <input type="checkbox" id="clock-late-nolimit" />
+                                    No limit
+                                </label>
+                            </div>
+                            <div class="clock-settings-input-row">
+                                <input type="number" id="clock-late-minutes" min="0" max="720" step="1" value="30" />
+                                <span>minutes after shift end</span>
+                            </div>
+                        </div>
+                        <div class="clock-settings-field clock-settings-field-wide" id="clock-address-field">
+                            <div class="clock-settings-field-top">
+                                <label for="clock-address-inline-input">Restaurant address (for clock-in)</label>
+                            </div>
+                            <p class="clock-settings-gps-hint">
+                                Enter the restaurant street address. We look it up and pin that location so staff can only clock in nearby.
+                            </p>
+                            <p class="clock-settings-gps-hint" id="clock-gps-summary">Loading address…</p>
+                            <div class="clock-address-inline-search">
+                                <input
+                                    id="clock-address-inline-input"
+                                    type="text"
+                                    autocomplete="off"
+                                    placeholder="Start typing the restaurant address…"
+                                />
+                                <ul id="clock-address-inline-suggestions" class="clock-address-suggestions clock-address-inline-suggestions" hidden></ul>
+                            </div>
+                            <div id="clock-address-inline-picked" class="clock-address-picked" hidden></div>
+                            <div class="clock-address-inline-row">
+                                <label for="clock-address-inline-radius">Radius (m)</label>
+                                <input id="clock-address-inline-radius" type="number" min="25" max="2000" step="1" value="150" />
+                                <button type="button" class="btn-primary btn-sm" id="clock-address-save-btn" disabled>
+                                    <i class="fas fa-map-marker-alt"></i> Save address
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="clock-settings-actions">
+                        <span id="clock-settings-status" class="clock-settings-status" aria-live="polite"></span>
+                        <button type="button" class="btn-primary btn-sm" id="clock-settings-save-btn">
+                            <i class="fas fa-save"></i> Save clock settings
+                        </button>
+                    </div>
+                </div>
+
+                <div class="timesheet-toolbar">
+                    <p class="timesheet-hint">Clock in / out for the visible week. Pairing uses each employee’s punches in order.</p>
+                    <div class="timesheet-toolbar-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="timesheet-export-btn">
+                            <i class="fas fa-file-export"></i> Export CSV
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm" id="timesheet-export-totals-btn">
+                            <i class="fas fa-calculator"></i> Export totals
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm" id="timesheet-add-shift-btn">
+                            <i class="fas fa-pen-square"></i> Add shift
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm" id="timesheet-refresh-btn">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="timesheet-table-wrap">
+                    <table class="timesheet-table" aria-label="Employee timesheet">
+                        <thead>
+                            <tr>
+                                <th scope="col">Employee</th>
+                                <th scope="col">Date</th>
+                                <th scope="col">Clock in</th>
+                                <th scope="col">Clock out</th>
+                                <th scope="col">Hours</th>
+                                <th scope="col">Notes</th>
+                                <th scope="col"><span class="sr-only">Edit</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="timesheet-table-body">
+                            <tr class="timesheet-empty-row">
+                                <td colspan="7">Loading timesheet…</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="tokens.js"></script>
+    <script src="supabase-config.js?v=20260414-implicit"></script>
+    <script src="subscriptionPlans.js?v=1"></script>
+    <script src="auth.js?v=20250308"></script>
+    <script src="adminSettings.js?v=20260913-clock"></script>
+    <script src="employees.js?v=20260411-profile-roster"></script>
+    <script src="script.js"></script>
+    <script src="restaurantAddress.js?v=20260924-restore"></script>
+    <script src="timesheet.js?v=20260924-restore"></script>
+</body>
+</html>
